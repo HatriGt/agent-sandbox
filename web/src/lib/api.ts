@@ -770,7 +770,12 @@ export type BrowserPage = {
   ports?: number[];
   netError?: string;
   tried?: string;
+  /** How many errors and failed requests the page showing has logged. */
+  errs?: number;
+  /** What the agent last did in this browser, and how many ms ago. */
+  agent?: { ago: number; did: string };
 };
+export type BrowserLog = { level: string; text: string };
 export type BrowserReply = BrowserPage & {
   ok: boolean;
   code?: string;
@@ -780,6 +785,7 @@ export type BrowserReply = BrowserPage & {
   same?: boolean;
   map?: import("./browser-model").MappedElement[];
   pick?: import("./browser-model").PickDetail;
+  logs?: BrowserLog[];
 };
 
 export const api = {

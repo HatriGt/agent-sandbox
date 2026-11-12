@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowUpRight, CircleDot, FileCode2, GitCommitHorizontal, GitPullRequest, Github, Globe, Link as LinkIcon } from "lucide-react";
+import { AppWindow, ArrowUpRight, CircleDot, FileCode2, GitCommitHorizontal, GitPullRequest, Github, Globe, Link as LinkIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
  * repo); anything else shows its host and first path segment. When the author gave the link its own
  * text (`[like this](url)`), that text wins and only the icon/arrow are added.
  */
-type Kind = "pr" | "issue" | "commit" | "file" | "repo" | "github" | "web";
+type Kind = "pr" | "issue" | "commit" | "file" | "repo" | "github" | "web" | "sandbox";
 
 export function describeUrl(href: string): { kind: Kind; label: string; title: string } {
   let u: URL;
@@ -33,6 +33,12 @@ export function describeUrl(href: string): { kind: Kind; label: string; title: s
     if (!kind) return { kind: "repo", label: repo, title: `${repo} on GitHub` };
     return { kind: "github", label: `${repo}/${kind}`, title: href };
   }
+  // An address inside the sandbox (the agent's dev server): the port is the whole point, and it
+  // opens in the browser beside the conversation, not in a new tab on the reader's machine.
+  if (/^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/.test(host)) {
+    const path = u.pathname === "/" ? "" : u.pathname;
+    return { kind: "sandbox", label: `localhost${u.port ? `:${u.port}` : ""}${path}`, title: "Open in the browser beside the conversation" };
+  }
   const first = segs[0] ? `/${segs[0]}${segs.length > 1 ? "/…" : ""}` : "";
   return { kind: "web", label: `${host}${first}`, title: href };
 }
@@ -45,6 +51,7 @@ const ICONS: Record<Kind, React.ComponentType<{ className?: string }>> = {
   repo: Github,
   github: Github,
   web: Globe,
+  sandbox: AppWindow,
 };
 
 export function LinkChip({ href, children, className }: { href: string; children?: React.ReactNode; className?: string }) {
@@ -63,12 +70,13 @@ export function LinkChip({ href, children, className }: { href: string; children
         "bg-muted hover:bg-accent text-foreground inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-px align-[-0.12em] text-[0.9em] leading-[1.35] font-medium no-underline transition-colors",
         d.kind === "pr" && "text-ok",
         d.kind === "issue" && "text-live",
+        d.kind === "sandbox" && "text-live",
         className
       )}
     >
       <Icon className="size-[0.95em] shrink-0 opacity-80" aria-hidden />
       <span className="truncate">{custom ? children : d.label}</span>
-      <ArrowUpRight className="text-muted-foreground size-[0.85em] shrink-0" aria-hidden />
+      {d.kind !== "sandbox" && <ArrowUpRight className="text-muted-foreground size-[0.85em] shrink-0" aria-hidden />}
     </a>
   );
 }

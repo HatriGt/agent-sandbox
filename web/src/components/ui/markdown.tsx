@@ -12,7 +12,7 @@ import { normalizeBlocks } from "@/lib/markdown-normalize"
 import { isCodeBlock } from "@/lib/markdown-code"
 import { splitOpenFence } from "@/lib/markdown-stream"
 import { CodeBlock, CodeBlockCode } from "./code-block"
-import { LinkChip } from "./link-chip"
+import { LinkChip, describeUrl } from "./link-chip"
 import { CodeRefLink, CodeRefScope, InlineCode } from "./code-ref"
 import { parseCodeRef } from "@/lib/code-refs"
 import { PROSE_REF_ATTR, remarkCodeRefs } from "@/lib/remark-code-refs"
@@ -316,6 +316,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     const ref = parseCodeRef(href)
     const chip = <LinkChip href={href}>{children}</LinkChip>
     if (ref) return <CodeRefLink parsed={ref} fallback={PROSE_REF_ATTR in props ? children : chip}>{children}</CodeRefLink>
+    if (describeUrl(href).kind === "sandbox") return chip
     if (isExternal(href))
       return (
         <span className="md-ext">

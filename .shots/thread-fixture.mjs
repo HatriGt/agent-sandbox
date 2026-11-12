@@ -1,3 +1,7 @@
+import * as osx from "node:os";
+import * as fsx from "node:fs";
+import * as pathx from "node:path";
+import { execSync as execSyncX } from "node:child_process";
 // Thread fixture + screenshot runner. The local controller has no sandboxes, so every per-box
 // endpoint is mocked with page.route() and served from realistic fixtures derived from
 // web/src/lib/api.ts and src/trace.ts. Run from PowerShell (bash mangles the leading slashes):
@@ -394,6 +398,7 @@ if (interact === "send" || interact === "send-probe" || interact === "send-rich"
 }
 
 /* ───────────────────────────── browser ───────────────────────────── */
+const helperHeaders = () => { try { return { "x-asb-browser": fsx.readFileSync(pathx.join(osx.homedir(), ".asb", "browser.token"), "utf8").trim() }; } catch { return {}; } };
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: W, height: H }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: 1, hasTouch: W < 500, isMobile: W < 500 });
 await ctx.addInitScript(
@@ -423,7 +428,7 @@ await page.route("**/*", async (route) => {
       if (flag("browser", "") === "down") return json(route, { ok: false, code: "no-start", error: "the browser did not start" });
       if (flag("browser", "") === "slow") await new Promise((r) => setTimeout(r, 60000));
       if (body.op === "goto" && !/^https?:/.test(body.url)) body.url = (/^(localhost|[\d.]+)(:|$)/.test(body.url) ? "http://" : "https://") + body.url;
-      const r = await fetch("http://127.0.0.1:9334/", { method: "POST", body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, code: "failed", error: String(e.message) }));
+      const r = await fetch("http://127.0.0.1:9334/", { method: "POST", headers: helperHeaders(), body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, code: "failed", error: String(e.message) }));
       if (r.blank && flag("ports", "")) r.ports = flag("ports", "").split(",").map(Number);
       return json(route, r);
     }
@@ -658,7 +663,7 @@ if (stream) {
   await page.waitForTimeout(700);
   await shot("-review-rejected");
 } else if (interact === "browser" || interact === "browser-blank" || interact === "browser-phone") {
-  await fetch("http://127.0.0.1:9334/", { method: "POST", body: JSON.stringify({ op: "goto", url: "about:blank", w: 800, h: 600 }) }).catch(() => {});
+  await fetch("http://127.0.0.1:9334/", { method: "POST", headers: helperHeaders(), body: JSON.stringify({ op: "goto", url: "about:blank", w: 800, h: 600 }) }).catch(() => {});
   if (W < 768) { await page.getByRole("button", { name: "More actions" }).click(); await page.getByRole("menuitem", { name: /browser/i }).click(); }
   else await page.getByRole("button", { name: "Browser", exact: true }).click();
   await page.locator('aside[aria-label="Browser"]').waitFor({ timeout: 8000 });
@@ -691,6 +696,23 @@ if (stream) {
     await page.mouse.down(); await page.mouse.up();
     await page.waitForTimeout(1800);
     await shot("-browser-tagged");
+    await page.mouse.move(bb.x + 60, bb.y + 110);
+    await page.mouse.down();
+    await page.mouse.move(bb.x + 200, bb.y + 200, { steps: 4 });
+    await page.mouse.move(bb.x + 430, bb.y + 330, { steps: 4 });
+    await page.waitForTimeout(200);
+    await shot("-browser-area-drag");
+    await page.mouse.up();
+    await page.waitForTimeout(1500);
+    await shot("-browser-area");
+    await page.keyboard.press("Escape");
+    if (flag("agent", "")) {
+      execSyncX("node daemon.cjs " + flag("agent", ""), { cwd: "C:/Users/ak/moli-test/dev", env: { ...process.env, ASB_MOLI_BIN: "C:\Users\ak\moli-test\moli-v1.1.23-x86_64-pc-windows-msvc\moli.exe" }, stdio: "inherit" });
+      await page.waitForTimeout(4500);
+      await shot("-browser-agent");
+    }
+    const chip = page.getByRole("button", { name: /on this page/ });
+    if (await chip.count()) { await chip.click(); await page.waitForTimeout(1200); await shot("-browser-errors"); }
     console.log("composer:", JSON.stringify(await input().inputValue()));
   }
 } else if (interact === "workspace") {

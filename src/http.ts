@@ -42,7 +42,7 @@ import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, 
 import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-disk.js";
 import { BAKED_MCP_PACKAGES, BASE_PACKAGES, fetchLatestVersions, imageChanges, packageNameOf, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
 import { clearImageOverride, makeImageUpdater, planImageUpdate, writeImageOverride } from "./image-update.js";
-import { browserStubScript, makeBoxQueue, moliInstallSh, parseBrowserAction, parseBrowserReply } from "./browser.js";
+import { browserFastMissed, browserFastSh, browserStubScript, makeBoxQueue, moliInstallSh, parseBrowserAction, parseBrowserReply } from "./browser.js";
 import { bakeAgentImage, hostDisk, mcpProvisionState, sweepOrphanSandboxDirs } from "./msb.js";
 import { claimNonce, mintNonce, questionChoices, releaseNonce } from "./answer-choice.js";
 import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
@@ -73,7 +73,7 @@ import { parseStore } from "./gh-token-store.js";
 import { seedStarterSkills } from "./starter-skills.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { currentPrincipal, guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
-import { securityHeaders } from "./security-headers.js";
+import { allowShellScripts, securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, mirrorInboxMessage, takeDeliveredInbox, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo } from "./msb.js";
 import { isBoxName } from "./sync.js";
 import { shellQuote } from "./exec.js";
@@ -107,7 +107,7 @@ import type { BoxView, WatchSnapshot } from "./monitor.js";
 import { listChanges, readDiff, readFullDiff, discardChange, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
 import { readArtifact } from "./artifact.js";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { withStartedBy, currentStartedBy, recordStartedBy, startedByOf, type StartedBy } from "./started-by.js";
 import { makeDispatcher, type StartRunInput } from "./trigger-dispatch.js";
 import { GhRateLimitError, makeRepoWatcher, rateInfoOf } from "./repo-watch.js";
@@ -1774,6 +1774,7 @@ const WEB_DIST = resolve(HERE, "..", "web", "dist");
 const HAS_WEB = existsSync(join(WEB_DIST, "index.html"));
 
 if (HAS_WEB) {
+  allowShellScripts(readFileSync(join(WEB_DIST, "index.html"), "utf8"));
   // Hashed assets are immutable; the HTML shell must never be cached or a browser keeps referencing
   // a bundle that no longer exists after a deploy (the "old index.js" crash reports).
   app.use(
@@ -3551,7 +3552,12 @@ app.post(BROWSER_ACT_PATH, async (req: Request, res: Response) => {
     return;
   }
   try {
-    const r = await browserQueue(session, () => execInBox(cfg, session, "node -", { input: browserStubScript(parsed.action), timeoutMs: 70_000 }));
+    const r = await browserQueue(session, async () => {
+      // Quick path first (curl to a helper that is already up); the full script only to start one.
+      const fast = await execInBox(cfg, session, browserFastSh(), { input: JSON.stringify(parsed.action), timeoutMs: 70_000 }).catch(() => null);
+      if (fast && !browserFastMissed(fast.stdout)) return fast;
+      return execInBox(cfg, session, "node -", { input: browserStubScript(parsed.action), timeoutMs: 70_000 });
+    });
     res.setHeader("Cache-Control", "no-store");
     res.json(parseBrowserReply(r.stdout));
   } catch (e) {

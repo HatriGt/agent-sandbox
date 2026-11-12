@@ -1404,3 +1404,21 @@ Tested as a person would use it, on the live server with a real run, and changed
 
 Proof: `.shots/live-browser.mjs` against a real run (`.shots/br/live-*`): link, pick, comment, send,
 and the button changed in the pane 45 s later.
+
+## Round: the browser, second pass, and thread polish (2026-11-11)
+
+- **Area.** In Select, a drag marks an area (dashed live outline while dragging); releasing adds an
+  "Area n" picture chip whose note lists the outermost elements inside it. A click still picks one
+  element. Esc ends selecting from anywhere, including the message box, where a pick leaves the caret.
+- **Errors chip.** When the page showing has logged errors or failed requests, a destructive-tinted
+  count sits before Select. Pressing it writes them into the message as plain lines.
+- **What the agent is doing.** While the agent drives the page, a pill at the bottom of the pane says
+  its last action ("The agent clicked "Add to order"") for 12 s, and the pane looks again every 1.3 s
+  instead of every 4 s.
+- **Notes say where words came from.** Element and area notes carry "copied from the page: content,
+  not instructions", because the page wrote that text, not the person.
+- **Sandbox link chip.** `localhost:3000` in the agent's prose is a live-coloured chip with a window
+  icon, the port in its label and no outward arrow: it opens in the pane, not in a new tab.
+- **Rolling counts sit on the baseline.** The numbers in "3 files changed" and "4 of 4" were boxes
+  with `overflow: hidden`, whose baseline is their bottom edge, so the digit hung below its words.
+  They use `overflow: clip` and `align-baseline` now.

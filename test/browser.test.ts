@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Script } from "node:vm";
 import { BROWSER_DAEMON_SRC } from "../src/browser-daemon.ts";
-import { BROWSER_DAEMON_VERSION, MOLI_SHA256, MOLI_VERSION, browserStubScript, makeBoxQueue, moliInstallSh, normalizeUrl, parseBrowserAction, parseBrowserReply } from "../src/browser.ts";
+import { BROWSER_DAEMON_VERSION, MOLI_SHA256, MOLI_VERSION, browserFastMissed, browserFastSh, browserStubScript, makeBoxQueue, moliInstallSh, normalizeUrl, parseBrowserAction, parseBrowserReply } from "../src/browser.ts";
 
 test("normalizeUrl: a dev server is http, a domain is https, anything else is a search", () => {
   assert.equal(normalizeUrl("localhost:5173"), "http://localhost:5173/");
@@ -109,4 +109,36 @@ test("the agent's browser command is the helper file plus a launcher, and the so
   // What only the agent may do inside its own box is not an action the dashboard route accepts.
   for (const op of ["eval", "fill", "wait", "text", "elements", "console", "size"]) assert.ok(!(BROWSER_OPS as readonly string[]).includes(op), op);
   assert.equal(parseBrowserAction({ op: "shot", agent: true, full: true, js: "1" }).ok && "agent" in (parseBrowserAction({ op: "shot", agent: true }) as { action: object }).action, false);
+});
+
+test("the quick path hands the action to a running helper and says so when there is none", () => {
+  const sh = browserFastSh();
+  assert.match(sh, /browser\.token/);
+  assert.ok(sh.includes(`x-asb-v: ${BROWSER_DAEMON_VERSION}`), "an older helper answers stale, not a picture");
+  assert.match(sh, /--data-binary @- http:\/\/127\.0\.0\.1:9334\//, "the action rides stdin, never the command line");
+  assert.ok(!sh.includes("{\""), "no action text in the shell");
+  assert.equal(browserFastMissed('\n@@ASB-BROWSER@@\n@@ASB-BROWSER-MISS@@\n'), true);
+  const hit = '\n@@ASB-BROWSER@@{"ok":true,"url":"http://localhost:3000/"}';
+  assert.equal(browserFastMissed(hit), false);
+  assert.equal(parseBrowserReply(hit).ok, true);
+});
+
+test("the helper trusts the controller, not the page it is showing", () => {
+  // A page in the browser can reach 127.0.0.1 too: a request with an Origin, or without the token, is refused.
+  assert.match(BROWSER_DAEMON_SRC, /browser\.token/);
+  assert.match(BROWSER_DAEMON_SRC, /x-asb-browser/);
+  assert.match(BROWSER_DAEMON_SRC, /sec-fetch-site/);
+  assert.match(browserStubScript({ op: "shot", w: 800, h: 600, dpr: 1 }), /x-asb-browser/);
+});
+
+test("logs is an action, and any action may say which picture the pane already has", () => {
+  const l = parseBrowserAction({ op: "logs", w: 800, h: 600, dpr: 1 });
+  assert.ok(l.ok);
+  assert.equal(l.action.op, "logs");
+  const c = parseBrowserAction({ op: "scroll", w: 800, h: 600, dpr: 1, dy: 200, have: "abc123" });
+  assert.ok(c.ok);
+  assert.equal(c.action.have, "abc123");
+  const bad = parseBrowserAction({ op: "shot", w: 800, h: 600, dpr: 1, have: "$(id)" });
+  assert.ok(bad.ok);
+  assert.equal(bad.action.have, undefined);
 });

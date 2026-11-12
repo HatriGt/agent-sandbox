@@ -18,7 +18,7 @@ import { CHANGES_DISCARDED_EVENT } from "./FilePane";
 /** The count rolls when it changes — a file landing mid-run is visible even in peripheral vision. */
 function PopCount({ value }: { value: number }) {
   return (
-    <span className="relative inline-grid overflow-hidden text-center align-bottom" style={{ minWidth: "1ch", height: "1.2em" }}>
+    <span className="relative inline-grid overflow-clip text-center align-baseline" style={{ minWidth: "1ch" }}>
       <AnimatePresence initial={false} mode="popLayout">
         <motion.span
           key={value}

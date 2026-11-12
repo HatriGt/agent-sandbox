@@ -74,3 +74,19 @@ test("csp: the public auth pages are app shell, not data", async () => {
   assert.equal(cspKindForPath("/signup/"), "app");
   assert.equal(cspKindForPath("/auth/config.json"), "data");
 });
+
+test("the shell's inline scripts are allowed by hash, and nothing else inline is", async () => {
+  const { allowShellScripts, inlineScriptHashes, cspFor } = await import("../src/security-headers.ts");
+  const { createHash } = await import("node:crypto");
+  const body = "\n  try { document.documentElement.classList.add('dark'); } catch (e) {}\n";
+  const html = `<html><head><script>${body}</script><script type="module" src="/dashboard/assets/index-abc.js"></script><script></script></head></html>`;
+  const want = createHash("sha256").update(body).digest("base64");
+  assert.deepEqual(inlineScriptHashes(html), [want]);
+  allowShellScripts(html);
+  const csp = cspFor("app");
+  assert.ok(csp.includes(`script-src 'self' 'sha256-${want}'`));
+  assert.ok(!/script-src[^;]*unsafe-inline/.test(csp));
+  assert.ok(!cspFor("data").includes("sha256"));
+  allowShellScripts("");
+  assert.ok(cspFor("app").includes("script-src 'self';"));
+});

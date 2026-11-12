@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, ArrowRight, Camera, Globe, Loader2, Maximize2, Minimize2, Monitor, RotateCw, Smartphone, SquareDashedMousePointer, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, Globe, Loader2, Maximize2, Minimize2, Monitor, RotateCw, Smartphone, SquareDashedMousePointer, TriangleAlert, X } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type BrowserPage } from "@/lib/api";
@@ -10,7 +10,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { clampTo, defaultPaneWidth, paneRange, type Range } from "@/lib/workspace-model";
 import { cn } from "@/lib/utils";
-import { elementNote, hitTest, sandboxAddress, type MappedElement } from "@/lib/browser-model";
+import { areaNote, elementNote, errorsNote, hitTest, sandboxAddress, type MappedElement } from "@/lib/browser-model";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 const STORE_W = "asb-browser-w";
@@ -143,6 +143,8 @@ export function BrowserPane({
 
   type Act = { op: "open" | "goto" | "reload" | "back" | "forward" | "click" | "scroll" | "type" | "key" | "shot"; url?: string; x?: number; y?: number; dy?: number; text?: string; key?: string; have?: string; /** Which wheel movement a scroll answers (never sent). */ seq?: number };
   const frameNow = React.useRef<Frame | null>(null);
+  /** When the agent last did something in this browser (by this clock). */
+  const agentAt = React.useRef(0);
 
   /** One action, in order. `quiet` actions (background refreshes) show no progress and no errors. */
   const run = React.useCallback(
@@ -154,7 +156,7 @@ export function BrowserPane({
         if (!opts.quiet) setBusy(true);
         try {
           const { seq: sentSeq, ...act } = a;
-          const body = { ...act, w: viewRef.current.w, h: viewRef.current.h, dpr, map: selectRef.current };
+          const body = { ...act, w: viewRef.current.w, h: viewRef.current.h, dpr, map: selectRef.current, have: frameNow.current ? hashRef.current : undefined };
           let r = await api.browser(session, body);
           if (!r.ok && r.code === "not-installed") {
             setPhase("installing");
@@ -179,7 +181,9 @@ export function BrowserPane({
             frameNow.current = { src, nav: navSeq.current, top: r.over?.[0] ?? 0, bottom: r.over?.[1] ?? 0 };
             setFrame(frameNow.current);
           }
-          if (!same || !pageRef.current) setPage(p);
+          void same;
+          setPage(p);
+          if (p.agent) agentAt.current = Date.now() - p.agent.ago;
           if (m) {
             setMap(m);
             setHover(-1);
@@ -236,10 +240,15 @@ export function BrowserPane({
   // While the agent works, the page it is building changes under you: look again every few seconds.
   React.useEffect(() => {
     if (!live || phase !== "ready" || page?.blank) return;
+    // Every 4 s while it works; every 1.3 s while it is the one driving this page, so its clicks
+    // and typing are seen as they happen.
+    let tick = 0;
     const t = window.setInterval(() => {
       if (document.visibilityState !== "visible" || editing) return;
-      void run(() => ({ op: "shot", have: hashRef.current }), { quiet: true });
-    }, 4000);
+      const driving = Date.now() - agentAt.current < 20_000;
+      if (!driving && ++tick % 3 !== 0) return;
+      void run(() => ({ op: "shot" }), { quiet: true });
+    }, 1300);
     return () => window.clearInterval(t);
   }, [live, phase, page?.blank, editing, run]);
 
@@ -333,6 +342,28 @@ export function BrowserPane({
     onTag(image ? { image: { name: `element-${n}-${el[4]}.png`, dataUrl: image, label: `Element ${n}`, note } } : { text: note });
   };
 
+  const tagArea = async (box: [number, number, number, number]) => {
+    const p = pageRef.current;
+    if (!p || !frame) return;
+    const n = pins.length + 1;
+    setPins((prev) => [...prev, { n, url: p.url, x: box[0] + p.sx, y: box[1] + p.sy, w: box[2], h: box[3] }]);
+    const image = await cropFrame(frame, box, p.dpr ?? dpr, "image/png").catch(() => null);
+    const note = areaNote(n, p.url, box, map);
+    onTag(image ? { image: { name: `area-${n}.png`, dataUrl: image, label: `Area ${n}`, note } } : { text: note });
+  };
+
+  // What went wrong on this page, into the message: the fastest way to say "fix this".
+  const sendErrors = async () => {
+    const p = pageRef.current;
+    if (!p) return;
+    try {
+      const logs = (await api.browser(session, { op: "logs", w: viewRef.current.w, h: viewRef.current.h, dpr })).logs ?? [];
+      if (logs.length) onTag({ text: errorsNote(p.url, logs) });
+    } catch {
+      toast.error("Could not read the page's errors.");
+    }
+  };
+
   const snapshot = async () => {
     const p = pageRef.current;
     if (!frame || !p) return;
@@ -377,10 +408,16 @@ export function BrowserPane({
     return () => el.removeEventListener("wheel", onWheel);
   }, [scrollBy]);
 
-  const drag = React.useRef<{ id: number; y: number; moved: boolean } | null>(null);
+  const drag = React.useRef<{ id: number; y: number; moved: boolean; x0: number; y0: number } | null>(null);
+  /** In select mode a drag marks an area instead of one element. */
+  const [area, setArea] = React.useState<[number, number, number, number] | null>(null);
+  const areaRef = React.useRef(area);
+  areaRef.current = area;
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 || !page || page.blank) return;
-    drag.current = { id: e.pointerId, y: e.clientY, moved: false };
+    const at = local(e);
+    drag.current = { id: e.pointerId, y: e.clientY, moved: false, x0: at.x, y0: at.y };
+    if (select && e.pointerType === "mouse") e.currentTarget.setPointerCapture(e.pointerId);
     stageRef.current?.focus({ preventScroll: true });
   };
   const onPointerMove = (e: React.PointerEvent) => {
@@ -396,12 +433,24 @@ export function BrowserPane({
     }
     if (select && e.pointerType === "mouse" && offset === 0) {
       const at = local(e);
+      if (d && d.id === e.pointerId && (areaRef.current || Math.abs(at.x - d.x0) > 6 || Math.abs(at.y - d.y0) > 6)) {
+        const x1 = Math.min(view.w, Math.max(0, at.x)), y1 = Math.min(view.h, Math.max(0, at.y));
+        setArea([Math.min(d.x0, x1), Math.min(d.y0, y1), Math.abs(x1 - d.x0), Math.abs(y1 - d.y0)]);
+        setHover(-1);
+        return;
+      }
       setHover(hitTest(map, at.x, at.y));
     }
   };
   const onPointerUp = (e: React.PointerEvent) => {
     const d = drag.current;
     drag.current = null;
+    const marked = areaRef.current;
+    if (marked) {
+      setArea(null);
+      if (marked[2] >= 12 && marked[3] >= 12) void tagArea(marked);
+      return;
+    }
     if (!d || d.moved || d.id !== e.pointerId || !page || page.blank) return;
     const at = local(e);
     if (at.x < 0 || at.y < 0 || at.x > view.w || at.y > view.h) return;
@@ -423,12 +472,17 @@ export function BrowserPane({
     typed.current = "";
     if (text) void run(() => ({ op: "type", text }), { quiet: true });
   }, [run]);
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape" && select) {
-      e.preventDefault();
+  // Picking puts the caret in the message, so Esc has to end selecting from there too.
+  React.useEffect(() => {
+    if (!select) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || (e.target as Element | null)?.closest?.('[role="dialog"],[role="menu"],[role="listbox"]') || document.querySelector('[role="dialog"][data-state="open"],[role="menu"][data-state="open"]')) return;
       toggleSelect();
-      return;
-    }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [select, toggleSelect]);
+  const onKeyDown = (e: React.KeyboardEvent) => {
     if (!page || page.blank || select || e.ctrlKey || e.metaKey || e.altKey) return;
     if (PAGE_KEYS.has(e.key) && e.key !== "Escape") {
       e.preventDefault();
@@ -510,6 +564,17 @@ export function BrowserPane({
             className="text-foreground placeholder:text-faint min-w-0 flex-1 bg-transparent text-meta outline-none"
           />
         </form>
+        {!!page?.errs && !page.blank && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={() => void sendErrors()} aria-label={`${page.errs} ${page.errs === 1 ? "error" : "errors"} on this page. Add them to your message`} className="text-destructive hover:text-destructive h-7 gap-1 px-1.5 tabular-nums">
+                <TriangleAlert />
+                {page.errs}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{page.errs === 1 ? "This page logged an error" : `This page logged ${page.errs} errors`}. Click to add {page.errs === 1 ? "it" : "them"} to your message</TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="sm" onClick={toggleSelect} aria-pressed={select} aria-label="Select an element" disabled={!page || page.blank} className={cn("text-muted-foreground h-7 px-2", select && "bg-live/12 text-live hover:bg-live/16 hover:text-live")}>
@@ -517,7 +582,7 @@ export function BrowserPane({
               <span className="max-sm:hidden">Select</span>
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">Point at an element to add it to your message</TooltipContent>
+          <TooltipContent side="bottom">Click an element, or drag over an area, to add it to your message</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -584,7 +649,8 @@ export function BrowserPane({
                   <span className="bg-live absolute -top-2.5 -left-2.5 grid size-5 place-items-center rounded-full text-micro font-semibold text-white tabular-nums shadow-e1">{p.n}</span>
                 </div>
               ))}
-            {select && hovered && offset === 0 && (
+            {select && area && <div className="border-live bg-live/10 pointer-events-none absolute rounded-[3px] border-[1.5px] border-dashed" style={{ left: area[0], top: area[1], width: area[2], height: area[3] }} />}
+            {select && !area && hovered && offset === 0 && (
               <div className="border-live bg-live/10 pointer-events-none absolute rounded-[3px] border-[1.5px]" style={{ left: hovered[0], top: hovered[1], width: hovered[2], height: hovered[3] }}>
                 <span
                   className={cn("bg-live absolute left-[-1.5px] max-w-[18rem] truncate rounded-[4px] px-1.5 py-0.5 font-mono text-micro leading-4 whitespace-nowrap text-white", hovered[1] > 26 ? "bottom-full mb-1" : "top-full mt-1")}
@@ -613,7 +679,7 @@ export function BrowserPane({
           <div className="absolute inset-0 grid place-items-center px-6" role="alert">
             <div className="flex max-w-sm flex-col items-center gap-3 text-center">
               <p className="text-foreground text-body font-medium">The browser did not start</p>
-              <p className="text-muted-foreground text-meta">{!error || /did not start/i.test(error) ? "It needs about 220 MB of the sandbox's memory. If the agent is using most of it, try again in a moment." : error}</p>
+              <p className="text-muted-foreground text-meta">{!error || /did not start/i.test(error) ? "It needs about 220 MB of the sandbox's memory. If the agent is using most of it, try again in a moment." : error.charAt(0).toUpperCase() + error.slice(1)}</p>
               <Button
                 size="sm"
                 variant="outline"
@@ -637,9 +703,22 @@ export function BrowserPane({
             className="bg-popover text-popover-foreground pointer-events-none absolute inset-x-0 bottom-3 mx-auto flex w-fit max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-full border px-3 py-1.5 text-meta shadow-e2"
           >
             <span className="bg-live size-1.5 shrink-0 rounded-full" aria-hidden />
-            <span className="truncate">{pagePins.length ? `${pagePins.length} added to your message. Pick more, or` : "Click an element to add it to your message."}</span>
+            <span className="truncate">{pagePins.length ? `${pagePins.length} added to your message. Pick more, or` : "Click an element or drag over an area."}</span>
             <Kbd className="max-sm:hidden">Esc</Kbd>
             <span className="text-muted-foreground max-sm:hidden">{pagePins.length ? "to finish" : "to stop"}</span>
+          </motion.div>
+        )}
+        {!select && live && page && !page.blank && page.agent && page.agent.ago < 12_000 && (
+          <motion.div
+            key={page.agent.did}
+            initial={still ? false : { opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.2, ease: EASE }}
+            role="status"
+            className="bg-popover text-popover-foreground pointer-events-none absolute inset-x-0 bottom-3 mx-auto flex w-fit max-w-[calc(100%-1.5rem)] items-center gap-2 rounded-full border px-3 py-1.5 text-meta shadow-e2"
+          >
+            <span className="bg-live browser-spin size-1.5 shrink-0 rounded-full" aria-hidden />
+            <span className="truncate">The agent {page.agent.did}</span>
           </motion.div>
         )}
       </div>

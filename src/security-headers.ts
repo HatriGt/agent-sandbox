@@ -13,6 +13,8 @@
  *               response has no origin, no scripts and no same-origin privileges.
  *  - `data`     every JSON/SSE route. Nothing should ever be rendered from these.
  */
+import { createHash } from "node:crypto";
+
 export type HeaderMap = Record<string, string>;
 
 /**
@@ -24,9 +26,10 @@ export type HeaderMap = Record<string, string>;
  * spans it generates, and the motion layer writes inline styles. Inline *style* cannot exfiltrate a
  * localStorage token, so this is the one relaxation worth making.
  */
-const CSP_APP = [
+const cspApp = (scriptHashes: readonly string[]) => [
   "default-src 'self'",
-  "script-src 'self'",
+  // The shell's own inline scripts, by hash (see allowShellScripts); never 'unsafe-inline'.
+  ["script-src 'self'", ...scriptHashes.map((h) => `'sha256-${h}'`)].join(" "),
   "style-src 'self' 'unsafe-inline'",
   // GitHub avatars on the Integrations page (github.com/<login>.png redirects to avatars.githubusercontent.com).
   "img-src 'self' data: blob: https://github.com https://avatars.githubusercontent.com",
@@ -41,6 +44,27 @@ const CSP_APP = [
   "form-action 'self'",
   "frame-ancestors 'none'",
 ].join("; ");
+
+let CSP_APP = cspApp([]);
+
+/** The sha256 (base64) of every inline script in a page, as a CSP hash source wants it. */
+export function inlineScriptHashes(html: string): string[] {
+  const out: string[] = [];
+  for (const m of html.matchAll(/<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi)) {
+    if (m[1].trim()) out.push(createHash("sha256").update(m[1], "utf8").digest("base64"));
+  }
+  return out;
+}
+
+/**
+ * Let the built shell's inline scripts run. The shell sets the theme before first paint with a few
+ * inline lines; under `script-src 'self'` the browser refused them, so a dark-theme user saw a
+ * light page until the bundle loaded. Hashing the exact text we ship allows those lines and
+ * nothing else: an injected script has a different hash.
+ */
+export function allowShellScripts(html: string): void {
+  CSP_APP = cspApp(inlineScriptHashes(html));
+}
 
 const CSP_DATA = ["default-src 'none'", "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'"].join("; ");
 

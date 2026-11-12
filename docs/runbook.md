@@ -676,3 +676,38 @@ Moli lays a page out when it paints, not when a script asks for a size. The help
 (`layout()`) before it measures anything and after every change of size. Two bugs came from leaving
 that out: a wait that never saw an element a click had just added, and a pane that showed the agent's
 phone layout stretched wide.
+
+### The browser: trust, speed and upkeep (2026-11-11, second pass)
+
+- **Who the helper trusts.** A page shown in the browser can reach `127.0.0.1` like anything else in
+  the box, and the helper used to act on any POST it received: a hostile page could drive the browser.
+  The helper now writes a random token to `~/.asb/browser.token` (mode 600) on each start and refuses
+  a request that carries an `Origin` or `sec-fetch-site` header, a wrong `Host`, or no
+  `x-asb-browser: <token>` header (403). A request built for another helper version gets 409.
+- **The quick path.** `/browser.json` first runs one `curl` to the running helper (`browserFastSh` in
+  `src/browser.ts`), with the action on stdin. Only when that misses (no helper, older helper, no
+  token) does it send the full Node script that starts or replaces the helper.
+- **The same picture is not sent twice.** Every action from the pane says which picture it already
+  shows (`have`); the helper answers `same: true` without the picture when nothing changed.
+- **Idle and restore.** The helper and Moli exit after 5 idle minutes (was 15), which gives about
+  150 MB back to the agent. The address and scroll position are kept in `~/.asb/browser-last.json`
+  and restored on the next action.
+- **Memory guard.** The helper will not start Moli when the box has under 160 MB available; the pane
+  says so (`code: low-memory`) instead of the agent being killed.
+- **Fonts.** Moli does not load web fonts. The helper reads a page's Google Fonts stylesheet links,
+  saves the fonts to `~/.fonts/asb` (at most 24 per stylesheet, 400 in all) and reloads the page once.
+  The image recipe adds `fonts-liberation` and `fonts-noto-color-emoji`; boxes get them after the
+  next **Update image**.
+- **Errors.** The helper keeps the current page's console errors and failed requests. The pane shows
+  the count; the `logs` action returns them. The agent reads the same list with `browser console`.
+- **Pictures on disk.** `browser shot` without a file name saves to `$TMPDIR/browser` and keeps the
+  newest 30.
+- **Agent commands added.** `browser hover <target>`, `browser shot --of <target>`, `browser reset`.
+
+### The console's inline theme script and the CSP
+
+The shell (`web/index.html`) sets the theme before first paint with a few inline lines. Under
+`script-src 'self'` the browser refused them, so dark-theme users saw a light flash on every load.
+At start the controller hashes the inline scripts of the built `index.html`
+(`allowShellScripts` in `src/security-headers.ts`) and adds those hashes to `script-src`. There is
+still no `'unsafe-inline'`: any other inline script has a different hash and stays blocked.

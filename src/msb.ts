@@ -678,7 +678,9 @@ export function agentImageDockerfile(cfg: Config, base: string, npx: string[], a
   const steps = [
     "set -e",
     claudeInstallSh(cfg.claudeCodeVersion),
-    "apt-get update -qq && apt-get install -y -qq --no-install-recommends gh >/dev/null",
+    // Fonts for the browser (src/browser.ts): the base image has DejaVu alone, so every page fell
+    // back to it and an emoji was an empty box. Liberation stands in for Arial, Times and Courier.
+    "apt-get update -qq && apt-get install -y -qq --no-install-recommends gh fonts-liberation fonts-noto-color-emoji >/dev/null",
     // The browser (src/browser.ts): one pinned, checksummed binary, for the agent and the pane.
     moliInstallSh(),
     ...(omp

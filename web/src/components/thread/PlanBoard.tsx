@@ -289,7 +289,7 @@ function RollingCount({ value }: { value: number }) {
   const reduce = useReducedMotion();
   if (reduce) return <span className="tabular-nums">{value}</span>;
   return (
-    <span className="relative inline-grid overflow-hidden text-center align-bottom" style={{ minWidth: "1ch", height: "1.15em" }}>
+    <span className="relative inline-grid overflow-clip text-center align-baseline" style={{ minWidth: "1ch" }}>
       <AnimatePresence initial={false} mode="popLayout">
         <motion.span
           key={value}
