@@ -1,4 +1,5 @@
 import * as React from "react";
+import { lazyRetry } from "@/lib/lazy-retry";
 import { Link, useLocation, useNavigationType } from "react-router";
 import { Activity as ActivityIcon, ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Cpu, FileSearch, GitCompare, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, MessageCircleQuestion, Moon, MoonStar, Palette, PanelLeftClose, PanelLeftOpen, PanelRight, Pause, Pin, PinOff, Plug, PlugZap, Plus, Search, Shield, Sparkles, Square, Sun, SunMedium, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
@@ -53,16 +54,16 @@ import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 // Secondary pages are code-split: the thread — the page you live in — never pays for them.
-const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => ({ default: m.Sandboxes })));
-const Integrations = React.lazy(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations })));
-const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
-const MemoryPage = React.lazy(() => import("@/components/Memory").then((m) => ({ default: m.MemoryPage })));
-const AutopilotPage = React.lazy(() => import("@/components/AutopilotPage").then((m) => ({ default: m.AutopilotPage })));
-const AutomationRunsPage = React.lazy(() => import("@/components/AutomationRunsPage").then((m) => ({ default: m.AutomationRunsPage })));
-const HarnessesPage = React.lazy(() => import("@/components/HarnessesPage").then((m) => ({ default: m.HarnessesPage })));
-const History = React.lazy(() => import("@/components/History").then((m) => ({ default: m.History })));
-const ActivityPage = React.lazy(() => import("@/components/Activity").then((m) => ({ default: m.Activity })));
-const PullRequestPage = React.lazy(() => import("@/components/pr/PullRequestPage").then((m) => ({ default: m.PullRequestPage })));
+const Sandboxes = React.lazy(lazyRetry(() => import("@/components/Sandboxes").then((m) => ({ default: m.Sandboxes }))));
+const Integrations = React.lazy(lazyRetry(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations }))));
+const SkillsPage = React.lazy(lazyRetry(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage }))));
+const MemoryPage = React.lazy(lazyRetry(() => import("@/components/Memory").then((m) => ({ default: m.MemoryPage }))));
+const AutopilotPage = React.lazy(lazyRetry(() => import("@/components/AutopilotPage").then((m) => ({ default: m.AutopilotPage }))));
+const AutomationRunsPage = React.lazy(lazyRetry(() => import("@/components/AutomationRunsPage").then((m) => ({ default: m.AutomationRunsPage }))));
+const HarnessesPage = React.lazy(lazyRetry(() => import("@/components/HarnessesPage").then((m) => ({ default: m.HarnessesPage }))));
+const History = React.lazy(lazyRetry(() => import("@/components/History").then((m) => ({ default: m.History }))));
+const ActivityPage = React.lazy(lazyRetry(() => import("@/components/Activity").then((m) => ({ default: m.Activity }))));
+const PullRequestPage = React.lazy(lazyRetry(() => import("@/components/pr/PullRequestPage").then((m) => ({ default: m.PullRequestPage }))));
 /** Hovering the nav item warms the chunk and both payloads, so the page paints complete on click. */
 function prefetchIntegrations() {
   void import("@/components/Integrations");
@@ -1192,7 +1193,7 @@ function ThreadPageSkeleton() {
 
 function PageSkeleton() {
   return (
-    <div className="mx-auto max-w-3xl px-6 py-9" aria-busy="true">
+    <div className="page-frame py-6 md:py-8" aria-busy="true">
       <Bar className="h-7 w-40" />
       <Bar className="mt-3 h-3 w-[70%]" />
       <Bar className="mt-2 h-3 w-[50%]" />

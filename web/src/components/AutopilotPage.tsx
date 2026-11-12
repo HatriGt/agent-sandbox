@@ -44,8 +44,8 @@ export function AutopilotPage({
     { id: "playbooks", label: "Playbooks", hint: "How it gets done", icon: <ListChecks className="size-4" />, count: workflows?.length },
   ];
   return (
-    <div className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto max-w-[1000px] px-5 py-6 md:px-8 md:py-8">
+    <div className="@container h-full min-w-0 overflow-y-auto">
+      <div className="page-frame py-6 md:py-8">
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden">
           <ArrowLeft className="size-4" />
           Back

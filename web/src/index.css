@@ -494,6 +494,22 @@
 @utility scrollbar-gutter-stable {
   scrollbar-gutter: stable;
 }
+/* The one frame every console page sits in. Pages used to cap themselves anywhere from 672 to
+   1152px and centre, which left a third of a wide screen empty on each side and made every tab
+   start at a different left edge. One cap, one gutter: the page fills the window, and what stops
+   a line getting too long is the page's own columns, not a narrow container. */
+@utility page-frame {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 100rem;
+  padding-inline: 1.25rem;
+  @media (min-width: 48rem) {
+    padding-inline: 2rem;
+  }
+  @media (min-width: 96rem) {
+    padding-inline: 2.5rem;
+  }
+}
 
 @layer base {
   * {

@@ -60,6 +60,8 @@ import { isStalled } from "./stall.js";
 import { EXIT_DISK_FULL } from "./run-health.js";
 import { parseBakedManifest, type LastProvision } from "./package-watch.js";
 import { ensureHostGuard, hostGuardFlags } from "./host-guard.js";
+import { BLANK_OWNER, ownerTag } from "./warm-owners.js";
+import { withOwner } from "./user-store.js";
 import { MOLI_BIN, MOLI_PROMPT_HINT, browserToolSetup, moliInstallSh } from "./browser.js";
 import { orphanSandboxDirs, parseDfPk, parseDirListing, type DiskReading } from "./host-disk.js";
 
@@ -296,13 +298,13 @@ const POOL_PREFIX = "pool-";
  * Boot one warm pool box: snapshot + open egress + memory cap + auto-teardown, then
  * pre-bootstrap creds/tools so a claim only needs the repo copy. Requires cfg.snapshot.
  */
-export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude"): Promise<string> {
+export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude", owner: string | null = null): Promise<string> {
   // Flavor rides in the NAME (pool-<ts>-omp-<rand>) so every prefix/age-based pool mechanism
   // covers both flavors unchanged. Callers pass the flavored cfg (ompPoolCfg) for omp boots.
   const name = `${POOL_PREFIX}${Date.now()}-${agent === "omp" ? "omp-" : ""}${Math.random().toString(36).slice(2, 8)}`;
   warming.add(name);
   try {
-    await bootAndWarm(cfg, name, agent);
+    await bootAndWarm(cfg, name, agent, owner);
   } catch (e) {
     // A box whose warm-up failed (boot error, bootstrap error, or the health check below) is not
     // left running without /.ready for the orphan reaper to find twelve minutes later: it goes now,
@@ -335,8 +337,9 @@ export function isOrphanWarmBox(name: string, state: string, inFlight: ReadonlyS
 
 /**
  * Wipe what the pool warm-up leaves behind before the box becomes claimable. The warm-up runs with
- * the OPERATOR's MCP config and skills, but ANY user may claim the box. The claim rewrites the MCP
- * config and skills for its owner, yet the servers' side effects would survive it: omp's agent.db
+ * the box OWNER's MCP config and skills (nobody's, for a blank box) and only that owner can claim
+ * it. The claim rewrites the MCP config and skills anyway, and the scrub keeps the warm-up's own
+ * traces out of the first real run: omp's agent.db
  * (auth_credentials is where omp keeps MCP OAuth logins, plus the discovery cache), its logs and
  * warm-up transcripts, the HANA client's secure store (~/.hdb), mcp-remote's OAuth dir and npm
  * logs. Kept, because they are the point of warming: bun's transpile cache and the model catalog.
@@ -346,7 +349,87 @@ export const OMP_WARM_SCRUB_SH =
   "/root/.omp/agent/sessions /root/.omp/sessions /root/.omp/logs /root/.hdb /root/.mcp-auth /root/.npm/_logs " +
   "/root/.local/share/chrome-devtools-mcp /workspace/* /workspace/.[!.]* /tmp/* /root/.tmp/* 2>/dev/null; true";
 
-async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise<void> {
+/**
+ * Prepare a booted, bootstrapped box for the one owner it will be handed to. `owner` null means a
+ * blank box: nobody's MCP servers, skills or memory go in, so anyone may claim it and pays their
+ * own install then. Runs as that owner, so every store read below is theirs and never the
+ * operator's. All best-effort, at a time when nobody is waiting.
+ */
+async function prepareWarmBox(cfg: Config, name: string, agent: AgentKind, owner: string | null): Promise<void> {
+  const asOwner = <T>(fn: () => Promise<T>): Promise<T> => (owner ? withOwner(owner, fn) : fn());
+  if (agent === "omp") {
+    // Pre-warm: the box's FIRST omp session pays bun compile caches, cold module trees AND every
+    // MCP server's first-run side effects (connects, discovery, tool listing) — measured live as a
+    // ~50s "Starting up" on the first task; every later session is ~12s. The owner's own MCP
+    // config goes in first so the warm-up one-shot spawns the servers this owner really uses.
+    if (owner) {
+      await asOwner(async () => {
+        await installMcpConfig(cfg, name).catch(() => {});
+        // Skills too: omp indexes them on first sight (onnxruntime embedding load — expensive), and
+        // they otherwise arrive only at claim time, putting that cost back on the user's first task.
+        await installSkills(cfg, name).catch(() => {});
+        await installMemory(cfg, name);
+      });
+    }
+    // TWICE: measured on a warm box, the run right after a single warm-up still took 6.6s to
+    // reach turn one and every run after it ~3.5s — so with one pass the user's task WAS that
+    // second, half-primed run. The extra pass is ~5s at boot, when nobody is waiting.
+    const oneShot =
+      `OMP_SKIP_SETUP=1 timeout 180 omp --mode json --approval-mode=yolo ` +
+      `--model "ccproxy/$ANTHROPIC_MODEL"` +
+      `$([ -n "$ANTHROPIC_SMOL_MODEL" ] && printf -- ' --smol ccproxy/%s' "$ANTHROPIC_SMOL_MODEL")` +
+      ` -p "Reply with exactly: ok" </dev/null >/dev/null 2>&1`;
+    const warm =
+      `mkdir -p /workspace && cd /workspace && ${ompSeedSh()} && { ${oneShot}; ${oneShot}; }; ` +
+      `${OMP_WARM_SCRUB_SH}`;
+    // Generous budget: the warm-up one-shot IS the ~50s cold start being absorbed — a timeout that
+    // kills it mid-flight (the first version's 150s did, together with a cache-priming find) just
+    // moves the cost back onto the user's first task.
+    await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop", undefined, undefined, undefined, agent), "--", "bash", "-lc", warm], false, 360_000);
+  } else if (owner) {
+    await asOwner(() => preinstallMcpPackages(cfg, name));
+  }
+}
+
+/** Write who the box is for. The value is a tag (or "blank"), so it is safe inside a shell word. */
+function ownerMarkSh(owner: string | null): string {
+  return `printf %s ${owner ? ownerTag(owner) : BLANK_OWNER} > /.owner`;
+}
+
+/**
+ * Hand a blank warm box to an owner without booting another VM: prepare it with that owner's set
+ * and re-mark it. The box is not claimable while this runs (no /.ready), and a failure removes it
+ * so nobody is handed a half-prepared box. Costs no extra RAM, which is the point.
+ */
+export async function adoptWarmBox(cfg: Config, box: string, agent: AgentKind, owner: string): Promise<void> {
+  warming.add(box);
+  try {
+    await exec(cfg, box, "rm -f /.ready");
+    await prepareWarmBox(cfg, box, agent, owner);
+    const health = await exec(cfg, box, WARM_HEALTH_SH, { timeoutMs: 60_000 });
+    const verdict = warmBoxVerdict(health.stdout);
+    if (!verdict.ok) throw new Error(`warm box ${box} failed its health check (${verdict.reason}); it is not handed out`);
+    await exec(cfg, box, `${ownerMarkSh(owner)} && touch /.ready`);
+  } catch (e) {
+    await forceRemoveBox(cfg, box).catch(() => {});
+    throw e;
+  } finally {
+    warming.delete(box);
+  }
+}
+
+/** MiB the host can still give out (MemAvailable), or undefined when it cannot be read. */
+export async function hostFreeMb(cfg: Config): Promise<number | undefined> {
+  try {
+    const r = await ssh(cfg, "awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo", false);
+    const n = Number(String(r.stdout ?? "").trim());
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function bootAndWarm(cfg: Config, name: string, agent: AgentKind, owner: string | null = null): Promise<void> {
   await learnHostGuard(cfg);
   await msb(cfg, [
     "run",
@@ -379,36 +462,7 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise
   // Pre-bootstrap so claims are instant (idempotent; persists in the box rootfs). For omp this
   // also lays down the formatter + asb-guard ahead of the claim.
   await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop", undefined, undefined, undefined, agent), "--", "sh", "-lc", bootstrapScript(cfg, agent)]);
-  if (agent === "omp") {
-    // Pre-warm: the box's FIRST omp session pays bun compile caches, cold module trees AND every
-    // MCP server's first-run side effects (connects, discovery, tool listing) — measured live as a
-    // ~50s "Starting up" on the first task; every later session is ~12s. Install the OPERATOR's
-    // MCP config first so the warm-up one-shot spawns the real servers (the claim rewrites the
-    // config for the actual owner; on this product the operator's set is the representative one),
-    // then run a throwaway prompt. All best-effort, at boot time where nobody is waiting.
-    await installMcpConfig(cfg, name).catch(() => {});
-    // Skills too: omp indexes them on first sight (onnxruntime embedding load — expensive), and
-    // they otherwise arrive only at claim time, putting that cost back on the user's first task.
-    await installSkills(cfg, name).catch(() => {});
-    await installMemory(cfg, name);
-    // TWICE: measured on a warm box, the run right after a single warm-up still took 6.6s to
-    // reach turn one and every run after it ~3.5s — so with one pass the user's task WAS that
-    // second, half-primed run. The extra pass is ~5s at boot, when nobody is waiting.
-    const oneShot =
-      `OMP_SKIP_SETUP=1 timeout 180 omp --mode json --approval-mode=yolo ` +
-      `--model "ccproxy/$ANTHROPIC_MODEL"` +
-      `$([ -n "$ANTHROPIC_SMOL_MODEL" ] && printf -- ' --smol ccproxy/%s' "$ANTHROPIC_SMOL_MODEL")` +
-      ` -p "Reply with exactly: ok" </dev/null >/dev/null 2>&1`;
-    const warm =
-      `mkdir -p /workspace && cd /workspace && ${ompSeedSh()} && { ${oneShot}; ${oneShot}; }; ` +
-      `${OMP_WARM_SCRUB_SH}`;
-    // Generous budget: the warm-up one-shot IS the ~50s cold start being absorbed — a timeout that
-    // kills it mid-flight (the first version's 150s did, together with a cache-priming find) just
-    // moves the cost back onto the user's first task.
-    await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop", undefined, undefined, undefined, agent), "--", "bash", "-lc", warm], false, 360_000);
-  } else {
-    await preinstallOperatorMcpPackages(cfg, name);
-  }
+  await prepareWarmBox(cfg, name, agent, owner);
   // A box is handed out only if it can actually run a task: the disk has room for one and the
   // agent binary starts. Checked HERE, at warm-up time where nobody is waiting, rather than at
   // claim time: neither can change while the box sits idle, and `claude --version` is a ~1s node
@@ -418,8 +472,9 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise
   if (!verdict.ok) throw new Error(`warm box ${name} failed its health check (${verdict.reason}); it is not handed out`);
   // Claimable only from here: the free-probe requires /.ready, so a delegation can never claim a
   // box whose (multi-minute, for omp) warm-up is still running — that race put the whole cold
-  // start back on the user's first task while the pool claimed to be "warm".
-  await exec(cfg, name, "touch /.ready");
+  // start back on the user's first task while the pool claimed to be "warm". The owner marker lands
+  // in the same step: a box is never ready without saying whose it is.
+  await exec(cfg, name, `${ownerMarkSh(owner)} && touch /.ready`);
 }
 
 /**
@@ -555,16 +610,35 @@ export async function reapDeadPoolBoxes(cfg: Config): Promise<string[]> {
  * record the task, but never run — the box shows run:running while Stopped).
  */
 export async function listPoolBoxes(cfg: Config): Promise<string[]> {
+  return (await listWarmBoxes(cfg)).map((b) => b.name);
+}
+
+/** A free warm box and who it is for: an owner tag, "blank", or "legacy" (made before owners existed). */
+export interface WarmBox {
+  name: string;
+  owner: string;
+}
+
+/** Read the free-probe's last line: `claimed`, `warming`, or `free <owner>`. Pure. */
+export function parseWarmProbe(stdout: string): { state: string; owner: string } {
+  const m = stdout.trim().match(/(claimed|warming|free)(?:[ \t]+(\S+))?\s*$/);
+  return m ? { state: m[1], owner: m[2] || "legacy" } : { state: "", owner: "legacy" };
+}
+
+/** The free warm boxes with their owners. One exec per box, the same one that proves it free. */
+export async function listWarmBoxes(cfg: Config): Promise<WarmBox[]> {
   const live = await reapDeadPoolBoxes(cfg);
-  const available: string[] = [];
+  const available: WarmBox[] = [];
   for (const box of live) {
     try {
       // Free = unclaimed AND finished its boot-time warm-up (/.ready is bootWarmBox's LAST step).
       // Without the readiness gate a box was claimable seconds after boot, mid-warm-up, and the
       // user's first task paid the whole cold start the pool exists to hide.
-      const r = await exec(cfg, box, 'if [ -f /.claimed ]; then echo claimed; elif [ ! -f /.ready ]; then echo warming; else echo free; fi');
-      const state = r.stdout.trim().split(/\s+/).pop() ?? "";
-      if (state === "free") available.push(box);
+      // A box with no /.owner was warmed before boxes had owners; it reads as "legacy" and is
+      // never handed out, because it may carry another owner's packages.
+      const r = await exec(cfg, box, 'if [ -f /.claimed ]; then echo claimed; elif [ ! -f /.ready ]; then echo warming; else echo "free $(cat /.owner 2>/dev/null || echo legacy)"; fi');
+      const { state, owner } = parseWarmProbe(r.stdout);
+      if (state === "free") available.push({ name: box, owner });
       else if (isOrphanWarmBox(box, state, warming)) {
         console.error(`[pool] reaping orphaned warm-up ${box} (never became ready; its warm-up was cut off)`);
         await forceRemoveBox(cfg, box);
@@ -1357,14 +1431,15 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<string
 }
 
 /**
- * Put the npm packages behind the operator's MCP servers into a warm box while nobody is waiting.
+ * Put the npm packages behind the calling owner's MCP servers into THEIR warm box while nobody is
+ * waiting (the caller runs this as the owner the box is for; see prepareWarmBox).
  * A server added after the image was baked is not in the image, so the first task in every box
  * installed it at claim time: measured live, a warm box that should start in under a second took
  * 59, all of it this install. Only the public packages are fetched here; no config and no secret
  * is written until an owner claims the box, and the claim's own install then finds the directories
  * and does nothing. The same disk guard applies, and a failure costs nothing but the old wait.
  */
-export async function preinstallOperatorMcpPackages(cfg: Config, box: string): Promise<void> {
+export async function preinstallMcpPackages(cfg: Config, box: string): Promise<void> {
   try {
     const conf = toClaudeMcpConfig(await loadMcpStore(cfg), boxSecretPolicy(cfg));
     const specs = conf ? npxPackagesOf(conf) : [];

@@ -104,7 +104,7 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
           </motion.div>
         ) : (
           <motion.div key="library" {...slide(-1)} className="absolute inset-0 overflow-y-auto">
-            <div className="mx-auto max-w-6xl px-5 py-6 md:px-8 md:py-8">
+            <div className="page-frame py-6 md:py-8">
               <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden" aria-label="Back to machines">
                 <ArrowLeft className="size-4" />
                 Machines

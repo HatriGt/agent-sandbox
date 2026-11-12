@@ -25,6 +25,8 @@ export interface Column<T> {
   align?: "start" | "center" | "end";
   /** Width class for the <col>, e.g. "w-28"; omit for the flexible column. */
   width?: string;
+  /** Raise the widest this column may be fitted to its content, in px (default 360). */
+  fitMax?: number;
   /** Hide below this breakpoint (the primary column should carry a mobile meta line instead). */
   hideBelow?: "sm" | "md" | "lg";
   /** The column that names the row: bright ink and medium weight; every other column stays muted (Orbit). */
@@ -225,7 +227,7 @@ export function DataTable<T>({
           const fit = cols.fit(c.id);
           const declared = c.width && f ? `max(${f}px, ${twWidth(c.width)})` : undefined;
           const px = narrow ? (c.width && f && fit ? `max(${f}px, min(${fit}px, ${twWidth(c.width)}))` : declared) : cols.isManual(c.id) || (w && c.width) ? w : declared;
-          return <col key={c.id} data-col={c.id} data-flex={c.width ? undefined : ""} style={px ? { width: px } : undefined} className={!px ? c.width : undefined} />;
+          return <col key={c.id} data-col={c.id} data-flex={c.width ? undefined : ""} data-fit-max={c.fitMax} style={px ? { width: px } : undefined} className={!px ? c.width : undefined} />;
         })}
         {actions && <col data-col={ACTIONS} style={actionsW ? { width: actionsW } : undefined} className={actionsW ? undefined : "w-28"} />}
       </colgroup>

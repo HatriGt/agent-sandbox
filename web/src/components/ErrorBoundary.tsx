@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { useRouteError } from "react-router";
 import { Button } from "@/components/ui/button";
+import { isChunkLoadError, recoverFromStaleChunk } from "@/lib/lazy-retry";
 
 /**
  * Last line of defence for the console: a render error shows a calm recovery screen with the
@@ -14,6 +15,9 @@ import { Button } from "@/components/ui/button";
 export function RouteError() {
   const err = useRouteError() as unknown;
   const message = err instanceof Error ? err.message : typeof err === "object" && err && "statusText" in err ? String((err as { statusText: string }).statusText) : String(err);
+  // A page file the last deploy renamed: the new page is the fix, so load it (once).
+  const reloading = React.useMemo(() => isChunkLoadError(err) && recoverFromStaleChunk(), [err]);
+  if (reloading) return <div className="bg-background h-full" aria-busy="true" />;
   return <Fallback message={message} retry={() => location.reload()} />;
 }
 
@@ -73,6 +77,8 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
   }
   componentDidCatch(error: Error) {
     console.error("[console] render error", error);
+    // A page file the last deploy renamed: the new page is the fix, so load it (once).
+    if (isChunkLoadError(error)) recoverFromStaleChunk();
   }
   render() {
     if (!this.state.error) return this.props.children;

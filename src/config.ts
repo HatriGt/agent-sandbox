@@ -94,6 +94,10 @@ export interface Config {
   maxBoxes: number;
   /** Number of pre-booted warm boxes to keep idle (0 disables pooling). */
   poolSize: number;
+  /** How many owners get a warm box of their own at once. Each is a VM holding RAM, so keep it small. */
+  poolOwners: number;
+  /** How long after an owner was last seen (dashboard open, task started) their warm box is kept. */
+  poolOwnerWindowMs: number;
 
   /**
    * Interactive A2A: how long `delegate`/`resume` block server-side waiting for the in-box agent to
@@ -267,6 +271,8 @@ export function loadConfig(): Config {
     rootDisk: req("MSB_ROOT_DISK", "1G"),
     maxBoxes: Number(process.env.MSB_MAX_BOXES ?? "5"),
     poolSize: Number(process.env.MSB_POOL_SIZE ?? "1"),
+    poolOwners: Number(process.env.MSB_POOL_OWNERS ?? "2"),
+    poolOwnerWindowMs: Number(process.env.MSB_POOL_OWNER_WINDOW_MS ?? String(2 * 3600_000)),
 
     // Block-until-boundary window. A tools/call must RETURN before the MCP client's own request
     // timeout, or the client throws "-32001 Request timed out" and the calling agent reverts to

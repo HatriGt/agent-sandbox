@@ -6,6 +6,7 @@ import { useCached } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
 import { Swap } from "@/components/ui/swap";
+import { SettingsSection } from "@/components/ui/settings";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { Sheet } from "@/components/ui/sheet";
@@ -110,18 +111,13 @@ export function McpServers() {
   const hasServers = !!servers && servers.length > 0;
 
   return (
-    <section aria-labelledby="mcp-h" className="scroll-mt-6">
-      <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-3">
-        <h2 id="mcp-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
-          MCP servers
-        </h2>
-        {servers && (
-          <span className="text-muted-foreground text-meta tabular-nums">
-            {servers.length === 0 ? "none yet" : `${counts.on} of ${servers.length} on`}
-          </span>
-        )}
-        <div className="ml-auto flex items-center gap-2">
-          {hasServers && (
+    <SettingsSection
+      id="mcp"
+      title="MCP servers"
+      meta={servers ? (servers.length === 0 ? "none yet" : `${counts.on} of ${servers.length} on`) : undefined}
+      actions={
+        hasServers ? (
+          <>
             <AnimatedTabs
               ariaLabel="View"
               className="h-8"
@@ -132,8 +128,7 @@ export function McpServers() {
                 { value: "json", icon: <Braces className="size-3.5" />, label: "JSON" },
               ]}
             />
-          )}
-          {view === "list" && hasServers && (
+          {view === "list" && (
             <>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -150,9 +145,10 @@ export function McpServers() {
               </Button>
             </>
           )}
-        </div>
-      </div>
-
+          </>
+        ) : undefined
+      }
+    >
       <Collapse open={!!cached.error}>
         <p role="alert" className="bg-destructive/10 text-destructive mb-3 rounded-lg px-3 py-2 text-meta">
           {cached.error}
@@ -220,7 +216,7 @@ export function McpServers() {
       <Dialog open={pasting} onOpenChange={setPasting}>
         {pasting && <PasteDialog onMutate={mutate} onClose={() => setPasting(false)} />}
       </Dialog>
-    </section>
+    </SettingsSection>
   );
 }
 

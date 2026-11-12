@@ -1,4 +1,5 @@
 import * as React from "react";
+import { lazyRetry } from "@/lib/lazy-retry";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowLeft, Copy, Download, GitCompare, Layers, Pencil, Plus, ShieldAlert, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -20,7 +21,7 @@ import { ImportHarness } from "@/components/harness/ImportHarness";
 import { AttemptGroupList, CompareLauncher, CompareList } from "@/components/harness/Compare";
 import { downloadJson, rulesLine, type HarnessDraft, draftOf, emptyDraft } from "@/components/harness/model";
 
-const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
+const SkillsPage = React.lazy(lazyRetry(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage }))));
 
 type Tab = "saved" | "drivers" | "skills";
 const ORDER: readonly Tab[] = ["drivers", "skills", "saved"];
@@ -91,8 +92,8 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
   const reviewCount = list.filter((h) => h.needsReview).length;
 
   return (
-    <div className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto max-w-4xl px-5 py-6 md:px-8 md:py-8">
+    <div className="@container h-full min-w-0 overflow-y-auto">
+      <div className="page-frame py-6 md:py-8">
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden">
           <ArrowLeft className="size-4" />
           Back

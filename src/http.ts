@@ -24,7 +24,8 @@ import { SETUP_SENTINEL, parseSentinel, type SetupProfile } from "./setup-profil
 import { addManualNote, deleteNote, exportMemoryMarkdown, getNote, importMemoryMarkdown, forgetEpisode, loadMemoryStore, noteHistory, playbookToSkill, recordEpisode, saveMemoryStore, updateNote, viewMemory, type MemoryReceipt, type MemoryStore } from "./memory-store.js";
 import { MemoryHarvester } from "./memory-harvest.js";
 import { deleteSetup, getSetup, listSetups, recordLearned, repoKey, repoSlugFromUrl, saveSetup } from "./setup-store.js";
-import { refillPool, startPoolMaintainer } from "./pool.js";
+import { kickRefill, refillPool, startPoolMaintainer } from "./pool.js";
+import { noteOwnerActive } from "./warm-owners.js";
 import { checkBearer } from "./http-auth.js";
 import { clientOf, makeAuthThrottle, makeRateLimiter } from "./auth-throttle.js";
 import { auditFields, formatAudit, listAuditEvents, MUTATING, pruneAuditEvents } from "./audit.js";
@@ -1835,6 +1836,9 @@ if (HAS_WEB) {
 // Cached ~1.5s server-side so N tabs cost one SSH sweep.
 app.get("/fleet.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
+  // The dashboard polls this while it is open, so it doubles as "this person is here": their warm
+  // box is prepared while they are still typing, not after they press send.
+  if (noteOwnerActive(cfg, ownerKey(principalOf(res)))) kickRefill(cfg);
   try {
     const fleet = await readFleet();
     // Let the broker look at every waiting box (fire-and-forget; guarded once per question).

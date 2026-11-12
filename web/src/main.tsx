@@ -1,4 +1,5 @@
 import { StrictMode, Suspense, lazy, type ReactNode } from "react";
+import { lazyRetry, recoverFromStaleChunk } from "@/lib/lazy-retry";
 import { createRoot } from "react-dom/client";
 import { MotionConfig } from "motion/react";
 import { initMotionPref, useReducedMotion } from "./lib/motion-pref";
@@ -15,6 +16,12 @@ import App from "./App";
 import { TokenGate } from "./components/TokenGate";
 import { ErrorBoundary, RouteError } from "./components/ErrorBoundary";
 
+// A tab left open across a deploy asks for chunk files the new build renamed: load the new page
+// instead of showing an error (see lib/lazy-retry). Vite raises this for preloads it could not get.
+window.addEventListener("vite:preloadError", (e) => {
+  if (recoverFromStaleChunk()) e.preventDefault();
+});
+
 // Resolve the motion setting onto <html data-motion> before first paint so CSS never flashes motion.
 initMotionPref();
 // The theme id lands on <html data-theme> (and the dark class) the same way; index.html already did
@@ -27,9 +34,9 @@ function AppMotion({ children }: { children: ReactNode }) {
 }
 
 // The public landing page is code-split: the console never pays for it, and vice versa.
-const Landing = lazy(() => import("./pages/Landing"));
-const SignInPage = lazy(() => import("./pages/Auth").then((m) => ({ default: m.SignInPage })));
-const SignUpPage = lazy(() => import("./pages/Auth").then((m) => ({ default: m.SignUpPage })));
+const Landing = lazy(lazyRetry(() => import("./pages/Landing")));
+const SignInPage = lazy(lazyRetry(() => import("./pages/Auth").then((m) => ({ default: m.SignInPage }))));
+const SignUpPage = lazy(lazyRetry(() => import("./pages/Auth").then((m) => ({ default: m.SignUpPage }))));
 
 const router = createBrowserRouter([
   { path: "/", element: <Landing />, errorElement: <RouteError /> },

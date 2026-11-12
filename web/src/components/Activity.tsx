@@ -202,7 +202,7 @@ export function Activity({ boxes, onBack }: { boxes: BoxView[]; onBack: () => vo
   const oldest = audit && audit.length > 0 ? audit[audit.length - 1] : null;
   return (
     <SettingsPage title="Activity" purpose="What happened as you: your actions, each run's start and finish, and what live machines did while this tab was open." back={{ label: "Back", onClick: onBack, mobileOnly: true }}>
-      <SettingsSection id="timeline" title="Timeline" meta="audit kept 90 days" actions={rows && rows.length > 0 ? <div role="radiogroup" aria-label="Filter activity" className="flex flex-wrap gap-1">
+      <SettingsSection stacked id="timeline" title="Timeline" meta="audit kept 90 days" actions={rows && rows.length > 0 ? <div role="radiogroup" aria-label="Filter activity" className="flex flex-wrap gap-1">
               {ACTIVITY_FILTERS.map((f) => (
                 <FilterChip key={f.value} group="activity" active={filter === f.value} onClick={() => setFilter(f.value)} label={f.label} count={counts[f.value]} tone={f.value === "failed" ? "destructive" : undefined} />
               ))}

@@ -1,10 +1,11 @@
 import * as React from "react";
+import { lazyRetry } from "@/lib/lazy-retry";
 import type { Dag } from "@/lib/viz-extra";
 import { VizFrame, VizShimmer } from "./VizFrame";
 import { VizFullscreenContext } from "./viz-fullscreen";
 
 // xyflow + dagre are a separate chunk: the transcript pays for them only when a graph renders.
-const GraphCanvas = React.lazy(() => import("./GraphCanvas"));
+const GraphCanvas = React.lazy(lazyRetry(() => import("./GraphCanvas")));
 
 /**
  * ```graph / ```dag / mermaid flowchart → an xyflow canvas laid out by dagre (GraphCanvas.tsx).

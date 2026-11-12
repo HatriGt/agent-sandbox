@@ -84,9 +84,15 @@ function LedgerTotalsStrip({ t }: { t: LedgerTotals | null }) {
     if (t.costUsd !== null) cells.push({ label: "Cost", value: <NumberTicker value={Math.round(t.costUsd * 100)} format={(c) => `$${(c / 100).toFixed(2)}`} />, note: t.withCost < t.runs ? `from ${t.withCost} priced runs` : undefined });
   }
   return (
-    <div className={cn("mb-4 grid gap-px overflow-hidden rounded-xl border bg-border", t && t.costUsd !== null ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3")} aria-label="Ledger totals">
+    <div
+      className={cn(
+        "mb-4 grid gap-px overflow-hidden rounded-xl border bg-border @5xl:mb-0 @5xl:min-w-0 @5xl:flex-1 @5xl:auto-rows-fr",
+        t && t.costUsd !== null ? "grid-cols-2 sm:grid-cols-4 @5xl:group-has-[section]/summary:grid-cols-2" : "grid-cols-3"
+      )}
+      aria-label="Ledger totals"
+    >
       {(t ? cells : [0, 1, 2].map(() => null)).map((c, i) => (
-        <div key={i} className="bg-card px-4 py-3">
+        <div key={i} className="bg-card flex flex-col justify-center px-4 py-3 @5xl:px-5">
           {c ? (
             <>
               <p className="label text-muted-foreground">{c.label}</p>
@@ -234,8 +240,8 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
   };
 
   return (
-    <div className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto max-w-[900px] px-5 py-7 md:px-8 md:py-9">
+    <div className="@container h-full min-w-0 overflow-y-auto">
+      <div className="page-frame py-6 md:py-8">
         <header className="mb-6">
           <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden" aria-label="Back to machines">
             <ArrowLeft className="size-4" />
@@ -245,10 +251,14 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
           <p className="text-muted-foreground mt-1 text-meta">Finished runs, kept after their machines are gone.</p>
         </header>
 
-        <ActivityPanel />
+        {/* On a wide page the calendar and the totals share one row: stacked, the calendar was a
+            small grid alone in a card as wide as the window. */}
+        <div className="group/summary @5xl:mb-4 @5xl:flex @5xl:items-stretch @5xl:gap-4">
+          <ActivityPanel />
 
-        {/* A failed load shows its error below; a shimmer that never resolves above it would be a lie. */}
-        {!error && <LedgerTotalsStrip t={totals} />}
+          {/* A failed load shows its error below; a shimmer that never resolves above it would be a lie. */}
+          {!error && <LedgerTotalsStrip t={totals} />}
+        </div>
 
         <Swap state={error ? "error" : rows === null ? "loading" : !rows.length && !liveRows.length ? "empty" : !tableRows.length ? `none-${filter}` : "list"}>
           {error ? (
@@ -594,7 +604,7 @@ function ActivityPanel() {
   // runs, a single row of the last six weeks says the same thing at its own size.
   const activeDays = new Set(runs.map((r) => new Date(r.t).toDateString())).size;
   return (
-    <section aria-label="Run activity" className="enter bg-card mb-6 rounded-xl border px-4 py-3.5">
+    <section aria-label="Run activity" className="enter bg-card mb-6 rounded-xl border px-4 py-3.5 @5xl:mb-0 @5xl:min-w-[26rem] @5xl:shrink-0">
       <div className="mb-3 flex items-baseline gap-4">
         <span className="label text-muted-foreground">Activity</span>
         <span className="text-faint text-micro">

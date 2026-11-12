@@ -9,7 +9,9 @@
  *
  * The pool state lives on the VPS (the running `pool-*` boxes), so it survives MCP respawns.
  */
-import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes, forceRemoveBox, OMP_MIN_MEMORY, OMP_MIN_DISK, OMP_CPUS, ompRootSource, claudeRootSource } from "./msb.js";
+import { createBox, bootWarmBox, adoptWarmBox, listPoolBoxes, listWarmBoxes, hostFreeMb, claimWarmBox, reapDeadPoolBoxes, forceRemoveBox, OMP_MIN_MEMORY, OMP_MIN_DISK, OMP_CPUS, ompRootSource, claudeRootSource, type WarmBox } from "./msb.js";
+import { BLANK_OWNER, activeWarmOwners, ownerTag } from "./warm-owners.js";
+import { loadAgentPrefs } from "./agent-kind.js";
 import { stagingPathFor } from "./sync.js";
 import { parseDurationSec } from "./monitor.js";
 import type { Config } from "./config.js";
@@ -108,12 +110,24 @@ export function pickFreeBox(available: readonly string[], reserved: ReadonlySet<
   return available.find((b) => !reserved.has(b));
 }
 
+/**
+ * The warm boxes this owner may take, their own first: a box prepared for them, then a blank one.
+ * Never another owner's box, and never a legacy box (warmed before boxes had owners). Pure.
+ */
+export function claimableBoxes(boxes: readonly WarmBox[], owner: string | undefined): string[] {
+  const tag = owner ? ownerTag(owner) : undefined;
+  const mine = boxes.filter((b) => tag !== undefined && b.owner === tag);
+  const blank = boxes.filter((b) => b.owner === BLANK_OWNER);
+  return [...mine, ...blank].map((b) => b.name);
+}
+
 export async function acquireBox(
   cfg: Config,
   session: string,
   copyDir: string | undefined,
   eligible: boolean,
-  agent: AgentKind = "claude"
+  agent: AgentKind = "claude",
+  owner?: string
 ): Promise<{ box: string; warm: boolean }> {
   if (eligible) {
     // listPoolBoxes already reaps dead/wedged boxes, so anything it returns is Running + free.
@@ -124,7 +138,8 @@ export async function acquireBox(
     const maxAgeMs = (parseDurationSec(cfg.poolIdleTimeout) ?? 0) * 1000;
     // Only THIS delegation's flavor: a claude task must never claim an omp box and vice versa —
     // wrong toolchain, wrong memory tier, wrong snapshot.
-    const available = freshPoolBoxes(await listPoolBoxes(cfg), maxAgeMs).filter((b) => poolBoxFlavor(b) === agent);
+    const listed = (await listWarmBoxes(cfg)).filter((b) => poolBoxFlavor(b.name) === agent);
+    const available = freshPoolBoxes(claimableBoxes(listed, owner), maxAgeMs);
     const warm = pickFreeBox(available);
     if (warm) {
       claiming.add(warm);
@@ -159,10 +174,45 @@ export async function acquireBox(
 /** IO seam for refillPool so its concurrency behavior is unit-testable without SSH. */
 export interface RefillIO {
   listPoolBoxes: (cfg: Config) => Promise<string[]>;
-  bootWarmBox: (cfg: Config, agent?: AgentKind) => Promise<string>;
+  bootWarmBox: (cfg: Config, agent?: AgentKind, owner?: string | null) => Promise<string>;
   removeBox: (cfg: Config, box: string) => Promise<void>;
+  /** The same listing with each box's owner; absent (tests) means every listed box is blank. */
+  listWarmBoxes?: (cfg: Config) => Promise<WarmBox[]>;
+  /** Re-prepare a blank box for an owner in place; absent means boot a new one instead. */
+  adoptWarmBox?: (cfg: Config, box: string, agent: AgentKind, owner: string) => Promise<void>;
+  /** MiB the host can still give out; absent or undefined means "do not hold back". */
+  hostFreeMb?: (cfg: Config) => Promise<number | undefined>;
+  /** Which agent an owner's box is warmed for. */
+  ownerFlavor?: (owner: string) => AgentKind;
 }
-const realRefillIO: RefillIO = { listPoolBoxes, bootWarmBox, removeBox: forceRemoveBox };
+const realRefillIO: RefillIO = { listPoolBoxes, listWarmBoxes, bootWarmBox, adoptWarmBox, removeBox: forceRemoveBox, hostFreeMb };
+
+/** The pool flavor an owner's box is warmed for: their default agent, omp or claude. */
+export function ownerFlavor(owner: string): AgentKind {
+  return loadAgentPrefs(owner).defaultAgent === "omp" ? "omp" : "claude";
+}
+
+/** "1G" / "1536M" as MiB; an unreadable size counts as 1 GiB. Pure. */
+export function memoryMb(size: string): number {
+  const m = /^(\d+(?:\.\d+)?)\s*([GM])/i.exec(size.trim());
+  if (!m) return 1024;
+  return Math.round(Number(m[1]) * (m[2].toUpperCase() === "G" ? 1024 : 1));
+}
+
+/** Kept free on the host on top of a new warm box's own memory, in MiB. */
+export const WARM_HOST_RESERVE_MB = 512;
+
+/**
+ * May the host take one more idle VM? A warm box is a convenience; on a host that is short of
+ * memory it is the first thing to give up, because the run it would speed up needs that memory
+ * more. Unknown free memory never holds a boot back. Pure.
+ */
+export function hostHasRoom(freeMb: number | undefined, boxMemory: string): boolean {
+  return freeMb === undefined || freeMb >= memoryMb(boxMemory) + WARM_HOST_RESERVE_MB;
+}
+
+/** Said once per state, not once a minute by the maintainer. */
+let saidNoRoom = false;
 
 /**
  * At most ONE refill in flight per process. Observed live: a warm claim's reseed and the periodic
@@ -179,7 +229,12 @@ let refillInFlight: Promise<void> | null = null;
  * Fire-and-forget: errors are logged to stderr and swallowed so a refill failure never breaks a
  * delegation.
  */
-export function refillPool(cfg: Config, io: RefillIO = realRefillIO, wanted: Set<AgentKind> = preferredAgents()): Promise<void> {
+export function refillPool(
+  cfg: Config,
+  io: RefillIO = realRefillIO,
+  wanted: Set<AgentKind> = preferredAgents(),
+  owners: readonly string[] = activeWarmOwners(cfg)
+): Promise<void> {
   const claudeOn = cfg.poolSize > 0 && claudeSourceOn(cfg);
   const ompOn = (cfg.ompPoolSize ?? 0) > 0 && ompSourceOn(cfg);
   if ((!claudeOn && !ompOn) || !cfg.egressAllowAll) return Promise.resolve();
@@ -191,10 +246,65 @@ export function refillPool(cfg: Config, io: RefillIO = realRefillIO, wanted: Set
       // ONE listing serves both flavors; each reconciles its own partition. A flavor no user has
       // picked as their default gets a target of ZERO — its idle boxes are trimmed, not kept: the
       // pool follows the agent setting instead of paying RAM for both flavors at once.
-      const all = await io.listPoolBoxes(cfg);
+      const listed: WarmBox[] = io.listWarmBoxes
+        ? await io.listWarmBoxes(cfg)
+        : (await io.listPoolBoxes(cfg)).map((name) => ({ name, owner: BLANK_OWNER }));
+      const bootCfgOf = (agent: AgentKind): Config => (agent === "omp" ? ompPoolCfg(cfg) : claudePoolCfg(cfg));
+      const room = async (agent: AgentKind): Promise<boolean> => {
+        const free = io.hostFreeMb ? await io.hostFreeMb(cfg) : undefined;
+        const ok = hostHasRoom(free, bootCfgOf(agent).memory);
+        if (!ok && !saidNoRoom) console.error(`[pool] not booting a warm ${agent} box: the host has ${free} MB free, and a warm box is the first thing to give up`);
+        saidNoRoom = !ok;
+        return ok;
+      };
+      // Owner boxes first. Each owner on the list holds ONE box prepared with their own set, in
+      // their own agent's flavor; a flavor whose pool is off gets none.
+      const flavorOf = io.ownerFlavor ?? ownerFlavor;
+      const holders = owners
+        .map((owner) => ({ owner, tag: ownerTag(owner), agent: flavorOf(owner) }))
+        .filter((o) => (o.agent === "omp" ? ompOn : claudeOn));
+      const agentOfTag = new Map(holders.map((o) => [o.tag, o.agent]));
+      const pool: WarmBox[] = [];
+      for (const b of listed) {
+        // A box nobody may claim is only RAM: one whose owner left the list, one in a flavor its
+        // owner no longer uses, or one warmed before boxes had owners.
+        const keep = b.owner === BLANK_OWNER || agentOfTag.get(b.owner) === poolBoxFlavor(b.name);
+        if (keep || claiming.has(b.name)) pool.push(b);
+        else {
+          console.error(`[pool] removing warm box ${b.name}: ${b.owner === "legacy" ? "it was warmed before boxes had owners" : "its owner is no longer around"}`);
+          await io.removeBox(cfg, b.name);
+        }
+      }
+      for (const o of holders) {
+        if (pool.some((b) => b.owner === o.tag && poolBoxFlavor(b.name) === o.agent)) continue;
+        const blank = io.adoptWarmBox ? pool.find((b) => b.owner === BLANK_OWNER && poolBoxFlavor(b.name) === o.agent && !claiming.has(b.name)) : undefined;
+        if (blank && io.adoptWarmBox) {
+          // Reserved like a claim, so no task takes the box while it is being prepared.
+          claiming.add(blank.name);
+          try {
+            await io.adoptWarmBox(cfg, blank.name, o.agent, o.owner);
+            blank.owner = o.tag;
+            console.error(`[pool] warm ${o.agent} box ${blank.name} is now prepared for one owner`);
+          } catch (e) {
+            pool.splice(pool.indexOf(blank), 1);
+            console.error(`[pool] could not prepare ${blank.name} for its owner:`, (e as Error).message);
+          } finally {
+            claiming.delete(blank.name);
+          }
+          continue;
+        }
+        if (!(await room(o.agent))) continue;
+        const name = await io.bootWarmBox(bootCfgOf(o.agent), o.agent, o.owner);
+        pool.push({ name, owner: o.tag });
+        console.error(`[pool] warm ${o.agent} box ready for one owner: ${name}`);
+      }
+      // Blank boxes: kept only while nobody is on the list, so a deployment nobody has used yet
+      // still starts its first task warm. Once an owner holds a box, a blank one is spare RAM.
+      const all = pool.filter((b) => b.owner === BLANK_OWNER).map((b) => b.name);
+      const blankOn = holders.length === 0;
       const flavors: Array<{ agent: AgentKind; size: number; bootCfg: Config; on: boolean }> = [
-        { agent: "claude", size: wanted.has("claude") ? cfg.poolSize : 0, bootCfg: claudePoolCfg(cfg), on: claudeOn },
-        { agent: "omp", size: wanted.has("omp") ? cfg.ompPoolSize ?? 0 : 0, bootCfg: ompPoolCfg(cfg), on: ompOn },
+        { agent: "claude", size: blankOn && wanted.has("claude") ? cfg.poolSize : 0, bootCfg: claudePoolCfg(cfg), on: claudeOn },
+        { agent: "omp", size: blankOn && wanted.has("omp") ? cfg.ompPoolSize ?? 0 : 0, bootCfg: ompPoolCfg(cfg), on: ompOn },
       ];
       for (const f of flavors) {
         if (!f.on) continue;
@@ -203,6 +313,7 @@ export function refillPool(cfg: Config, io: RefillIO = realRefillIO, wanted: Set
         if (deficit > 0) {
           console.error(`[pool] refilling ${f.agent}: ${available.length}/${f.size} ready — booting ${deficit}`);
           for (let i = 0; i < deficit; i++) {
+            if (!(await room(f.agent))) break;
             const name = await io.bootWarmBox(f.bootCfg, f.agent);
             console.error(`[pool] warm ${f.agent} box ready: ${name}`);
           }
@@ -228,6 +339,16 @@ export function refillPool(cfg: Config, io: RefillIO = realRefillIO, wanted: Set
   });
   refillInFlight = tracked;
   return tracked;
+}
+
+/**
+ * Refill once more after whatever refill is running now. For a change the running flight cannot
+ * have seen: an owner who just showed up needs their box prepared now, not at the next tick.
+ */
+export function kickRefill(cfg: Config): void {
+  const after = refillInFlight;
+  if (after) void after.then(() => refillPool(cfg));
+  else void refillPool(cfg);
 }
 
 /**

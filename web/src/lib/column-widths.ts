@@ -102,7 +102,9 @@ export function useColumnWidths(storeKey: string | undefined, ready: boolean, si
         const c = row.cells[i];
         if (c && c.colSpan === 1 && c.offsetParent) w = Math.max(w, c.getBoundingClientRect().width);
       }
-      if (w > 0) fit[id] = Math.min(AUTO_MAX, Math.max(MIN_COL, Math.ceil(w) + 2));
+      // A column may raise its own cap (`fitMax`): the fleet's machine cell is one fixed reading
+      // of memory and disk that was cut off mid-number at the shared cap.
+      if (w > 0) fit[id] = Math.min(Number(col.dataset.fitMax) || AUTO_MAX, Math.max(MIN_COL, Math.ceil(w) + 2));
     });
     [table.style.tableLayout, table.style.width, table.style.minWidth] = saved;
     cols.forEach((c, i) => (c.style.width = savedCols[i]));

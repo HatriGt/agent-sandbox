@@ -1,4 +1,5 @@
 import * as React from "react";
+import { lazyRetry } from "@/lib/lazy-retry";
 import { ArrowUpRight, Bug, Compass, GitPullRequest, Loader2, Plus, Sparkles, Undo2 } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { toast } from "sonner";
@@ -6,13 +7,13 @@ import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSna
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 // The workspace (CodeMirror + merge view) is heavy and optional: loaded the first time it opens.
-const WorkspacePane = React.lazy(() => import("./WorkspacePane").then((m) => ({ default: m.WorkspacePane })));
+const WorkspacePane = React.lazy(lazyRetry(() => import("./WorkspacePane").then((m) => ({ default: m.WorkspacePane }))));
 import { SleepingCard, WakingCard } from "./WakingCard";
 import { SessionContext, SessionReposContext } from "@/lib/session-context";
 import { CodeNavContext } from "@/components/ui/code-ref";
 import type { CodeRef } from "@/lib/code-refs";
 import type { OpenRequest } from "./WorkspacePane";
-const BrowserPane = React.lazy(() => import("./BrowserPane").then((m) => ({ default: m.BrowserPane })));
+const BrowserPane = React.lazy(lazyRetry(() => import("./BrowserPane").then((m) => ({ default: m.BrowserPane }))));
 import type { BrowserTag } from "./BrowserPane";
 import { sandboxAddress } from "@/lib/browser-model";
 import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";

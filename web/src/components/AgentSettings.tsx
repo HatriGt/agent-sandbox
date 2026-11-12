@@ -90,12 +90,12 @@ export function AgentSettings({ harnesses = [] }: { harnesses?: HarnessView[] })
     >
       <Swap state={prefs ? "list" : "loading"}>
         {!prefs ? (
-          <div className="flex max-w-xl flex-col gap-2" aria-busy="true" aria-label="Loading">
+          <div className="grid gap-2 @4xl:grid-cols-2" aria-busy="true" aria-label="Loading">
             <Bar className="h-16 w-full rounded-lg" />
             <Bar className="h-16 w-full rounded-lg" />
           </div>
         ) : (
-          <div role="radiogroup" aria-labelledby="agent-h" className="flex max-w-xl flex-col gap-2">
+          <div role="radiogroup" aria-labelledby="agent-h" className="grid gap-2 @4xl:grid-cols-2 @4xl:items-stretch">
             {prefs.agents.map((a) => {
               const active = prefs.defaultAgent === a.id;
               const pinned = harnesses.filter((h) => h.driver === a.id).length;

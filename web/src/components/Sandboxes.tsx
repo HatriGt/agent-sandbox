@@ -30,14 +30,13 @@ import { cn } from "@/lib/utils";
  * row opens the thread. Capacity is the configured slot count against live occupancy.
  */
 
-type Filter = "all" | "attention" | "working" | "sleeping" | "done" | "warm";
+type Filter = "all" | "attention" | "working" | "sleeping" | "done";
 
 const groupOf = (v: StableBox): Exclude<Filter, "all"> => {
   if (v.runState === "waiting") return "attention";
   const s = displayState(v);
   if (s === "running") return "working";
   if (s === "sleeping") return "sleeping";
-  if (v.role === "pool-free") return "warm";
   return "done";
 };
 
@@ -46,11 +45,10 @@ const GROUP_LABEL: Record<Exclude<Filter, "all">, string> = {
   working: "Working",
   sleeping: "Sleeping",
   done: "Done",
-  warm: "Warm — ready for a task",
 };
 
 export function Sandboxes({
-  boxes,
+  boxes: everyBox,
   lifecycle,
   loading,
   onOpen,
@@ -67,10 +65,13 @@ export function Sandboxes({
   const [filter, setFilter] = React.useState<Filter>("all");
   const [query, setQuery] = React.useState("");
   const go = useGo();
+  // This page lists runs. A machine kept ready for the next task is not one: nobody started it
+  // and there is nothing to open, answer or destroy. It is handed to a task when one starts.
+  const boxes = React.useMemo(() => everyBox.filter((b) => b.role !== "pool-free"), [everyBox]);
 
   const sorted = [...boxes].sort(threadSort);
   const counts = React.useMemo(() => {
-    const c: Record<Exclude<Filter, "all">, number> = { attention: 0, working: 0, sleeping: 0, done: 0, warm: 0 };
+    const c: Record<Exclude<Filter, "all">, number> = { attention: 0, working: 0, sleeping: 0, done: 0 };
     for (const b of boxes) if (!b.leaving) c[groupOf(b)]++;
     return c;
   }, [boxes]);
@@ -92,7 +93,7 @@ export function Sandboxes({
   const sleepable = boxes.filter((b) => displayState(b) === "sleeping" && !b.kept && !b.leaving);
   return (
     <div className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto max-w-[1100px] px-5 py-7 md:px-8 md:py-9">
+      <div className="page-frame py-6 md:py-8">
         <header className="mb-5">
           <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden" aria-label="Back to machines">
             <ArrowLeft className="size-4" />
@@ -159,7 +160,6 @@ export function Sandboxes({
               <FilterChip group="fleet" active={filter === "working"} onClick={() => setFilter("working")} label="Working" count={counts.working} tone="live" />
               <FilterChip group="fleet" active={filter === "sleeping"} onClick={() => setFilter("sleeping")} label="Sleeping" count={counts.sleeping} tone="sleep" />
               <FilterChip group="fleet" active={filter === "done"} onClick={() => setFilter("done")} label="Done" count={counts.done} />
-              <FilterChip group="fleet" active={filter === "warm"} onClick={() => setFilter("warm")} label="Warm" count={counts.warm} />
             </div>
             <div className="ml-auto flex items-center gap-2">
               <label className="bg-card focus-within:ring-ring flex h-8 items-center gap-1.5 rounded-md border px-2 transition-shadow focus-within:ring-2">
@@ -270,7 +270,7 @@ function MachineTable({
       cell: (b) => stateDot(b),
     },
     { id: "task", header: "Task", primary: true, cell: (b) => <TaskCell box={b} lifecycle={lifecycle} /> },
-    { id: "machine", header: "Machine", width: "w-52", hideBelow: "md", cell: (b) => <MachineCell box={b} lifecycle={lifecycle} /> },
+    { id: "machine", header: "Machine", width: "w-52", fitMax: 440, hideBelow: "md", cell: (b) => <MachineCell box={b} lifecycle={lifecycle} /> },
     { id: "left", header: "Time left", width: "w-[8.5rem]", hideBelow: "md", cell: (b) => <TimeLeft box={b} lifecycle={lifecycle} /> },
     // The row is the action (click opens the thread); this cell holds destroy + the click cue.
     { id: "actions", header: <span className="sr-only">Actions</span>, width: "w-[5.5rem]", align: "end", cell: (b) => <RowActions box={b} onDestroyed={onDestroyed} /> },

@@ -4,7 +4,7 @@ import type { LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent, type WatchEvent } from "@/lib/api";
-import { fmtAgo } from "@/lib/format";
+import { fmtAgo, friendlyName } from "@/lib/format";
 import { useCached, writeCache } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
@@ -277,7 +277,10 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
 
   return (
     <div className="min-w-0">
-      <div>
+      {/* On a wide page the list and the PR rules sit side by side: the rules are settings you
+          glance at, not something to scroll past the whole list to reach. */}
+      <div className="@6xl:grid @6xl:grid-cols-[minmax(0,1fr)_24rem] @6xl:items-start @6xl:gap-x-10">
+       <div className="min-w-0">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <p className="text-muted-foreground min-w-0 flex-[1_1_20rem] text-meta">
             <span className="text-foreground">When</span> work starts on its own — a schedule, a webhook, a GitHub event, or after another run. Each opens a PR at most and leaves a receipt.
@@ -356,7 +359,10 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
             />
           )}
         </Swap>
-        <PrFollowupsPanel />
+       </div>
+        <div className="min-w-0 @6xl:sticky @6xl:top-6">
+          <PrFollowupsPanel />
+        </div>
       </div>
 
       <Sheet open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
@@ -475,6 +481,22 @@ function WorkflowPick({ value, onChange }: { value: string | undefined; onChange
 const isPending = (a: Automation) => !!a.proposed && !a.enabled;
 
 /** Every automation as one table row: name + what fires it, when, how the last run went. The row opens its runs; the actions cell holds View (the editor sheet) and the switch (or Approve/Dismiss for a proposal). */
+/**
+ * A schedule made in a chat with no name of its own is stored under its machine's id
+ * (`pool-1791864841224-omp-qyt2hi`). That id is plumbing: show the name the machine goes by
+ * everywhere else in the console.
+ */
+export function automationLabel(name: string): string {
+  return /^pool-\d+-/.test(name) ? friendlyName(name) : name;
+}
+
+/** The link back to the chat a schedule came from; "from chat" when it would only repeat the name. */
+function sourceLabel(a: Automation): string {
+  const title = a.sourceTitle?.trim();
+  if (title && title !== a.name) return title;
+  return "from chat";
+}
+
 function AutomationList({
   rows,
   onEdit,
@@ -513,7 +535,7 @@ function AutomationList({
           <span className="flex min-w-0 items-center gap-3">
             <Glyph className={cn("size-4 shrink-0", a.enabled ? "text-live" : "text-muted-foreground")} strokeWidth={1.75} aria-hidden />
             <span className="text-foreground min-w-0 truncate font-medium" title={a.name}>
-              {a.name}
+              {automationLabel(a.name)}
             </span>
             {playbook && <span className="text-muted-foreground shrink-0 text-micro">{playbook}</span>}
             {a.sourceBox && (
@@ -523,7 +545,7 @@ function AutomationList({
                 className="text-muted-foreground hover:text-foreground inline-flex max-w-[14rem] shrink-0 cursor-pointer items-center gap-0.5 text-micro underline-offset-2 hover:underline"
                 title={`From chat: ${a.sourceTitle || a.sourceBox}`}
               >
-                <span className="truncate">{a.sourceTitle || a.sourceBox}</span>
+                <span className="truncate">{sourceLabel(a)}</span>
                 <ArrowUpRight className="size-3 shrink-0" aria-hidden />
               </button>
             )}

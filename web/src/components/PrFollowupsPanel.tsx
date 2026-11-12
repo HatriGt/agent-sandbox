@@ -86,7 +86,7 @@ export function PrFollowupsPanel() {
 
   if (!prefs) return null;
   return (
-    <section aria-label="PR follow-ups" className="mt-8 rounded-xl border px-4 py-4">
+    <section aria-label="PR follow-ups" className="mt-8 rounded-xl border px-4 py-4 @6xl:mt-0">
       <div className="mb-3 flex items-center gap-2">
         <GitPullRequest className="text-muted-foreground size-4" aria-hidden />
         <h2 className="text-foreground text-meta font-medium">After a PR is opened</h2>
