@@ -490,7 +490,12 @@ async function prepareWarmBox(cfg: Config, name: string, agent: AgentKind, owner
     // moves the cost back onto the user's first task.
     await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop", undefined, undefined, undefined, agent), "--", "bash", "-lc", warm], false, 360_000);
   } else if (owner) {
-    await asOwner(() => preinstallMcpPackages(cfg, name));
+    // The owner's MCP config goes in now, not only at the claim: the warm-up start below (see
+    // CLAUDE_PREWARM_SH) then starts the servers this owner really uses, once, while nobody waits.
+    // It is written again at the claim, so a server added in between is not missed.
+    const s = Date.now();
+    const notes = await asOwner(() => installMcpConfig(cfg, name)).catch(() => [] as string[]);
+    console.error(`[pool] ${name}: MCP servers ready in ${Date.now() - s}ms${notes.length ? ` (${notes.join("; ")})` : ""}`);
   }
 }
 
@@ -509,7 +514,7 @@ export async function adoptWarmBox(cfg: Config, box: string, agent: AgentKind, o
   try {
     await exec(cfg, box, "rm -f /.ready");
     await prepareWarmBox(cfg, box, agent, owner);
-    const health = await exec(cfg, box, WARM_HEALTH_SH, { timeoutMs: 60_000 });
+    const health = await exec(cfg, box, warmHealthSh(agent), { timeoutMs: 60_000 });
     const verdict = warmBoxVerdict(health.stdout);
     if (!verdict.ok) throw new Error(`warm box ${box} failed its health check (${verdict.reason}); it is not handed out`);
     await exec(cfg, box, `${ownerMarkSh(owner)} && touch /.ready`);
@@ -573,7 +578,7 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind, owner: s
   // agent binary starts. Checked HERE, at warm-up time where nobody is waiting, rather than at
   // claim time: neither can change while the box sits idle, and `claude --version` is a ~1s node
   // startup that would otherwise sit on every task start. The claim re-reads only the disk.
-  const health = await exec(cfg, name, WARM_HEALTH_SH, { timeoutMs: 60_000 });
+  const health = await exec(cfg, name, warmHealthSh(agent), { timeoutMs: 60_000 });
   const verdict = warmBoxVerdict(health.stdout);
   if (!verdict.ok) throw new Error(`warm box ${name} failed its health check (${verdict.reason}); it is not handed out`);
   // Claimable only from here: the free-probe requires /.ready, so a delegation can never claim a
@@ -595,15 +600,23 @@ export const DF_FREE_KB_SH = `df -Pk / 2>/dev/null | awk 'NR==2{print $4}'`;
 /**
  * Claude Code's first start in a box is slow: measured in a fresh warm box, 1.9 s to get going
  * the first time and 0.3 s every time after (it migrates its config, probes the filesystem, lays
- * out its caches). A warm box had never run it, so the user's first task paid that. Here it is
- * run once while nobody waits, against an address nothing listens on and with a key that is not
- * one: it starts up, cannot reach a model, and is stopped. Nothing of the attempt is kept.
+ * out its caches). With the owner's MCP servers it is worse: 5 to 6 s before the first request
+ * the first time, 2.3 s after, because each server reads its package from disk for the first
+ * time. A warm box had never run any of it, so the user's first task paid that, and with the
+ * wait for servers capped (CLAUDE_MCP_WAIT_MS) the slow ones missed the first turn. Here it is
+ * all started once while nobody waits, against an address nothing listens on and with a key that
+ * is not one: Claude Code and the servers start, no model is reached, and it is stopped. Nothing
+ * of the attempt is kept.
  */
 export const CLAUDE_PREWARM_SH =
-  `(cd /tmp && ANTHROPIC_API_KEY=warm ANTHROPIC_BASE_URL=http://127.0.0.1:9 timeout 4 claude -p hi --setting-sources user --output-format stream-json --verbose >/dev/null 2>&1; ` +
+  `(W=4; F=; if [ -s ${MCP_CONFIG_PATH} ]; then W=10; F="--mcp-config ${MCP_CONFIG_PATH}"; fi; ` +
+  `cd /tmp && ANTHROPIC_API_KEY=warm ANTHROPIC_BASE_URL=http://127.0.0.1:9 CLAUDE_CODE_MCP_STARTUP_WAIT_MS=8000 ` +
+  `timeout "$W" claude -p hi --setting-sources user $F --output-format stream-json --verbose >/dev/null 2>&1; ` +
   `rm -rf "$HOME/.claude/projects/-tmp"; true)`;
 /** The warm-up health probe: free KiB on line one, then the agent's version line. */
-export const WARM_HEALTH_SH = `${CLAUDE_PREWARM_SH}; ${DF_FREE_KB_SH}; claude --version 2>/dev/null | head -1`;
+export const WARM_HEALTH_SH = `${DF_FREE_KB_SH}; claude --version 2>/dev/null | head -1`;
+/** The same, after the warm-up start for a box that will run Claude Code. */
+export const warmHealthSh = (agent: AgentKind): string => (agent === "omp" ? WARM_HEALTH_SH : `${CLAUDE_PREWARM_SH}; ${WARM_HEALTH_SH}`);
 
 /** Judge WARM_HEALTH_SH's output. Pure, so the gate is unit-tested without a box. */
 export function warmBoxVerdict(stdout: string, minFreeKb = RUN_MIN_FREE_KB): { ok: true } | { ok: false; reason: string } {
@@ -1552,30 +1565,6 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<string
   } catch (e) {
     console.error(`[mcp] could not install MCP config into ${box}:`, (e as Error).message);
     return [];
-  }
-}
-
-/**
- * Put the npm packages behind the calling owner's MCP servers into THEIR warm box while nobody is
- * waiting (the caller runs this as the owner the box is for; see prepareWarmBox).
- * A server added after the image was baked is not in the image, so the first task in every box
- * installed it at claim time: measured live, a warm box that should start in under a second took
- * 59, all of it this install. Only the public packages are fetched here; no config and no secret
- * is written until an owner claims the box, and the claim's own install then finds the directories
- * and does nothing. The same disk guard applies, and a failure costs nothing but the old wait.
- */
-export async function preinstallMcpPackages(cfg: Config, box: string): Promise<void> {
-  try {
-    const conf = toClaudeMcpConfig(await loadMcpStore(cfg), boxSecretPolicy(cfg));
-    const specs = conf ? npxPackagesOf(conf) : [];
-    if (!specs.length) return;
-    wantStoredPackages(cfg, specs);
-    const s = Date.now();
-    const r = await exec(cfg, box, preinstallSh(specs), { timeoutMs: 300_000 });
-    const notes = mcpInstallNotes(r.stdout ?? "");
-    console.error(`[pool] ${box}: MCP packages ready in ${Date.now() - s}ms${notes.length ? ` (${notes.join("; ")})` : ""}`);
-  } catch (e) {
-    console.error(`[pool] ${box}: could not pre-install MCP packages: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
   }
 }
 
