@@ -24,10 +24,10 @@ import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
 import { useModelChoice, type ModelChoice } from "@/components/thread/ModelPicker";
 import { RunOptionChips, type Attempts, type ChipKey, type VerifySpec } from "@/components/thread/RunSettings";
 import { ComposerToolbar, HarnessMenu, ModelMenu, WorkflowMenu, MoreMenu, PlusMenu, SkillsMenu, useComposerMenus } from "@/components/composer/Toolbar";
-import { SkillChip, SkillMenu } from "@/components/thread/SkillMenu";
-import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
-import { useCached } from "@/lib/cache";
-import type { HarnessView, SkillView, WorkflowView } from "@/lib/api";
+import { SkillMenu } from "@/components/thread/SkillMenu";
+import { slashAt, type SlashState } from "@/lib/slash";
+import { useInlineTags } from "@/hooks/useInlineTags";
+import type { HarnessView, WorkflowView } from "@/lib/api";
 import { useProviders } from "@/components/Providers";
 import { useAgentChoice } from "@/components/DriverPicker";
 import { AnimatePresence, motion } from "motion/react";
@@ -284,41 +284,23 @@ export function Hub({
   }, []);
   // One open toolbar menu at a time; ⌘. opens Model.
   const menus = useComposerMenus("model");
-  // `/` skills, exactly as the thread composer does them (SendBar): a `/query` token opens the
-  // menu, a pick becomes a chip, and the send carries it as the leading `/name` of the task.
-  const skillsCache = useCached("skills", (signal) => api.skills(signal));
-  const [skill, setSkill] = React.useState<SkillView | null>(null);
+  // `/` skills, exactly as the thread composer does them (SendBar): a `/query` opens the menu and a
+  // pick is written into the task where the caret is, drawn as a pill in the line. A task can name
+  // several skills; the controller reads every one of them.
   const [slash, setSlash] = React.useState<SlashState | null>(null);
   const [slashMatches, setSlashMatches] = React.useState(0);
-  const findSkill = (name: string) => (skillsCache.data?.skills ?? []).find((s) => s.enabled && s.name === name) ?? null;
   const taskEl = () => document.getElementById("new-task") as HTMLTextAreaElement | null;
+  const tags = useInlineTags(task, setTask, taskEl);
   const updateSlash = (next: string) => {
     const caret = taskEl()?.selectionStart ?? next.length;
-    setSlash(skill ? null : slashAt(next, caret));
-    if (!skill) {
-      const t = typedSkillToken(next);
-      const hit = t ? findSkill(t.name) : null;
-      if (hit && t) {
-        setSkill(hit);
-        setTask(next.slice(0, t.start) + next.slice(t.start + t.length));
-        setSlash(null);
-      }
-    }
+    setSlash(tags.atPicked(next, caret) ? null : slashAt(next, caret));
   };
   const pickSkill = (name: string) => {
-    const hit = findSkill(name);
-    if (!hit) return;
-    // From the `/` menu the typed token goes; from the Skills button the text is left alone.
-    const stripped = slash ? stripSlashToken(task, slash.start) : { value: task, caret: task.length };
-    setSkill(hit);
-    setTask(stripped.value);
+    if (slash) {
+      const ws = task.slice(slash.start).search(/\s/);
+      tags.insert(`/${name}`, slash.start, ws === -1 ? task.length : slash.start + ws);
+    } else tags.toggleSkill(name);
     setSlash(null);
-    requestAnimationFrame(() => {
-      const t = taskEl();
-      if (!t) return;
-      t.focus();
-      t.setSelectionRange(stripped.caret, stripped.caret);
-    });
   };
   const provModels = React.useMemo<ModelChoice[]>(
     () => (providers?.providers ?? []).flatMap((p) => (p.models ?? []).map((id) => ({ id, label: id, tier: "other" as const, group: p.label, provider: p.id }))),
@@ -469,10 +451,10 @@ export function Hub({
 
   const submit = async () => {
     const typed = task.trim();
-    if ((!typed && !images.length && !skill) || busy) return;
-    // The skill rides as the leading /token, the same as a thread follow-up (SendBar) — the agent is
-    // instructed to invoke it for the message, and the skill is synced into every sandbox.
-    const t = skill ? `/${skill.name}${typed ? ` ${typed}` : ""}` : typed;
+    if ((!typed && !images.length) || busy) return;
+    // Skills ride in the task as written (`/name`), the same as a thread follow-up (SendBar): the
+    // agent is told to invoke each one, and every skill is synced into every sandbox.
+    const t = typed;
     if (readsPending > 0) {
       // An image is still being read; submitting now would silently drop it. The read resolves in
       // milliseconds — ask for one more Enter rather than auto-firing with state that may have moved.
@@ -507,7 +489,7 @@ export function Hub({
         finishHowto();
         setTask("");
         setImages([]);
-        setSkill(null);
+        tags.reset();
         clearVerify();
         setAttempts(1);
         // Repos inferred from the task ride along to render INLINE in the booting pane/thread —
@@ -719,9 +701,11 @@ export function Hub({
             )}
             <PromptInputTextarea
               id="new-task"
-              placeholder={skill ? `Add details for /${skill.name} — or just start…` : "Describe a task. A fresh sandbox picks it up…  ( / skills )"}
+              placeholder="Describe a task. A fresh sandbox picks it up…  ( / skills )"
               className="min-h-[4.5rem] px-2.5 pt-2 text-lead"
+              tokens={tags.tokens}
               onKeyDown={(e) => {
+                if (tags.onKeyDown(e)) return setSlash(null);
                 if (!["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) return;
                 if (slash && slashMatches > 0) {
                   e.preventDefault();
@@ -735,9 +719,8 @@ export function Hub({
 
             {/* Context chips, inside the box above the toolbar: repositories with their branch, the
                 skill, and every run option that is off its default. Nothing here when nothing is set. */}
-            {(picked.length > 0 || skill || chipsSet) && (
+            {(picked.length > 0 || chipsSet) && (
               <div className="enter mt-1 flex flex-wrap gap-1.5 px-1.5" onClick={(e) => e.stopPropagation()}>
-                {skill && <SkillChip skill={skill} onRemove={() => setSkill(null)} />}
                 <AnimatePresence initial={false}>
                 {picked.map((p) => (
                   <motion.span
@@ -788,7 +771,7 @@ export function Hub({
                           { key: "image", icon: <ImagePlus />, label: "Add an image", hint: "Or paste / drop one into the box", run: () => fileInput.current?.click() },
                         ]}
                       />
-                      <SkillsMenu {...menus.props("skills")} side="bottom" current={skill?.name ?? null} onPick={pickSkill} />
+                      <SkillsMenu {...menus.props("skills")} side="bottom" selected={tags.skillNames} onPick={pickSkill} />
                       <HarnessMenu {...menus.props("harness")} side="bottom" harness={runOptions.harness} />
                       <WorkflowMenu {...menus.props("workflow")} side="bottom" list={workflows} value={workflow} onChange={setWorkflow} />
                       <ModelMenu {...menus.props("model")} side="bottom" model={runOptions.model} />
@@ -801,7 +784,7 @@ export function Hub({
                       <Button
                         size="icon"
                         onClick={submit}
-                        disabled={busy || (!task.trim() && !images.length && !skill) || !!(getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired)}
+                        disabled={busy || (!task.trim() && !images.length) || !!(getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired)}
                         aria-label="Start a machine with this task"
                         className="shrink-0 rounded-full"
                       >

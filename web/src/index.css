@@ -1353,6 +1353,20 @@
   box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.06), var(--shadow-e1);
 }
 
+/* A tag in the message box (`/skill`, `@file`): a tinted pill drawn behind the text where it sits.
+   It must not change how the line wraps, so it has no padding; the shadow is its breathing room. */
+.tag-pill {
+  --tag: color-mix(in oklch, var(--foreground) 9%, transparent);
+  background: var(--tag);
+  box-shadow: 0 0 0 2.5px var(--tag);
+  border-radius: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.tag-pill-skill {
+  --tag: color-mix(in oklch, var(--live) 16%, transparent);
+}
+
 /* Composer depth: hairline plus soft elevation, and a top highlight that reads as a lit edge. */
 .composer-depth {
   box-shadow:

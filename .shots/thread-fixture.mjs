@@ -195,6 +195,9 @@ function log(kind) {
   // A follow-up from the operator, answered, then the final turn.
   L.push(at(1, 0), "⟦you⟧", "Looks good so far. Fail open when Redis is down, and add a Retry-After header.", "⟦/you⟧");
   L.push(at(1, 4), "● session started (model ak-claude-opus-4.8)");
+  if (process.argv.includes("--produced")) {
+    for (const [i, f] of ["site/index.html", "site/styles.css", "site/app.js", "site/hero.png"].entries()) L.push(at(1, 5), `→ Write: /workspace/${f} ⟦#p${i}⟧`, at(1, 5), `  ⟦#p${i}⟧ File created: /workspace/${f}`);
+  }
   L.push(at(1, 6), "→ Edit: src/middleware/rateLimit.ts ⟦#e2⟧", at(1, 7), "  ⟦#e2⟧ The file src/middleware/rateLimit.ts has been updated.",
     "⟦diff⟧",
     "-    if (total > limit) return res.status(429).end();",
@@ -400,7 +403,7 @@ if (interact === "send" || interact === "send-probe" || interact === "send-rich"
 /* ───────────────────────────── browser ───────────────────────────── */
 const helperHeaders = () => { try { return { "x-asb-browser": fsx.readFileSync(pathx.join(osx.homedir(), ".asb", "browser.token"), "utf8").trim() }; } catch { return {}; } };
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: W, height: H }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: 1, hasTouch: W < 500, isMobile: W < 500 });
+const ctx = await browser.newContext({ viewport: { width: W, height: H }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: Number(flag("dsf", "1")), hasTouch: W < 500, isMobile: W < 500 });
 await ctx.addInitScript(
   ([t, d]) => {
     localStorage.setItem("asb-token", t);
@@ -478,6 +481,8 @@ await page.route("**/*", async (route) => {
       if (process.argv.includes("--slow-files")) await new Promise((r) => setTimeout(r, 4000));
       if (ap.endsWith(".png")) return route.fulfill({ status: 200, contentType: "image/png", body: PNG });
       if (ap.endsWith(".md")) return route.fulfill({ status: 200, contentType: "text/plain", body: README });
+      if (ap.endsWith(".html")) return route.fulfill({ status: 200, contentType: "text/plain", body: '<!doctype html>\n<html lang="en">\n  <head>\n    <meta charset="utf-8" />\n    <title>Orders</title>\n    <link rel="stylesheet" href="styles.css" />\n  </head>\n  <body>\n    <main class="shell">\n      <h1>Orders</h1>\n      <button id="refresh" type="button">Refresh</button>\n    </main>\n    <script src="app.js"></script>\n  </body>\n</html>\n' });
+      if (ap.endsWith(".css")) return route.fulfill({ status: 200, contentType: "text/plain", body: ':root {\n  --ink: #14171f;\n  --accent: oklch(62% 0.19 255);\n}\n\n.shell {\n  max-width: 48rem;\n  margin: 0 auto;\n  padding: 2rem 1.25rem;\n  color: var(--ink);\n}\n\n#refresh:hover {\n  background: var(--accent);\n}\n' });
       return route.fulfill({
         status: 200,
         contentType: "text/plain",
@@ -593,6 +598,17 @@ if (stream) {
     await shot(`-p${i + 1}`);
     if (top >= total) break;
   }
+} else if (interact === "produced") {
+  const box = page.locator("span.label", { hasText: /Produced files?/ }).locator("xpath=..");
+  const cards = box.locator("button[aria-expanded]", { hasText: /index\.html|styles\.css|hero\.png/ });
+  const n = await cards.count();
+  for (let i = 0; i < n; i++) { await cards.nth(i).click(); await page.waitForTimeout(500); }
+  await page.waitForTimeout(1200);
+  await cards.first().scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+  await box.screenshot({ path: `${outPrefix}-produced-crop.png` });
+  await shot("-produced");
+  console.log("produced cards:", n, "coloured tokens:", await page.evaluate(() => [...document.querySelectorAll("pre")].slice(-3).map((p) => new Set([...p.querySelectorAll("span[style]")].map((s) => s.getAttribute("style"))).size).join(",")));
 } else if (interact === "expand") {
   // Everything open, from the top: the reasoning trails' contents.
   await page.getByRole("button", { name: "Expand all" }).click().catch((e) => errors.push("expand: " + e.message));
@@ -612,6 +628,43 @@ if (stream) {
   await input().type("/rev");
   await page.waitForTimeout(500);
   await shot("-slash");
+} else if (interact === "tags") {
+  // Tags in the line: two skills and a file, each where it was typed; Backspace takes a whole tag.
+  await input().click();
+  await input().type("Check out /rev");
+  await page.waitForTimeout(400);
+  await input().press("Enter");
+  await page.waitForTimeout(250);
+  await input().type("then use it on @rate");
+  await page.waitForTimeout(700);
+  await input().press("Enter");
+  await page.waitForTimeout(250);
+  await input().type("and finish with /wri");
+  await page.waitForTimeout(400);
+  await input().press("Enter");
+  await page.waitForTimeout(250);
+  await input().type("for the admin routes too, the same way as we did for the public ones last week.");
+  await page.waitForTimeout(300);
+  console.log("value:", JSON.stringify(await input().inputValue()));
+  await shot("-tags");
+  await page.getByRole("button", { name: /skills/i }).last().click();
+  await page.waitForTimeout(400);
+  await shot("-tags-menu");
+  await page.keyboard.press("Escape");
+  await input().click();
+  await input().press("Control+End");
+  await input().type(" /release-notes");
+  await page.waitForTimeout(300);
+  await input().press("Enter");
+  await page.waitForTimeout(250);
+  console.log("picked:", JSON.stringify(await input().inputValue()));
+  await input().press("Backspace");
+  await input().press("Backspace");
+  await page.waitForTimeout(250);
+  console.log("after 2 backspaces:", JSON.stringify(await input().inputValue()));
+  await input().press("Enter");
+  await page.waitForTimeout(2600);
+  await shot("-tags-sent");
 } else if (interact === "mention") {
   await input().click();
   await input().type("Please look at @rate");

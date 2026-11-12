@@ -1,5 +1,6 @@
 import * as React from "react";
-import { ArrowLeft, ArrowRight, Camera, Globe, Loader2, Maximize2, Minimize2, Monitor, RotateCw, Smartphone, SquareDashedMousePointer, TriangleAlert, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, Globe, Loader2, Maximize2, Minimize2, Monitor, RotateCw, Smartphone, SquareDashedMousePointer, StretchHorizontal, TriangleAlert, X } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type BrowserPage } from "@/lib/api";
@@ -15,6 +16,10 @@ import { areaNote, elementNote, errorsNote, hitTest, sandboxAddress, type Mapped
 const EASE = [0.22, 1, 0.36, 1] as const;
 const STORE_W = "asb-browser-w";
 const PHONE = { w: 390, h: 844 };
+const STORE_DEVICE = "asb-browser-device";
+/** The width a page is laid out at in the desktop view, however narrow the pane is. */
+const DESKTOP_W = 1024;
+type Device = "desktop" | "fit" | "phone";
 /** Keys that go to the page as key presses; everything printable goes as text. */
 const PAGE_KEYS = new Set(["Enter", "Backspace", "Tab", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Delete", "Home", "End", "PageUp", "PageDown"]);
 
@@ -95,7 +100,14 @@ export function BrowserPane({
   const [busy, setBusy] = React.useState(false);
   const [address, setAddress] = React.useState("");
   const [editing, setEditing] = React.useState(false);
-  const [device, setDevice] = React.useState<"fit" | "phone">("fit");
+  const [device, setDeviceState] = React.useState<Device>(() => {
+    const v = localStorage.getItem(STORE_DEVICE);
+    return v === "fit" || v === "phone" ? v : "desktop";
+  });
+  const setDevice = (d: Device) => {
+    localStorage.setItem(STORE_DEVICE, d);
+    setDeviceState(d);
+  };
   const [select, setSelect] = React.useState(false);
   const [map, setMap] = React.useState<MappedElement[]>([]);
   const [hover, setHover] = React.useState(-1);
@@ -115,11 +127,22 @@ export function BrowserPane({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const view = React.useMemo(
-    () => (device === "phone" && stage.w > PHONE.w + 32 ? { w: PHONE.w, h: Math.max(240, Math.min(PHONE.h, stage.h - 32)) } : { w: Math.max(320, stage.w), h: Math.max(240, stage.h) }),
-    [device, stage.w, stage.h]
-  );
   const framed = device === "phone" && stage.w > PHONE.w + 32;
+  // Desktop: the page is laid out 1024 wide, as on a small laptop, and shown smaller to fit the pane. A
+  // pane is about half a window; laid out at that width most sites fall back to their tablet or
+  // phone layout, which reads as "zoomed in". `zoom` is how much smaller the page is shown.
+  const zoom = device === "desktop" && !phone && stage.w > 0 && stage.w < DESKTOP_W ? stage.w / DESKTOP_W : 1;
+  const view = React.useMemo(
+    () =>
+      framed
+        ? { w: PHONE.w, h: Math.max(240, Math.min(PHONE.h, stage.h - 32)) }
+        : zoom < 1
+          ? { w: DESKTOP_W, h: Math.min(2400, Math.max(240, Math.round(stage.h / zoom))) }
+          : { w: Math.max(320, stage.w), h: Math.max(240, stage.h) },
+    [framed, zoom, stage.w, stage.h]
+  );
+  const zoomRef = React.useRef(zoom);
+  zoomRef.current = zoom;
 
   // Refs the action queue reads at run time, so a queued action sees the latest values.
   const viewRef = React.useRef(view);
@@ -139,7 +162,11 @@ export function BrowserPane({
   const wheelSeq = React.useRef(0);
   const scrollQueued = React.useRef(false);
   const navSeq = React.useRef(0);
-  const dpr = typeof window !== "undefined" && window.devicePixelRatio >= 1.5 ? 2 : 1;
+  // Ask for exactly the device pixels the picture will cover. A display scaled to 125% used to get
+  // a 100% picture that the browser then stretched, which is what made text soft.
+  const dpr = Math.round(Math.min(3, Math.max(0.4, (typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1) * zoom)) * 100) / 100;
+  const dprRef = React.useRef(dpr);
+  dprRef.current = dpr;
 
   type Act = { op: "open" | "goto" | "reload" | "back" | "forward" | "click" | "scroll" | "type" | "key" | "shot"; url?: string; x?: number; y?: number; dy?: number; text?: string; key?: string; have?: string; /** Which wheel movement a scroll answers (never sent). */ seq?: number };
   const frameNow = React.useRef<Frame | null>(null);
@@ -156,7 +183,7 @@ export function BrowserPane({
         if (!opts.quiet) setBusy(true);
         try {
           const { seq: sentSeq, ...act } = a;
-          const body = { ...act, w: viewRef.current.w, h: viewRef.current.h, dpr, map: selectRef.current, have: frameNow.current ? hashRef.current : undefined };
+          const body = { ...act, w: viewRef.current.w, h: viewRef.current.h, dpr: dprRef.current, map: selectRef.current, have: frameNow.current ? hashRef.current : undefined };
           let r = await api.browser(session, body);
           if (!r.ok && r.code === "not-installed") {
             setPhase("installing");
@@ -209,7 +236,7 @@ export function BrowserPane({
       chain.current = chain.current.then(job, job);
       return chain.current;
     },
-    [session, dpr, still]
+    [session, still]
   );
 
   // Open: whatever page this sandbox's browser was last on (it outlives the pane), or a blank one.
@@ -224,7 +251,7 @@ export function BrowserPane({
   // The stage changed size (pane dragged, device switched): lay the page out again, once it settles.
   const sized = React.useRef("");
   React.useEffect(() => {
-    const key = `${view.w}x${view.h}`;
+    const key = `${view.w}x${view.h}@${dpr}`;
     if (!opened.current || phase !== "ready") {
       sized.current = key;
       return;
@@ -235,7 +262,7 @@ export function BrowserPane({
       void run(() => ({ op: "shot" }), { quiet: true });
     }, 220);
     return () => window.clearTimeout(t);
-  }, [view.w, view.h, phase, run]);
+  }, [view.w, view.h, dpr, phase, run]);
 
   // While the agent works, the page it is building changes under you: look again every few seconds.
   React.useEffect(() => {
@@ -252,13 +279,15 @@ export function BrowserPane({
     return () => window.clearInterval(t);
   }, [live, phase, page?.blank, editing, run]);
 
-  // A click or a key can set off work that lands after the first picture: one late second look.
-  const lateLook = React.useRef(0);
+  // A click, a key or a new page can set off work that lands after the first picture: look again.
+  // Most late work lands within half a second, a fetch-then-render within a few. A look that finds
+  // the same picture is answered without one, so these are cheap.
+  const lateLook = React.useRef<number[]>([]);
   const lookAgain = React.useCallback(() => {
-    window.clearTimeout(lateLook.current);
-    lateLook.current = window.setTimeout(() => void run(() => ({ op: "shot", have: hashRef.current }), { quiet: true }), 1100);
+    lateLook.current.forEach((t) => window.clearTimeout(t));
+    lateLook.current = [450, 1600, 4000].map((ms) => window.setTimeout(() => void run(() => ({ op: "shot" }), { quiet: true }), ms));
   }, [run]);
-  React.useEffect(() => () => window.clearTimeout(lateLook.current), []);
+  React.useEffect(() => () => lateLook.current.forEach((t) => window.clearTimeout(t)), []);
 
   const shown = page?.netError && page.tried ? page.tried : page?.blank ? "" : (page?.url ?? "");
   React.useEffect(() => {
@@ -270,7 +299,7 @@ export function BrowserPane({
     if (!u) return;
     setPins([]);
     target.current = 0;
-    void run(() => ({ op: "goto", url: u }), { nav: true });
+    void run(() => ({ op: "goto", url: u }), { nav: true }).then(lookAgain);
     stageRef.current?.focus({ preventScroll: true });
   };
 
@@ -318,7 +347,8 @@ export function BrowserPane({
 
   const local = (e: { clientX: number; clientY: number }) => {
     const b = imgBox.current?.getBoundingClientRect();
-    return b ? { x: Math.round(e.clientX - b.left), y: Math.round(e.clientY - b.top) } : { x: 0, y: 0 };
+    const z = zoomRef.current;
+    return b ? { x: Math.round((e.clientX - b.left) / z), y: Math.round((e.clientY - b.top) / z) } : { x: 0, y: 0 };
   };
   const imgBox = React.useRef<HTMLDivElement>(null);
 
@@ -402,7 +432,7 @@ export function BrowserPane({
       if (!pageRef.current || pageRef.current.blank) return;
       e.preventDefault();
       const unit = e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? viewRef.current.h : 1;
-      scrollBy(e.deltaY * unit, local(e));
+      scrollBy((e.deltaY * unit) / zoomRef.current, local(e));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -427,7 +457,7 @@ export function BrowserPane({
       if (d.moved || Math.abs(dy) > 8) {
         d.moved = true;
         d.y = e.clientY;
-        scrollBy(dy, local(e));
+        scrollBy(dy / zoomRef.current, local(e));
       }
       return;
     }
@@ -592,14 +622,41 @@ export function BrowserPane({
           </TooltipTrigger>
           <TooltipContent side="bottom">Add this view to your message</TooltipContent>
         </Tooltip>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button type="button" className={cn(iconBtn, "max-md:hidden", device === "phone" && "text-foreground bg-muted")} aria-pressed={device === "phone"} aria-label="Phone width" onClick={() => setDevice((d) => (d === "phone" ? "fit" : "phone"))}>
-              {device === "phone" ? <Smartphone className="size-4" /> : <Monitor className="size-4" />}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{device === "phone" ? "Phone width, 390 wide. Click for the full pane" : "Full pane. Click for phone width"}</TooltipContent>
-        </Tooltip>
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className={cn(iconBtn, "max-md:hidden")} aria-label={`Page size: ${DEVICE_LABEL[device]}`}>
+                  {device === "phone" ? <Smartphone className="size-4" /> : device === "fit" ? <StretchHorizontal className="size-4" /> : <Monitor className="size-4" />}
+                </button>
+              </DropdownMenuTrigger>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Page size: {DEVICE_LABEL[device]}</TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="end" className="w-64">
+            <DropdownMenuLabel>Show the page as</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={device} onValueChange={(v) => setDevice(v as Device)}>
+              <DropdownMenuRadioItem value="desktop">
+                <span className="flex flex-col">
+                  <span>Desktop</span>
+                  <span className="text-muted-foreground text-micro">A laptop-width layout, scaled to fit the pane</span>
+                </span>
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="fit">
+                <span className="flex flex-col">
+                  <span>Pane width</span>
+                  <span className="text-muted-foreground text-micro">Laid out as wide as the pane, at full size</span>
+                </span>
+              </DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="phone">
+                <span className="flex flex-col">
+                  <span>Phone</span>
+                  <span className="text-muted-foreground text-micro">390 wide</span>
+                </span>
+              </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <span className="bg-border mx-1 h-4 w-px max-md:hidden" aria-hidden />
         {onToggleFull && (
           <Tooltip>
@@ -632,7 +689,7 @@ export function BrowserPane({
         {busy && <div className="browser-progress" aria-hidden />}
 
         {frame && page && !page.blank && (
-          <div ref={imgBox} className={cn("relative overflow-hidden bg-white", framed && "rounded-xl shadow-e2")} style={{ width: view.w, height: view.h }}>
+          <div ref={imgBox} className={cn("relative origin-top-left overflow-hidden bg-white", framed && "rounded-xl shadow-e2")} style={{ width: view.w, height: view.h, transform: zoom < 1 ? `scale(${zoom})` : undefined }}>
             {under && <img src={under.src} alt="" draggable={false} className="absolute left-0 max-w-none" style={{ top: -under.top, width: view.w, height: view.h + under.top + under.bottom }} />}
             <img
               key={frame.nav}
@@ -646,14 +703,16 @@ export function BrowserPane({
             {offset === 0 &&
               pagePins.map((p) => (
                 <div key={p.n} className="border-live pointer-events-none absolute rounded-[3px] border-[1.5px]" style={{ left: p.x - page.sx, top: p.y - page.sy, width: p.w, height: p.h }}>
-                  <span className="bg-live absolute -top-2.5 -left-2.5 grid size-5 place-items-center rounded-full text-micro font-semibold text-white tabular-nums shadow-e1">{p.n}</span>
+                  <span className="bg-live absolute -top-2.5 -left-2.5 grid size-5 place-items-center rounded-full text-micro font-semibold text-white tabular-nums shadow-e1" style={zoom < 1 ? { transform: `scale(${1 / zoom})` } : undefined}>{p.n}</span>
                 </div>
               ))}
             {select && area && <div className="border-live bg-live/10 pointer-events-none absolute rounded-[3px] border-[1.5px] border-dashed" style={{ left: area[0], top: area[1], width: area[2], height: area[3] }} />}
             {select && !area && hovered && offset === 0 && (
               <div className="border-live bg-live/10 pointer-events-none absolute rounded-[3px] border-[1.5px]" style={{ left: hovered[0], top: hovered[1], width: hovered[2], height: hovered[3] }}>
                 <span
-                  className={cn("bg-live absolute left-[-1.5px] max-w-[18rem] truncate rounded-[4px] px-1.5 py-0.5 font-mono text-micro leading-4 whitespace-nowrap text-white", hovered[1] > 26 ? "bottom-full mb-1" : "top-full mt-1")}
+                  className={cn("bg-live absolute left-[-1.5px] max-w-[18rem] truncate rounded-[4px] px-1.5 py-0.5 font-mono text-micro leading-4 whitespace-nowrap text-white", hovered[1] > 26 / zoom ? "bottom-full mb-1" : "top-full mt-1")}
+                  // The page is drawn smaller than life in the desktop view; its labels are not.
+                  style={zoom < 1 ? { transform: `scale(${1 / zoom})`, transformOrigin: hovered[1] > 26 / zoom ? "bottom left" : "top left" } : undefined}
                 >
                   {hovered[5]} <span className="opacity-70">{hovered[2]} × {hovered[3]}</span>
                 </span>
@@ -725,6 +784,8 @@ export function BrowserPane({
     </motion.aside>
   );
 }
+
+const DEVICE_LABEL: Record<Device, string> = { desktop: "Desktop", fit: "Pane width", phone: "Phone" };
 
 /** Nothing open yet: say where this browser is, and offer what is listening there. */
 function Blank({ ports, onGo }: { ports: number[]; onGo: (url: string) => void }) {

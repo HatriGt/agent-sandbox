@@ -25,7 +25,7 @@ test("normalizeUrl refuses everything that is not a web page", () => {
 test("parseBrowserAction clamps the viewport and keeps only the fields its action uses", () => {
   const p = parseBrowserAction({ op: "click", x: 99999, y: -5, w: 10, h: 99999, dpr: 3, url: "file:///etc/passwd", text: "x", session: "box-1", evil: "$(rm -rf /)" });
   assert.ok(p.ok);
-  assert.deepEqual(p.action, { op: "click", w: 320, h: 1600, dpr: 2, x: 1920, y: 0 });
+  assert.deepEqual(p.action, { op: "click", w: 320, h: 2400, dpr: 3, x: 1920, y: 0 });
   const g = parseBrowserAction({ op: "goto", url: "localhost:5173", map: true });
   assert.ok(g.ok);
   assert.deepEqual(g.action, { op: "goto", w: 1024, h: 720, dpr: 1, url: "http://localhost:5173/", map: true });

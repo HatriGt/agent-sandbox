@@ -418,7 +418,11 @@ async function act(a) {
   await ensure();
   const agent = a.agent === true;
   if (agent && a.op === "size") agentVp = { w: clamp(a.w, 320, 1920, 1280), h: clamp(a.h, 240, 1600, 800) };
-  const w = agent ? agentVp.w : clamp(a.w, 320, 1920, 1024), h = agent ? agentVp.h : clamp(a.h, 240, 1600, 720), dpr = agent ? 1 : +a.dpr >= 1.5 ? 2 : 1;
+  const w = agent ? agentVp.w : clamp(a.w, 320, 1920, 1024), h = agent ? agentVp.h : clamp(a.h, 240, 2400, 720);
+  // The pane asks for exactly the device pixels it will show (1.25 on a scaled display, under 1
+  // when a desktop-width page is shown smaller): a picture drawn at another size is resampled by
+  // the person's browser, which is what made text soft.
+  const dpr = agent ? 1 : Math.round(Math.min(3, Math.max(0.4, +a.dpr || 1)) * 100) / 100;
   const key = w + "x" + h + "@" + dpr;
   if (key !== vp) {
     vpSpec = { w: w, h: h, dpr: dpr };
@@ -549,10 +553,11 @@ async function act(a) {
     return out;
   }
   const hs = await history();
-  const band = Math.min(480, Math.round(st.vh * 0.6));
-  const top = Math.max(0, Math.min(st.sy, band)), bottom = Math.max(0, Math.min(st.dh - st.vh - st.sy, band));
-  // At two device pixels per CSS pixel a lower quality reads the same and is a quarter fewer bytes.
-  const q = dpr === 2 ? 62 : 74;
+  // Extra page above and below what is shown, so a scroll moves at once and the next picture
+  // catches up. More below than above: that is the way people read.
+  const top = Math.max(0, Math.min(st.sy, Math.min(500, Math.round(st.vh * 0.5)))), bottom = Math.max(0, Math.min(st.dh - st.vh - st.sy, Math.min(1100, st.vh)));
+  // Text needs a high quality to keep clean edges; at two device pixels per CSS pixel a lower one reads the same.
+  const q = dpr >= 1.75 ? 74 : 86;
   let shot = await send("Page.captureScreenshot", { format: "jpeg", quality: q, clip: { x: st.sx, y: st.sy - top, width: st.vw, height: st.vh + top + bottom, scale: 1 } });
   let over = [top, bottom];
   if (shot.error) { shot = await send("Page.captureScreenshot", { format: "jpeg", quality: q }); over = [0, 0]; }

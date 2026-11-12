@@ -183,8 +183,6 @@ export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc,
             <div className="h-full overflow-auto">
               <DiffView diff={diff} path={tab.path} review={review} />
             </div>
-            {/* Long lines scroll; a soft edge says so instead of a hard clip (as viz/DataTable). */}
-            <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[color-mix(in_oklab,var(--foreground)_7%,transparent)] to-transparent opacity-0 transition-opacity duration-150 in-data-scrolled-end:opacity-100" />
           </div>
         ) : mode === "edit" && content !== null ? (
           deleted ? (

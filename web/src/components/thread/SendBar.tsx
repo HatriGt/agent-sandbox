@@ -6,7 +6,6 @@ import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { ATTACHMENTS_DIR } from "@/lib/session-context";
 import { Lightbox } from "@/components/ui/lightbox";
-import { FileMark } from "@/lib/fileIcon";
 import { toast } from "sonner";
 import { api, type RunState } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -15,10 +14,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { MentionMenu, expandMentions, mentionAt, type MentionState } from "./MentionMenu";
 import { useModelChoice } from "./ModelPicker";
 import { ComposerToolbar, ModelMenu, PlusMenu, SkillsMenu, ToolButton, useComposerMenus } from "@/components/composer/Toolbar";
-import { SkillChip, SkillMenu } from "./SkillMenu";
-import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
-import { useCached } from "@/lib/cache";
-import type { SkillView } from "@/lib/api";
+import { SkillMenu } from "./SkillMenu";
+import { slashAt, type SlashState } from "@/lib/slash";
+import { useInlineTags } from "@/hooks/useInlineTags";
 import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
 import { VoiceButton, VoicePill } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
@@ -32,8 +30,9 @@ import { cn } from "@/lib/utils";
  * the question card, so the composer never has to explain "this releases the run". Questions ABOUT
  * the run go to the side chat, its own surface with its own input; the toolbar only opens it.
  *
- * `@` opens the workspace file picker (Cursor-style); mentions are expanded into explicit paths so
- * the agent reads the right files.
+ * `@` opens the workspace file picker and `/` the skills; what is picked is written into the message
+ * where the caret is and drawn as a pill in the line, so one message can name several skills and
+ * files, each in the sentence about it. Mentions are also spelled out as full paths for the agent.
  */
 export function SendBar({
   boxName,
@@ -67,7 +66,7 @@ export function SendBar({
   onReplyFailed?: (text: string) => void;
   /** Text to drop into the composer (e.g. a starter prompt); `n` changes to re-apply the same text.
    *  `append` adds it after a non-empty draft instead of replacing it (a quoted selection). */
-  seed?: { text: string; n: number; append?: boolean; /** A picture that arrives with the text (a browser element, a screenshot). */ image?: { name: string; dataUrl: string; label?: string; note?: string } } | null;
+  seed?: { text: string; n: number; append?: boolean; /** Joins the current line (a tag) instead of starting a paragraph. */ inline?: boolean; /** A picture that arrives with the text (a browser element, a screenshot). */ image?: { name: string; dataUrl: string; label?: string; note?: string } } | null;
 }) {
   const busy = runState === "running" && !sleeping;
   const [value, setValue] = React.useState(() => readDraft(boxName));
@@ -93,11 +92,6 @@ export function SendBar({
   // `/skill` menu: open while the message starts with `/` and something matches an enabled skill.
   const [slash, setSlash] = React.useState<SlashState | null>(null);
   const [slashMatches, setSlashMatches] = React.useState(0);
-  // The chosen skill rides as a chip above the text (like file mentions), not as raw `/name` prose.
-  const skillsCache = useCached("skills", (signal) => api.skills(signal));
-  const [skill, setSkill] = React.useState<SkillView | null>(null);
-  React.useEffect(() => setSkill(null), [boxName]);
-  const findSkill = (name: string) => (skillsCache.data?.skills ?? []).find((s) => s.enabled && s.name === name) ?? null;
   // Images pasted, dropped or picked: kept as data URLs for the preview, uploaded into the sandbox on
   // send (/workspace/.attachments) and referenced in the message so the agent opens them with Read.
   // `label` is what the chip is called; `note` is what the agent is told about the picture (a browser
@@ -136,12 +130,9 @@ export function SendBar({
       addImages(files);
     }
   };
-  // Files the message refers to — shown as removable chips above the text (Cursor's context pills),
-  // not as `@path` tokens buried in prose. They travel with the message as explicit references.
-  const [files, setFiles] = React.useState<string[]>([]);
-  React.useEffect(() => setFiles([]), [boxName]);
-
   const textarea = () => document.getElementById("send-input") as HTMLTextAreaElement | null;
+  // Skills and files are tags in the text itself, drawn as pills where they sit in the line.
+  const tags = useInlineTags(value, setValue, textarea);
 
   // Dictation: finalized phrases land at the caret through the same setValue path typing uses,
   // so drafts, @-mentions and /-skills keep working. Nothing auto-sends.
@@ -168,7 +159,7 @@ export function SendBar({
   React.useEffect(() => {
     if (!seed) return;
     // A seed that is only a picture (a browser element) leaves the words being written alone.
-    if (seed.text || !seed.image) setValue((prev) => (seed.append && prev.trim() ? `${prev.trimEnd()}\n\n${seed.text}` : seed.text));
+    if (seed.text || !seed.image) setValue((prev) => (seed.inline ? `${prev && !/\s$/.test(prev) ? `${prev} ` : prev}${seed.text} ` : seed.append && prev.trim() ? `${prev.trimEnd()}\n\n${seed.text}` : seed.text));
     const image = seed.image;
     if (image) setImages((prev) => [...prev, { id: `${seed.n}-${prev.length}`, name: image.name, dataUrl: image.dataUrl, size: Math.round(image.dataUrl.length * 0.75), label: image.label, note: image.note }]);
     requestAnimationFrame(() => {
@@ -206,67 +197,42 @@ export function SendBar({
   const updateMention = (next: string) => {
     const el = textarea();
     const caret = el?.selectionStart ?? next.length;
+    // The caret resting against a tag a menu just wrote is not a request to pick again.
+    if (tags.atPicked(next, caret)) {
+      setMention(null);
+      setSlash(null);
+      return;
+    }
     const m = mentionAt(next, caret);
     if (!m || m.start !== dismissed.current.mention) dismissed.current.mention = undefined;
     setMention(m && m.start === dismissed.current.mention ? null : m);
-    const s = skill ? null : slashAt(next, caret);
+    const s = slashAt(next, caret);
     if (!s || s.start !== dismissed.current.slash) dismissed.current.slash = undefined;
     setSlash(s && s.start === dismissed.current.slash ? null : s);
-    // Typing a full `/name ` by hand — at the start or mid-message — converts to the chip the
-    // moment the space lands, same as picking from the menu.
-    if (!skill) {
-      const t = typedSkillToken(next);
-      const hit = t ? findSkill(t.name) : null;
-      if (hit && t) {
-        setSkill(hit);
-        setValue(next.slice(0, t.start) + next.slice(t.start + t.length));
-        setSlash(null);
-      }
-    }
+  };
+
+  /** The end of the `/query` or `@query` being typed: up to the next space, wherever the caret is. */
+  const tokenEnd = (start: number) => {
+    const ws = value.slice(start).search(/\s/);
+    return ws === -1 ? value.length : start + ws;
   };
 
   const pickSkill = (name: string) => {
-    // The `/query` token — wherever it sits — becomes a chip; the rest stays as the message.
-    const hit = findSkill(name);
-    const at = slash?.start ?? 0;
-    const stripped = stripSlashToken(value, at);
-    if (hit) {
-      setSkill(hit);
-      setValue(stripped.value);
-    } else {
-      setValue(value.slice(0, at) + `/${name} ` + stripped.value.slice(stripped.caret));
-    }
+    // The `/query` being typed becomes the full tag, in place; the rest of the message is untouched.
+    if (slash) tags.insert(`/${name}`, slash.start, tokenEnd(slash.start));
+    else tags.insert(`/${name}`);
     setSlash(null);
-    requestAnimationFrame(() => {
-      const t = textarea();
-      if (!t) return;
-      t.focus();
-      t.setSelectionRange(stripped.caret, stripped.caret);
-    });
   };
 
   const pickFile = (path: string) => {
     if (!mention) return;
-    const el = textarea();
-    const caret = el?.selectionStart ?? value.length;
-    // Remove the `@query` token the user typed; the file becomes a chip.
-    const before = value.slice(0, mention.start);
-    const after = value.slice(caret).replace(/^\s/, "");
-    const next = `${before}${after}`;
-    setValue(next);
-    setFiles((prev) => (prev.includes(path) ? prev : [...prev, path]));
+    tags.insert(`@${path}`, mention.start, tokenEnd(mention.start));
     setMention(null);
-    requestAnimationFrame(() => {
-      const t = textarea();
-      if (!t) return;
-      t.focus();
-      t.setSelectionRange(before.length, before.length);
-    });
   };
 
   const send = async () => {
     const text = value.trim();
-    if ((!text && !files.length && !images.length && !skill) || sending) return;
+    if ((!text && !images.length) || sending) return;
     if (readersInFlight.current > 0) {
       // A pasted image is still decoding; sending now would drop it. Retry (via the ref, so the
       // retry sees the state that includes the decoded image) once the reader lands.
@@ -276,12 +242,10 @@ export function SendBar({
     voice.stop();
     setSending(true);
     setError(null);
-    const attached = files;
     const attachedImages = images;
-    const chosenSkill = skill;
-    let message = expandMentions(files.length ? `${text}\n\nFiles: ${files.map((f) => `@${f}`).join(" ")}` : text).trim();
-    // The skill rides as the leading /token — the agent is instructed to invoke it for the message.
-    if (chosenSkill) message = `/${chosenSkill.name}${message ? ` ${message}` : ""}`;
+    // The tags travel as written: the controller reads every `/skill` in the message, and each
+    // `@path` is also spelled out as a full path so the agent opens the right file.
+    let message = expandMentions(text).trim();
     try {
       // Upload images first so the message can name their in-box paths.
       let imagesTail = "";
@@ -297,9 +261,8 @@ export function SendBar({
         message = `${message}${message ? "\n\n" : ""}${imagesTail}`;
       }
       setValue("");
-      setFiles([]);
       setImages([]);
-      setSkill(null);
+      tags.reset();
       recall.current = null;
       // Echo NOW. The controller wakes/kicks the run in a few seconds; a message that only appears
       // when the server answers reads as a broken chat. The echo is withdrawn if delivery fails,
@@ -331,9 +294,7 @@ export function SendBar({
       // is gone and the state update below is a no-op — the words must still be there on return.
       writeDraft(boxName, text);
       setValue(text);
-      setFiles(attached);
       setImages(attachedImages);
-      setSkill(chosenSkill);
       toast.error("Could not send", { description: msg });
       setSending(false);
       return;
@@ -437,7 +398,13 @@ export function SendBar({
           <PromptInputTextarea
             id="send-input"
             className="px-2.5 pt-2 text-body"
+            tokens={tags.tokens}
             onKeyDown={(e) => {
+              if (tags.onKeyDown(e)) {
+                setMention(null);
+                setSlash(null);
+                return;
+              }
               const nav = ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key);
               if (!nav) return;
               // An IME's own Enter/arrows (choosing a candidate) are never ours to act on.
@@ -456,50 +423,19 @@ export function SendBar({
             onKeyUp={() => updateMention(value)}
             onClick={() => updateMention(value)}
             placeholder={
-              skill
-                ? `Add details for /${skill.name} — or just send…`
-                : sleeping
-                  ? "Type ahead — sends once the sandbox is awake…"
-                  : busy
-                    ? "Say something — the agent reads it at its next step…"
-                    : phase === "fresh"
-                      ? "Describe a task for this machine…"
-                      : phase === "starting"
-                        ? "Type ahead — delivered once the agent is listening…"
-                        : phase === "asked"
-                          ? "Answer in your own words…"
-                          : "Send a follow-up…"
+              sleeping
+                ? "Type ahead — sends once the sandbox is awake…"
+                : busy
+                  ? "Say something — the agent reads it at its next step…"
+                  : phase === "fresh"
+                    ? "Describe a task for this machine…"
+                    : phase === "starting"
+                      ? "Type ahead — delivered once the agent is listening…"
+                      : phase === "asked"
+                        ? "Answer in your own words…"
+                        : "Send a follow-up…  ( / skills, @ files )"
             }
           />
-          {/* Context chips inside the box, above the toolbar: the skill, then @-mentioned files. */}
-          <AnimatePresence initial={false}>
-          {(skill || files.length > 0) && (
-            <ChipRow key="context" still={still} className="flex flex-wrap gap-1.5 px-2 pt-1.5">
-              {skill && <SkillChip skill={skill} onRemove={() => setSkill(null)} />}
-              <AnimatePresence initial={false} mode="popLayout">
-              {files.map((f) => {
-                const base = f.slice(f.lastIndexOf("/") + 1);
-                const dir = f.slice(0, Math.max(0, f.lastIndexOf("/")));
-                return (
-                  <motion.span key={f} {...chipMotion(still)} className="bg-muted text-foreground inline-flex h-7 max-w-full items-center gap-1.5 rounded-md pl-2 pr-1 text-micro" title={f}>
-                    <FileMark path={f} />
-                    <span className="font-mono font-medium">{base}</span>
-                    {dir && <span className="text-muted-foreground hidden truncate font-mono sm:inline">{dir}</span>}
-                    <button
-                      type="button"
-                      onClick={() => setFiles((prev) => prev.filter((x) => x !== f))}
-                      aria-label={`Remove ${base}`}
-                      className="text-muted-foreground hover:text-foreground grid size-5 cursor-pointer place-items-center rounded"
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </motion.span>
-                );
-              })}
-              </AnimatePresence>
-            </ChipRow>
-          )}
-          </AnimatePresence>
           {/* One row, never two: everything is nowrap and the tool cluster can shrink (min-w-0) so the
               send button always keeps its place at the right edge — on a phone as much as beside an
               open workspace pane. */}
@@ -515,11 +451,10 @@ export function SendBar({
                   />
                   <SkillsMenu
                     {...menus.props("skills")}
-                    current={skill?.name ?? null}
+                    selected={tags.skillNames}
                     onPick={(name) => {
-                      const hit = findSkill(name);
-                      if (hit) setSkill(hit);
-                      requestAnimationFrame(() => textarea()?.focus());
+                      tags.toggleSkill(name);
+                      setSlash(null);
                     }}
                   />
                   <ToolButton
@@ -579,7 +514,7 @@ export function SendBar({
               variant="primary"
               size="icon"
               onClick={send}
-              disabled={sending || (!value.trim() && !files.length && !images.length && !skill)}
+              disabled={sending || (!value.trim() && !images.length)}
               aria-label={busy ? "Queue for the agent" : "Send to the agent"}
               className="no-press shrink-0 rounded-full transition-[opacity,scale,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out-quint)] disabled:opacity-35 enabled:hover:scale-105 enabled:active:scale-90 motion-reduce:enabled:hover:scale-100 motion-reduce:enabled:active:scale-100"
             >

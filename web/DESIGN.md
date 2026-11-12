@@ -278,6 +278,17 @@ per theme) so the first paint is already the right theme.
   secondary chip is **Side question**. `@` (or the @ button) opens `MentionMenu` — the workspace file
   list from `/files.json`, narrowed as you type, ↑/↓/Enter/Tab/Esc; mentions expand to
   `/workspace/<path>` references in the message. Dashed border in side-question mode.
+  **Tags live in the sentence.** A skill (`/name`) or a file (`@path`) is plain text in the message
+  and is drawn as a tinted pill where it stands (`lib/inline-tokens.ts`, `hooks/useInlineTags.ts`,
+  `.tag-pill` in index.css): a layer under the textarea repeats the text with the same padding,
+  font and wrap, transparent, and paints only the pill backgrounds. No chip row under the input.
+  Any number of skills; the Skills menu ticks the ones already in the text. Backspace right after a
+  tag a menu inserted removes the whole tag. The sent bubble shows the same tags as chips, and a
+  file chip opens the file. The explorer's "Mention in chat" puts a file's tag into the message.
+- **Produced files (`ProducedFiles`)** — one row per file: the explorer's icon, the name, its
+  folder in mono, then Open (Files pane) and Download. The row itself toggles the preview: markdown
+  rendered, a picture as a picture, anything else highlighted in its own language. No edge fades on
+  code, tables or file views anywhere: content is cut by its container, not by a gradient.
 
 ## Output visualizers
 

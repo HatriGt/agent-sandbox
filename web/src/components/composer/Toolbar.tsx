@@ -254,15 +254,15 @@ export function SkillsEmpty({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 /** `/ Skills`: the enabled skills as a list; a pick becomes the composer's skill chip. */
-export function SkillsMenu({ current, onPick, ...shell }: Shell & { current: string | null; onPick: (name: string) => void }) {
+export function SkillsMenu({ selected, onPick, ...shell }: Shell & { /** Skills the message already tags; picking one of these takes it out. */ selected: string[]; onPick: (name: string) => void }) {
   const cached = useCached("skills", (signal) => api.skills(signal));
   const skills = React.useMemo(() => (cached.data?.skills ?? []).filter((s) => s.enabled), [cached.data]);
-  const rov = useRoving(skills.length, Math.max(0, skills.findIndex((s) => s.name === current)));
+  const rov = useRoving(skills.length, Math.max(0, skills.findIndex((s) => selected.includes(s.name))));
   return (
     <ToolMenu
       {...shell}
       title="Skills"
-      trigger={{ icon: <SquareSlash />, label: "Skills", title: "Run a skill with this message ( / )", menu: "skills", dot: !!current }}
+      trigger={{ icon: <SquareSlash />, label: "Skills", title: "Run a skill with this message ( / )", menu: "skills", dot: selected.length > 0 }}
     >
       {!cached.data && !cached.error ? (
         <p className="text-muted-foreground px-3 py-2 text-micro">Loading skills…</p>
@@ -270,7 +270,7 @@ export function SkillsMenu({ current, onPick, ...shell }: Shell & { current: str
         <SkillsEmpty onNavigate={() => shell.onOpenChange(false)} />
       ) : (
         <div role="menu" aria-label="Skills">
-          <p className="text-faint px-3 pt-1 pb-1 text-micro">Runs with the rest of your message · type / to filter</p>
+          <p className="text-faint px-3 pt-1 pb-1 text-micro">Pick as many as the message needs, or type / in the text</p>
           {skills.map((s, i) => (
             <button
               key={s.name}
@@ -278,14 +278,14 @@ export function SkillsMenu({ current, onPick, ...shell }: Shell & { current: str
                 rov.refs.current[i] = el;
               }}
               type="button"
-              role="menuitemradio"
-              aria-checked={s.name === current}
+              role="menuitemcheckbox"
+              aria-checked={selected.includes(s.name)}
               tabIndex={rov.tabIndex(i)}
               onKeyDown={rov.onKeyDown(i, (j) => (onPick(skills[j].name), shell.onOpenChange(false)))}
               onClick={() => (onPick(s.name), shell.onOpenChange(false))}
               className={cn(
                 "hover:bg-muted/60 focus-visible:bg-muted/60 flex min-h-9 w-full cursor-pointer items-center gap-2.5 px-3 py-1.5 text-left outline-none transition-colors",
-                s.name === current && "bg-muted/40"
+                selected.includes(s.name) && "bg-muted/40"
               )}
             >
               <SkillMark name={s.name} size={15} className="text-muted-foreground shrink-0" />
@@ -293,6 +293,7 @@ export function SkillsMenu({ current, onPick, ...shell }: Shell & { current: str
                 <span className="stamp text-foreground block font-medium">/{s.name}</span>
                 <span className="text-muted-foreground block truncate text-micro">{s.description}</span>
               </span>
+              {selected.includes(s.name) && <Check className="text-live size-3.5 shrink-0" strokeWidth={2.5} aria-hidden />}
             </button>
           ))}
         </div>

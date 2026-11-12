@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowDown, ArrowUp, CaseSensitive, Check, ChevronRight, Columns2, Copy, CopyPlus, FilePlus, Files, FileDiff, FoldVertical, FolderPlus, GitBranch, GitCommitHorizontal, ListFilter, Loader2, Locate, Maximize2, Minimize2, PanelRight, Pencil, RefreshCw, Regex, Search, SearchCode, Table2, Trash2, Upload, WrapText, X, Box as BoxIcon, Hash as HashIcon, Heading, Key as KeyIcon, SquareFunction, Type as TypeIcon, Variable, type LucideIcon } from "lucide-react";
+import { ArrowDown, ArrowUp, AtSign, CaseSensitive, Check, ChevronRight, Columns2, Copy, CopyPlus, FilePlus, Files, FileDiff, FoldVertical, FolderPlus, GitBranch, GitCommitHorizontal, ListFilter, Loader2, Locate, Maximize2, Minimize2, PanelRight, Pencil, RefreshCw, Regex, Search, SearchCode, Table2, Trash2, Upload, WrapText, X, Box as BoxIcon, Hash as HashIcon, Heading, Key as KeyIcon, SquareFunction, Type as TypeIcon, Variable, type LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { ContextMenu as CM } from "radix-ui";
 import { useReducedMotion } from "@/lib/motion-pref";
@@ -97,7 +97,7 @@ const removeStore = (key: string) => {
   } catch {}
 };
 
-export function WorkspacePane({ session, changes, open, review, onClose, onSaved, repos, full = false, onToggleFull }: { session: string; changes: ChangedFile[]; open: OpenRequest | null; /** Bumped to switch the pane to the Review view (the whole run's diff). */ review?: number; onClose: () => void; onSaved: () => void; repos: Repo[]; full?: boolean; onToggleFull?: () => void }) {
+export function WorkspacePane({ session, changes, open, review, onClose, onSaved, repos, full = false, onToggleFull, onMention }: { session: string; changes: ChangedFile[]; open: OpenRequest | null; /** Bumped to switch the pane to the Review view (the whole run's diff). */ review?: number; onClose: () => void; onSaved: () => void; repos: Repo[]; full?: boolean; onToggleFull?: () => void; /** Put `@path` into the message being written. */ onMention?: (path: string) => void }) {
   const [paths, setPaths] = React.useState<string[] | null>(null);
   const [treeErr, setTreeErr] = React.useState<string | null>(null);
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set(repos.map((r) => r.name)));
@@ -613,6 +613,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
                     onReveal={revealActive}
                     onOpen={openPath}
                     onFs={onFs}
+                    onMention={onMention}
                   />
                 )}
               </>
@@ -765,11 +766,11 @@ function Divider({ value, range, label, onChange, onReset, onDragging }: { value
 
 /* ───────────────────────────── Explorer ───────────────────────────── */
 
-type MenuAction = "newFile" | "newDir" | "rename" | "delete" | "duplicate" | "copyPath" | "copyRelPath" | "openSide" | "reveal";
+type MenuAction = "mention" | "newFile" | "newDir" | "rename" | "delete" | "duplicate" | "copyPath" | "copyRelPath" | "openSide" | "reveal";
 
 const MAX_ANIMATED_ROW_SHIFT = 40;
 
-function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, edit, onEdit, onFocus, onToggle, onReveal, onOpen, onFs }: { tree: Node | null; err: string | null; expanded: Set<string>; focused: string | null; active: string | null; changeByPath: Map<string, ChangedFile>; repos: Repo[]; edit: RowEdit | null; onEdit: (e: RowEdit | null) => void; onFocus: (path: string | null) => void; onToggle: (dir: string, open?: boolean) => void; onReveal: () => void; onOpen: Open; onFs: (op: FsOp) => Promise<boolean> }) {
+function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, edit, onEdit, onFocus, onToggle, onReveal, onOpen, onFs, onMention }: { tree: Node | null; err: string | null; expanded: Set<string>; focused: string | null; active: string | null; changeByPath: Map<string, ChangedFile>; repos: Repo[]; edit: RowEdit | null; onEdit: (e: RowEdit | null) => void; onFocus: (path: string | null) => void; onToggle: (dir: string, open?: boolean) => void; onReveal: () => void; onOpen: Open; onFs: (op: FsOp) => Promise<boolean>; onMention?: (path: string) => void }) {
   const rows = React.useMemo(() => (tree ? visibleRows(tree, expanded, edit) : null), [tree, expanded, edit]);
   const listRef = React.useRef<HTMLUListElement>(null);
   const [menuTarget, setMenuTarget] = React.useState<Row | null>(null);
@@ -880,6 +881,9 @@ function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, e
         await onFs({ op: "copy", path: t.path, to: `${parentOf(t.path)}/${name}` });
         return;
       }
+      case "mention":
+        if (t) onMention?.(t.path);
+        return;
       case "copyPath":
         if (t) void copyText(`/workspace/${t.path}`);
         return;
@@ -1019,7 +1023,7 @@ function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, e
           )}
         </div>
       </CM.Trigger>
-      <ExplorerMenu target={menuTarget} onAction={(a) => void act(a, menuTarget)} />
+      <ExplorerMenu target={menuTarget} canMention={!!onMention} onAction={(a) => void act(a, menuTarget)} />
     </CM.Root>
   );
 }
@@ -1041,9 +1045,10 @@ function RowView({ row, repo, change, changeCount }: { row: Row & { kind: "dir" 
       <>
         <Twistie open={row.expanded} />
         <FolderIcon open={row.expanded} root={!!repo} changed={changeCount > 0} />
-        <span className={cn("truncate", repo && "font-semibold")}>{row.name}</span>
+        {/* The name is what the row is; the branch gives way first when the panel is narrow. */}
+        <span className={cn("truncate", repo && "max-w-[70%] shrink-0 font-semibold")}>{row.name}</span>
         {repo && (
-          <span className="stamp text-muted-foreground ml-1 flex min-w-0 items-center gap-0.5">
+          <span className="stamp text-muted-foreground ml-1 flex min-w-0 flex-1 items-center gap-0.5" title={repo.branch ?? "main"}>
             <GitBranch className="size-3 shrink-0" aria-hidden />
             <span className="truncate">{repo.branch ?? "main"}</span>
           </span>
@@ -1116,7 +1121,9 @@ function EditRow({ edit, siblings, onDone }: { edit: RowEdit; siblings: Readonly
   );
 }
 
-function ExplorerMenu({ target, onAction }: { target: Row | null; onAction: (a: MenuAction) => void }) {
+const MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+
+function ExplorerMenu({ target, canMention, onAction }: { target: Row | null; canMention: boolean; onAction: (a: MenuAction) => void }) {
   const t = target && target.kind !== "edit" ? target : null;
   const isFile = t?.kind === "file";
   const mutable = !!t && t.depth > 0;
@@ -1130,18 +1137,24 @@ function ExplorerMenu({ target, onAction }: { target: Row | null; onAction: (a: 
   return (
     <CM.Portal>
       <CM.Content collisionPadding={8} className={MENU_CONTENT} aria-label={t ? `${t.name} actions` : "Explorer actions"}>
+        {canMention && (
+          <>
+            {item("mention", "Mention in chat", <AtSign />, { disabled: !t })}
+            <CM.Separator className={MENU_SEP} />
+          </>
+        )}
         {item("newFile", "New file", <FilePlus />)}
         {item("newDir", "New folder", <FolderPlus />)}
         <CM.Separator className={MENU_SEP} />
         {item("openSide", "Open to the side", <Columns2 />, { disabled: !isFile, hint: shortcutLabel("split") })}
         {item("reveal", "Reveal active file", <Locate />)}
         <CM.Separator className={MENU_SEP} />
-        {item("copyPath", "Copy path", <Copy />, { disabled: !t, hint: "⌘C" })}
-        {item("copyRelPath", "Copy relative path", <Copy />, { disabled: !t, hint: "⌘⇧C" })}
+        {item("copyPath", "Copy path", <Copy />, { disabled: !t, hint: MAC ? "⌘C" : "Ctrl+C" })}
+        {item("copyRelPath", "Copy relative path", <Copy />, { disabled: !t, hint: MAC ? "⌘⇧C" : "Ctrl+Shift+C" })}
         <CM.Separator className={MENU_SEP} />
         {item("rename", "Rename", <Pencil />, { disabled: !mutable, hint: "F2" })}
         {item("duplicate", "Duplicate", <CopyPlus />, { disabled: !mutable })}
-        {item("delete", "Delete", <Trash2 />, { disabled: !mutable, destructive: true, hint: "⌦" })}
+        {item("delete", "Delete", <Trash2 />, { disabled: !mutable, destructive: true, hint: MAC ? "⌦" : "Del" })}
       </CM.Content>
     </CM.Portal>
   );

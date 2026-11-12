@@ -8,6 +8,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { splitTokens, type InlineToken } from "@/lib/inline-tokens"
 import React, {
   createContext,
   useContext,
@@ -118,12 +119,15 @@ function PromptInput({
 
 export type PromptInputTextareaProps = {
   disableAutosize?: boolean
+  /** Tags in the text (`/skill`, `@file`) to draw a tinted pill behind, where they sit in the line. */
+  tokens?: InlineToken[]
 } & React.ComponentProps<typeof Textarea>
 
 function PromptInputTextarea({
   className,
   onKeyDown,
   disableAutosize = false,
+  tokens,
   ...props
 }: PromptInputTextareaProps) {
   const { value, setValue, maxHeight, onSubmit, disabled, enterSends, textareaRef } =
@@ -162,15 +166,37 @@ function PromptInputTextarea({
     el.scrollTop = caretAtEnd ? el.scrollHeight : prevScrollTop
   }
 
+  // The pills are drawn on a layer under the textarea that wraps the same text the same way. It has
+  // to be exactly as wide as the textarea's text column (a scrollbar narrows it) and move with it.
+  const backRef = useRef<HTMLDivElement>(null)
+  const syncBack = () => {
+    const el = textareaRef.current
+    const back = backRef.current
+    if (!el || !back) return
+    back.style.width = `${el.clientWidth}px`
+    back.style.transform = `translateY(${-el.scrollTop}px)`
+  }
+
   const handleRef = (el: HTMLTextAreaElement | null) => {
     textareaRef.current = el
     adjustHeight(el)
   }
 
+  const hasTokens = !!tokens?.length
   useLayoutEffect(() => {
     adjustHeight(textareaRef.current)
+    syncBack()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, maxHeight, disableAutosize])
+  }, [value, maxHeight, disableAutosize, hasTokens])
+
+  React.useEffect(() => {
+    const el = textareaRef.current
+    if (!el || !hasTokens || typeof ResizeObserver === "undefined") return
+    const ro = new ResizeObserver(syncBack)
+    ro.observe(el)
+    return () => ro.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasTokens])
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     adjustHeight(e.target)
@@ -189,21 +215,42 @@ function PromptInputTextarea({
   }
 
   return (
-    <Textarea
-      ref={handleRef}
-      value={value}
-      onChange={handleChange}
-      onKeyDown={handleKeyDown}
-      className={cn(
-        "text-primary min-h-[44px] w-full resize-none border-none bg-transparent shadow-none outline-none focus-visible:ring-0 focus-visible:ring-offset-0",
-        // Grows and shrinks with the text instead of snapping; the px height is set by adjustHeight.
-        "transition-[height] duration-[160ms] ease-[var(--ease-out-quint)] motion-reduce:transition-none",
-        className
+    <div className="relative">
+      {hasTokens && (
+        <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div
+            ref={backRef}
+            className={cn("px-3 py-2 text-body break-words whitespace-pre-wrap text-transparent select-none", className, "min-h-0")}
+          >
+            {splitTokens(value, tokens ?? []).map((part, i) =>
+              "token" in part ? (
+                <span key={i} className={part.token.kind === "skill" ? "tag-pill tag-pill-skill" : "tag-pill tag-pill-file"}>
+                  {part.text}
+                </span>
+              ) : (
+                part.text
+              )
+            )}
+          </div>
+        </div>
       )}
-      rows={1}
-      disabled={disabled}
-      {...props}
-    />
+      <Textarea
+        ref={handleRef}
+        value={value}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+        onScroll={hasTokens ? syncBack : undefined}
+        className={cn(
+          "text-primary relative min-h-[44px] w-full resize-none border-none bg-transparent shadow-none outline-none focus-visible:ring-0 focus-visible:ring-offset-0",
+          // Grows and shrinks with the text instead of snapping; the px height is set by adjustHeight.
+          "transition-[height] duration-[160ms] ease-[var(--ease-out-quint)] motion-reduce:transition-none",
+          className
+        )}
+        rows={1}
+        disabled={disabled}
+        {...props}
+      />
+    </div>
   )
 }
 

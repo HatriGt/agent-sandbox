@@ -342,6 +342,11 @@ export function Thread({
     if (window.matchMedia("(max-width: 767px)").matches) setBrowserOpen(false);
     setSeed({ text: t.text ?? "", n: Date.now(), append: true, image: t.image });
   }, []);
+  // "Mention in chat" on a file or folder: its tag joins the sentence being written.
+  const mentionFile = React.useCallback((path: string) => {
+    setWorkspaceFull(false);
+    setSeed({ text: `@${path}`, n: Date.now(), append: true, inline: true });
+  }, []);
   const toggleSideChat = React.useCallback(() => (side.chat.open ? side.close() : openSideChat()), [side, openSideChat]);
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -479,7 +484,7 @@ export function Thread({
   // in-box checkpoint taken when turn k-1 finished). Refetched whenever a turn settles.
   const [revertable, setRevertable] = React.useState<Set<number>>(new Set());
   const [revertAsk, setRevertAsk] = React.useState<{ message: number; discarded: number } | null>(null);
-  const [seed, setSeed] = React.useState<{ text: string; n: number; append?: boolean; image?: { name: string; dataUrl: string; label?: string; note?: string } } | null>(null);
+  const [seed, setSeed] = React.useState<{ text: string; n: number; append?: boolean; inline?: boolean; image?: { name: string; dataUrl: string; label?: string; note?: string } } | null>(null);
   const [reverting, setReverting] = React.useState(false);
   const canRevertNow = !sleeping && runState !== "running";
   React.useEffect(() => {
@@ -1360,7 +1365,7 @@ export function Thread({
               </aside>
             }
           >
-            <WorkspacePane session={box.name} changes={changes} open={openFile} review={reviewNonce} onClose={closeWorkspace} onSaved={refreshChanges} repos={repos} full={workspaceFull} onToggleFull={() => setWorkspaceFull((v) => !v)} />
+            <WorkspacePane session={box.name} changes={changes} open={openFile} review={reviewNonce} onClose={closeWorkspace} onSaved={refreshChanges} repos={repos} full={workspaceFull} onToggleFull={() => setWorkspaceFull((v) => !v)} onMention={mentionFile} />
           </React.Suspense>
         )}
       </AnimatePresence>

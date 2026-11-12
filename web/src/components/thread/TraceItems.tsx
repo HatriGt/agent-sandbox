@@ -1,6 +1,7 @@
 import * as React from "react";
 import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Clock, Copy, FileSearch, FileText, KeyRound, Loader2, Pencil, Play, Terminal, Undo2 } from "lucide-react";
 import { parseYouMessage } from "@/lib/you-message";
+import { inlineTokens, splitTokens } from "@/lib/inline-tokens";
 import { FileMark } from "@/lib/fileIcon";
 import { CodeNavContext } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -14,6 +15,7 @@ import { useReducedMotion } from "@/lib/motion-pref";
 import { StreamingMarkdown } from "./StreamingMarkdown";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
+import { useCached } from "@/lib/cache";
 import { ATTACHMENT_RE, SessionReposContext, useSession } from "@/lib/session-context";
 import { SkillMark } from "@/lib/skillGlyph";
 import { parseMcpName } from "@/lib/mcp";
@@ -1293,6 +1295,12 @@ export function YouItem({
   const attachments = React.useMemo(() => [...new Set(text.match(ATTACHMENT_RE) ?? [])], [text]);
   const { body, skill: skillName, files } = React.useMemo(() => parseYouMessage(text), [text]);
   const openRef = React.useContext(CodeNavContext);
+  // Tags written in the message (`/skill`, `@file`) are drawn as chips where they sit in the line.
+  const skillList = useCached("skills", (signal) => api.skills(signal));
+  const parts = React.useMemo(() => {
+    const names = new Set((skillList.data?.skills ?? []).map((s) => s.name));
+    return splitTokens(body, inlineTokens(body, names));
+  }, [body, skillList.data]);
   const long = body.length > YOU_FOLD_CHARS || body.split("\n").length > YOU_FOLD_LINES;
   const [open, setOpen] = React.useState(false);
   const [copied, setCopied] = React.useState(false);
@@ -1367,7 +1375,7 @@ export function YouItem({
             {onEdit && body && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <button type="button" onClick={() => onEdit(body)} aria-label="Edit as a new message" className={action}>
+                  <button type="button" onClick={() => onEdit(skillName ? `/${skillName} ${body}` : body)} aria-label="Edit as a new message" className={action}>
                     <Pencil className="size-3.5" aria-hidden />
                   </button>
                 </TooltipTrigger>
@@ -1388,12 +1396,38 @@ export function YouItem({
           <div className="you-bubble text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-lead">
             <div className={cn("break-words whitespace-pre-wrap [overflow-wrap:anywhere]", long && !open && "line-clamp-[10]")}>
               {skillName && (
-                <span className="border-live/30 bg-live/10 text-live stamp mr-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-md border px-1.5 py-0.5 align-middle text-micro font-semibold">
+                <span className={cn(YOU_TAG, "bg-live/12 text-live mr-1.5")}>
                   <SkillMark name={skillName} size={13} />
                   /{skillName}
                 </span>
               )}
-              {body}
+              {parts.map((part, i) => {
+                if (!("token" in part)) return part.text;
+                const t = part.token;
+                if (t.kind === "skill")
+                  return (
+                    <span key={i} className={cn(YOU_TAG, "bg-live/12 text-live")}>
+                      <SkillMark name={t.name} size={13} />
+                      /{t.name}
+                    </span>
+                  );
+                const base = t.name.slice(t.name.lastIndexOf("/") + 1);
+                const inner = (
+                  <>
+                    <FileMark path={t.name} />
+                    {base}
+                  </>
+                );
+                return openRef ? (
+                  <button key={i} type="button" onClick={() => openRef({ path: t.name })} title={`Open ${t.name}`} className={cn(YOU_TAG, "bg-foreground/8 hover:bg-foreground/14 cursor-pointer transition-colors")}>
+                    {inner}
+                  </button>
+                ) : (
+                  <span key={i} title={t.name} className={cn(YOU_TAG, "bg-foreground/8")}>
+                    {inner}
+                  </span>
+                );
+              })}
             </div>
             {long && (
               <button
@@ -1412,6 +1446,9 @@ export function YouItem({
     </div>
   );
 }
+
+/** A tag inside your message: sits on the text line, a touch smaller, in the mono face. */
+const YOU_TAG = "stamp inline-flex translate-y-[-1px] items-center gap-1 rounded-md px-1.5 py-0.5 align-middle text-micro font-medium";
 
 /** A pasted image, fetched through the token-guarded artifact route; click to open full size. */
 function AttachmentImage({ path }: { path: string }) {

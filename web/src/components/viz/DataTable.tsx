@@ -269,11 +269,6 @@ export function DataTable({
             </tbody>
           </table>
         </div>
-        {/* Soft edge at the right while there is more that way; the left edge is the sticky column's own shadow. */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[color-mix(in_oklab,var(--foreground)_7%,transparent)] to-transparent opacity-0 transition-opacity duration-150 in-data-scrolled-end:opacity-100"
-        />
       </div>
       {texts.length > 8 && (
         <div className="flex items-center gap-2 border-t px-3 py-1.5">

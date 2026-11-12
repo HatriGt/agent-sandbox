@@ -37,5 +37,6 @@ export function languageOf(path: string): string {
   const base = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
   const ext = base.includes(".") ? base.slice(base.lastIndexOf(".") + 1) : "";
   const map: Record<string, string> = { ts: "typescript", tsx: "tsx", js: "javascript", jsx: "jsx", mjs: "javascript", py: "python", rb: "ruby", yml: "yaml", md: "markdown", sh: "bash", kt: "kotlin", rs: "rust" };
-  return map[ext] ?? ext ?? "plaintext";
+  if (base === "dockerfile" || base.startsWith("dockerfile.")) return "docker";
+  return map[ext] ?? (ext || "plaintext");
 }

@@ -116,17 +116,12 @@ function useScrollEdges() {
   return setWrap
 }
 
-const EDGE_FADE =
-  "pointer-events-none absolute inset-y-0 w-6 opacity-0 transition-opacity duration-150 from-[color-mix(in_oklab,var(--foreground)_7%,transparent)] to-transparent"
-
-/** The sideways scroller for code: thin scrollbar on hover only, and a soft fade on each edge that has more. */
+/** The sideways scroller for code: thin scrollbar on hover only. No fade at the edges: a clipped line and the scrollbar already say there is more. */
 function CodeScroller({ children }: { children: React.ReactNode }) {
   const ref = useScrollEdges()
   return (
     <div ref={ref} className="relative">
       {children}
-      <div aria-hidden className={cn(EDGE_FADE, "left-0 bg-gradient-to-r in-data-scrolled-start:opacity-100")} />
-      <div aria-hidden className={cn(EDGE_FADE, "right-0 bg-gradient-to-l in-data-scrolled-end:opacity-100")} />
     </div>
   )
 }
@@ -135,8 +130,8 @@ function CodeScroller({ children }: { children: React.ReactNode }) {
  * Shiki, code-split and narrowed.
  *
  * The default `shiki` bundle ships EVERY language grammar and theme plus the Oniguruma WASM engine —
- * hundreds of KB of grammars and a ~600KB wasm blob, all in the initial chunk. We only ever render a
- * handful of languages in traces and markdown fences, so instead we build a `shiki/core` highlighter
+ * hundreds of KB of grammars and a ~600KB wasm blob, all in the initial chunk. We render a known
+ * set of languages in traces, fences and produced files, so instead we build a `shiki/core` highlighter
  * with just those grammars, the JavaScript regex engine (no wasm), and a light+dark theme — and we
  * `import()` it lazily so none of it lands in the initial chunk. Until it resolves (and for any code
  * that needs no highlighting) we render a plain <pre>, so text is always legible.
@@ -150,6 +145,34 @@ const LANGS = {
   javascript: () => import("shiki/langs/javascript.mjs"),
   jsx: () => import("shiki/langs/jsx.mjs"),
   diff: () => import("shiki/langs/diff.mjs"),
+  // What an agent writes into a workspace. Each is its own lazy chunk: none of it loads until a
+  // file or fence in that language is on screen.
+  html: () => import("shiki/langs/html.mjs"),
+  css: () => import("shiki/langs/css.mjs"),
+  scss: () => import("shiki/langs/scss.mjs"),
+  less: () => import("shiki/langs/less.mjs"),
+  python: () => import("shiki/langs/python.mjs"),
+  yaml: () => import("shiki/langs/yaml.mjs"),
+  markdown: () => import("shiki/langs/markdown.mjs"),
+  go: () => import("shiki/langs/go.mjs"),
+  rust: () => import("shiki/langs/rust.mjs"),
+  sql: () => import("shiki/langs/sql.mjs"),
+  java: () => import("shiki/langs/java.mjs"),
+  c: () => import("shiki/langs/c.mjs"),
+  cpp: () => import("shiki/langs/cpp.mjs"),
+  php: () => import("shiki/langs/php.mjs"),
+  ruby: () => import("shiki/langs/ruby.mjs"),
+  toml: () => import("shiki/langs/toml.mjs"),
+  xml: () => import("shiki/langs/xml.mjs"),
+  docker: () => import("shiki/langs/docker.mjs"),
+  ini: () => import("shiki/langs/ini.mjs"),
+  csharp: () => import("shiki/langs/csharp.mjs"),
+  kotlin: () => import("shiki/langs/kotlin.mjs"),
+  swift: () => import("shiki/langs/swift.mjs"),
+  graphql: () => import("shiki/langs/graphql.mjs"),
+  vue: () => import("shiki/langs/vue.mjs"),
+  svelte: () => import("shiki/langs/svelte.mjs"),
+  lua: () => import("shiki/langs/lua.mjs"),
 } as const
 
 /** Aliases → one of the grammars we actually load; anything else falls back to plaintext (no highlight). */
@@ -171,6 +194,63 @@ const ALIASES: Record<string, keyof typeof LANGS> = {
   jsx: "jsx",
   diff: "diff",
   patch: "diff",
+  html: "html",
+  css: "css",
+  scss: "scss",
+  less: "less",
+  python: "python",
+  yaml: "yaml",
+  markdown: "markdown",
+  go: "go",
+  rust: "rust",
+  sql: "sql",
+  java: "java",
+  c: "c",
+  cpp: "cpp",
+  php: "php",
+  ruby: "ruby",
+  toml: "toml",
+  xml: "xml",
+  docker: "docker",
+  ini: "ini",
+  csharp: "csharp",
+  kotlin: "kotlin",
+  swift: "swift",
+  graphql: "graphql",
+  vue: "vue",
+  svelte: "svelte",
+  lua: "lua",
+  htm: "html",
+  xhtml: "html",
+  svg: "xml",
+  xsd: "xml",
+  plist: "xml",
+  py: "python",
+  yml: "yaml",
+  md: "markdown",
+  mdx: "markdown",
+  rs: "rust",
+  golang: "go",
+  h: "c",
+  hpp: "cpp",
+  cc: "cpp",
+  cxx: "cpp",
+  rb: "ruby",
+  dockerfile: "docker",
+  conf: "ini",
+  cfg: "ini",
+  env: "ini",
+  properties: "ini",
+  cs: "csharp",
+  kt: "kotlin",
+  kts: "kotlin",
+  gql: "graphql",
+  sass: "scss",
+  mts: "typescript",
+  cts: "typescript",
+  json5: "json",
+  webmanifest: "json",
+  map: "json",
 }
 
 let highlighterPromise: Promise<HighlighterCore> | null = null
@@ -189,7 +269,7 @@ async function getHighlighter(): Promise<HighlighterCore> {
         // Grammars are loaded on demand per-language in ensureLang; start with none.
         langs: [],
         themes: [light.default, dark.default],
-        engine: createJavaScriptRegexEngine(),
+        engine: createJavaScriptRegexEngine({ forgiving: true }),
       })
     })()
   }

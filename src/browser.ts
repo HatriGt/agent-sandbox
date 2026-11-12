@@ -121,7 +121,7 @@ export function parseBrowserAction(body: unknown): { ok: true; action: BrowserAc
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   const op = b.op as BrowserOp;
   if (typeof op !== "string" || !BROWSER_OPS.includes(op)) return { ok: false, message: "unknown browser action" };
-  const action: BrowserAction = { op, w: num(b.w, 320, 1920, 1024), h: num(b.h, 240, 1600, 720), dpr: Number(b.dpr) >= 1.5 ? 2 : 1 };
+  const action: BrowserAction = { op, w: num(b.w, 320, 1920, 1024), h: num(b.h, 240, 2400, 720), dpr: Math.round(Math.min(3, Math.max(0.4, Number(b.dpr) || 1)) * 100) / 100 };
   if (op === "goto" || (op === "open" && typeof b.url === "string" && b.url)) {
     const url = typeof b.url === "string" ? normalizeUrl(b.url) : null;
     if (!url) return { ok: false, message: "That is not an address this browser can open. Use an http or https address." };
@@ -129,7 +129,7 @@ export function parseBrowserAction(body: unknown): { ok: true; action: BrowserAc
   }
   if (op === "click" || op === "scroll") {
     action.x = num(b.x, 0, 1920, 0);
-    action.y = num(b.y, 0, 1600, 0);
+    action.y = num(b.y, 0, 2400, 0);
   }
   if (op === "scroll") {
     action.dx = num(b.dx, -20_000, 20_000, 0);

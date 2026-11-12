@@ -69,8 +69,7 @@ function Table({ className, variant, size, stickyHeader, containerClassName, ...
         data-slot="table-container"
         data-sticky-header={stickyHeader ? "" : undefined}
         className={cn(
-          "relative w-full overflow-x-auto overscroll-x-none rounded-[inherit] [--fade-end:0px] [--fade-start:0px] data-sticky-header:overflow-y-auto",
-          "mask-[linear-gradient(to_right,transparent,#000_var(--fade-start),#000_calc(100%-var(--fade-end)),transparent)] data-scrolled-end:[--fade-end:--spacing(8)] data-scrolled-start:[--fade-start:--spacing(8)]",
+          "relative w-full overflow-x-auto overscroll-x-none rounded-[inherit] data-sticky-header:overflow-y-auto",
           containerClassName
         )}
       >
