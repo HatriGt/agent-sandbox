@@ -335,6 +335,9 @@ async function act(a) {
   if (key !== vp) {
     await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: dpr, mobile: false });
     vp = key; await sleep(80);
+    // The new size only takes hold at the next paint (see layout): without this the first picture
+    // after the agent looked at a phone width is that phone layout, stretched to the pane.
+    await layout(); await sleep(40); await layout();
   }
   let netError = "";
   const before = a.op === "click" || a.op === "fill" || a.op === "key" || a.op === "back" || a.op === "forward" ? await ev("location.href").catch(() => "") : "";
