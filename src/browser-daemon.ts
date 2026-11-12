@@ -618,7 +618,7 @@ async function act(a) {
   const up = a.op === "scroll" && +a.dy < 0, big = Math.min(1400, Math.round(st.vh * 1.4)), small = Math.min(450, Math.round(st.vh * 0.45));
   const top = Math.max(0, Math.min(st.sy, up ? big : small)), bottom = Math.max(0, Math.min(st.dh - st.vh - st.sy, up ? small : big));
   // Text needs a high quality to keep clean edges; at two device pixels per CSS pixel a lower one reads the same.
-  const q = dpr >= 1.75 ? 80 : 86;
+  const q = dpr >= 1.75 ? 74 : 86;
   const snap = () => send("Page.captureScreenshot", { format: "jpeg", quality: q, clip: { x: st.sx, y: st.sy - top, width: st.vw, height: st.vh + top + bottom, scale: 1 } });
   let shot = await snap();
   if (!shot.error && (await stickAfter())) shot = await snap();

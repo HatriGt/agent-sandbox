@@ -8,6 +8,9 @@ test("warmBoxVerdict: a readable disk above the floor and a claude version pass;
   assert.match((warmBoxVerdict("5000\n2.1.273\n") as { reason: string }).reason, /only 5 MB free/);
   assert.match((warmBoxVerdict(`${RUN_MIN_FREE_KB}\n`) as { reason: string }).reason, /printed nothing/);
   assert.ok(WARM_HEALTH_SH.includes("df -Pk /") && WARM_HEALTH_SH.includes("claude --version"));
+  // Claude Code is started once while the box waits, against a dead address, and leaves nothing.
+  assert.match(WARM_HEALTH_SH, /ANTHROPIC_BASE_URL=http:\/\/127\.0\.0\.1:9 timeout 4 claude -p hi/);
+  assert.ok(WARM_HEALTH_SH.indexOf("claude -p hi") < WARM_HEALTH_SH.indexOf("df -Pk /"), "the disk is read after the warm-up run");
 });
 
 test("the guarded launch: a disk below the floor writes the note and the 250 mark and prints diskfull; otherwise the agent runs", async () => {

@@ -592,8 +592,18 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind, owner: s
 export const RUN_MIN_FREE_KB = 102_400;
 /** Free KiB on the root disk, one number (blank if df is unavailable). */
 export const DF_FREE_KB_SH = `df -Pk / 2>/dev/null | awk 'NR==2{print $4}'`;
+/**
+ * Claude Code's first start in a box is slow: measured in a fresh warm box, 1.9 s to get going
+ * the first time and 0.3 s every time after (it migrates its config, probes the filesystem, lays
+ * out its caches). A warm box had never run it, so the user's first task paid that. Here it is
+ * run once while nobody waits, against an address nothing listens on and with a key that is not
+ * one: it starts up, cannot reach a model, and is stopped. Nothing of the attempt is kept.
+ */
+export const CLAUDE_PREWARM_SH =
+  `(cd /tmp && ANTHROPIC_API_KEY=warm ANTHROPIC_BASE_URL=http://127.0.0.1:9 timeout 4 claude -p hi --setting-sources user --output-format stream-json --verbose >/dev/null 2>&1; ` +
+  `rm -rf "$HOME/.claude/projects/-tmp"; true)`;
 /** The warm-up health probe: free KiB on line one, then the agent's version line. */
-export const WARM_HEALTH_SH = `${DF_FREE_KB_SH}; claude --version 2>/dev/null | head -1`;
+export const WARM_HEALTH_SH = `${CLAUDE_PREWARM_SH}; ${DF_FREE_KB_SH}; claude --version 2>/dev/null | head -1`;
 
 /** Judge WARM_HEALTH_SH's output. Pure, so the gate is unit-tested without a box. */
 export function warmBoxVerdict(stdout: string, minFreeKb = RUN_MIN_FREE_KB): { ok: true } | { ok: false; reason: string } {
