@@ -12,7 +12,9 @@
  */
 export const BROWSER_DAEMON_SRC = String.raw`// agent-sandbox browser helper: owns one Moli page inside the sandbox and answers one action at a
 // time over 127.0.0.1 with the page's state and a screenshot. Exits after 15 idle minutes.
-const http = require("http"), cp = require("child_process"), fs = require("fs"), crypto = require("crypto");
+// Two callers share the page: the dashboard's Browser pane (through the controller) and the agent,
+// which runs this same file with arguments as the "browser" command (see cli() at the end).
+const http = require("http"), cp = require("child_process"), fs = require("fs"), crypto = require("crypto"), os = require("os"), path = require("path");
 const V = "@@V@@";
 const BIN = process.env.ASB_MOLI_BIN || "/usr/local/bin/moli";
 const PORT = +(process.env.ASB_BROWSER_PORT || 9334), CDP = PORT - 1;
@@ -21,6 +23,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const clamp = (v, lo, hi, d) => { v = Math.round(+v); return Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : d; };
 let moli = null, ws = null, seq = 0, loading = false, idle = null, vp = "";
 const pend = new Map();
+// The agent looks at the page at its own size, whatever width the person's pane happens to be.
+let agentVp = { w: 1280, h: 800 };
+// What the page logged or threw, and requests that failed, until the agent reads them.
+const logs = [];
+function note(level, text) { logs.push({ level: level, text: String(text).slice(0, 500) }); if (logs.length > 200) logs.shift(); }
 
 function quit() { try { if (moli) moli.kill("SIGKILL"); } catch (e) {} process.exit(0); }
 function touch() { clearTimeout(idle); idle = setTimeout(quit, IDLE_MS); }
@@ -52,6 +59,19 @@ async function ensure() {
     if (d.id && pend.has(d.id)) { const p = pend.get(d.id); pend.delete(d.id); p(d); return; }
     if (d.method === "Page.frameStartedLoading") loading = true;
     else if (d.method === "Page.frameStoppedLoading" || d.method === "Page.loadEventFired") loading = false;
+    else if (d.method === "Runtime.consoleAPICalled") {
+      const p = d.params || {};
+      note(p.type || "log", (p.args || []).map((x) => (x.value !== undefined ? (typeof x.value === "string" ? x.value : JSON.stringify(x.value)) : x.description || x.type || "")).join(" "));
+    } else if (d.method === "Runtime.exceptionThrown") {
+      const x = (d.params || {}).exceptionDetails || {};
+      note("error", (x.exception && x.exception.description) || x.text || "uncaught error");
+    } else if (d.method === "Network.responseReceived") {
+      const r = (d.params || {}).response || {};
+      if (r.status >= 400) note("network", r.status + " " + r.url);
+    } else if (d.method === "Network.loadingFailed") {
+      const f = d.params || {};
+      if (!f.canceled) note("network", "failed " + (f.errorText || "") + " " + (f.url || ""));
+    }
   };
   sock.onclose = () => {
     if (ws === sock) ws = null;
@@ -60,6 +80,8 @@ async function ensure() {
   };
   ws = sock; loading = false;
   await send("Page.enable");
+  await send("Runtime.enable");
+  await send("Network.enable");
 }
 
 function send(method, params) {
@@ -70,12 +92,19 @@ function send(method, params) {
     setTimeout(() => { if (pend.has(id)) { pend.delete(id); res({ error: { message: method + " timed out" } }); } }, 25000);
   });
 }
-async function ev(expression) {
-  const r = await send("Runtime.evaluate", { expression, returnByValue: true });
+async function ev(expression, awaitPromise) {
+  const r = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: !!awaitPromise });
   if (r.error) throw new Error(r.error.message);
-  if (r.result.exceptionDetails) throw new Error("the page refused a script");
+  if (r.result.exceptionDetails) {
+    const x = r.result.exceptionDetails;
+    throw fail("script", (x.exception && x.exception.description) || x.text || "the page refused a script");
+  }
   return r.result.result.value;
 }
+// Moli lays a page out when it paints, not when a script asks for a size: an element added by a
+// click measures 0 x 0 until the next picture. So before anything is measured for the agent, paint
+// a few pixels.
+async function layout() { await send("Page.captureScreenshot", { format: "jpeg", quality: 1, clip: { x: 0, y: 0, width: 8, height: 8, scale: 1 } }); }
 // Wait out a page load: at least minMs (a click needs a beat to start one), at most maxMs.
 async function settle(maxMs, minMs) {
   const t0 = Date.now();
@@ -164,6 +193,104 @@ const PICK = function (i) {
   return JSON.stringify({ selector: selector, text: text, html: open, component: comp, style: style, attrs: attrs, rect: [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)] });
 };
 
+// The shortest selector that matches an element alone (same rule as PICK above).
+function selectorOf(e) {
+  var ident = /^[A-Za-z_][\w-]*$/;
+  var parts = [], n = e, selector = "";
+  while (n && n.nodeType === 1 && n !== document.documentElement && parts.length < 6) {
+    var p = n.localName;
+    if (n.id && ident.test(n.id)) { parts.unshift(p + "#" + n.id); return parts.join(" > "); }
+    var cls = 0;
+    for (var ci = 0; ci < n.classList.length && cls < 2; ci++) { var c = n.classList[ci]; if (ident.test(c) && c.length < 32) { p += "." + c; cls++; } }
+    var par = n.parentElement;
+    if (par) {
+      var same = 0, idx = 0;
+      for (var si = 0; si < par.children.length; si++) { var sb = par.children[si]; if (sb.localName === n.localName) { same++; if (sb === n) idx = same; } }
+      if (same > 1) p += ":nth-of-type(" + idx + ")";
+    }
+    parts.unshift(p);
+    selector = parts.join(" > ");
+    try { if (document.querySelectorAll(selector).length === 1) return selector; } catch (x) {}
+    n = par;
+  }
+  return selector;
+}
+
+// One element from what the agent wrote: a CSS selector first, else the visible text (a button's
+// words, a field's label or placeholder). The shortest text that contains the words wins, so
+// "Save" finds the button and not the form around it. With go, it is scrolled into view.
+const FIND = function (q, go) {
+  var e = null;
+  try { e = document.querySelector(q); } catch (x) {}
+  if (!e) {
+    var want = String(q).replace(/\s+/g, " ").trim().toLowerCase(), best = null, bestScore = Infinity;
+    var all = document.body ? document.body.querySelectorAll("*") : [];
+    for (var i = 0; i < all.length; i++) {
+      var n = all[i], tag = n.localName;
+      if (tag === "script" || tag === "style" || tag === "noscript" || tag === "template") continue;
+      var t = (n.getAttribute("aria-label") || n.getAttribute("placeholder") || n.getAttribute("title") || n.getAttribute("alt") || (tag === "input" && /^(button|submit|reset)$/.test(n.type) ? n.value : "") || n.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
+      if (!t || t.indexOf(want) < 0) continue;
+      var r = n.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) continue;
+      var score = (t === want ? 0 : 100000) + t.length;
+      if (score <= bestScore) { best = n; bestScore = score; }
+    }
+    e = best;
+    // Words that name a field ("Email") mean the field, not its label.
+    if (e && e.localName === "label") { var f = e.control || e.querySelector("input,textarea,select"); if (f) e = f; }
+  }
+  if (!e) return "null";
+  if (go) { try { e.scrollIntoView({ block: "center", inline: "center" }); } catch (x) { try { e.scrollIntoView(); } catch (y) {} } }
+  var b = e.getBoundingClientRect();
+  window.__asbHit = e;
+  return JSON.stringify({ x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2), tag: e.localName, text: (e.getAttribute("aria-label") || e.textContent || e.getAttribute("placeholder") || "").replace(/\s+/g, " ").trim().slice(0, 80) });
+};
+
+// Empty the element FIND just returned and focus it, so typed text replaces what was there. A
+// select takes its option by value or by words. Goes through the native setter: a framework that
+// tracks the value (React) only notices a change made that way.
+const CLEAR = function (text) {
+  var e = window.__asbHit;
+  if (!e) return "gone";
+  e.focus();
+  if (e.localName === "select") {
+    var want = String(text).trim().toLowerCase(), hit = -1;
+    for (var i = 0; i < e.options.length; i++) { var o = e.options[i]; if (o.value.toLowerCase() === want || o.text.replace(/\s+/g, " ").trim().toLowerCase() === want) { hit = i; break; } }
+    if (hit < 0) return "no-option";
+    e.selectedIndex = hit;
+    e.dispatchEvent(new Event("input", { bubbles: true })); e.dispatchEvent(new Event("change", { bubbles: true }));
+    return "select";
+  }
+  if (e.isContentEditable) { e.textContent = ""; return "text"; }
+  if (!("value" in e)) return "not-a-field";
+  var proto = e.localName === "textarea" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  var d = Object.getOwnPropertyDescriptor(proto, "value");
+  if (d && d.set) d.set.call(e, ""); else e.value = "";
+  e.dispatchEvent(new Event("input", { bubbles: true }));
+  return "text";
+};
+
+// What a person could click or type into, each with the selector that finds it.
+const ELEMS = function () {
+  var out = [], vh = innerHeight;
+  var all = document.body ? document.body.querySelectorAll("a[href],button,input,textarea,select,summary,[role=button],[role=link],[role=tab],[role=checkbox],[role=menuitem],[role=switch],[onclick],[contenteditable=true]") : [];
+  for (var i = 0; i < all.length && out.length < 120; i++) {
+    var e = all[i], b = e.getBoundingClientRect();
+    if (b.width < 2 || b.height < 2) continue;
+    try { var cs = getComputedStyle(e); if (cs.visibility === "hidden" || cs.display === "none") continue; } catch (x) {}
+    if (e.localName === "input" && e.type === "hidden") continue;
+    var text = (e.getAttribute("aria-label") || e.getAttribute("placeholder") || e.getAttribute("name") || e.textContent || e.value || "").replace(/\s+/g, " ").trim();
+    if (text.length > 70) text = text.slice(0, 69) + "…";
+    var kind = e.localName === "input" ? "input:" + (e.type || "text") : e.localName;
+    var o = { kind: kind, text: text, sel: selectorOf(e) };
+    if ("value" in e && e.localName !== "button" && e.value) o.value = String(e.value).slice(0, 60);
+    if (e.disabled) o.disabled = true;
+    if (b.bottom < 0 || b.top > vh) o.off = true;
+    out.push(o);
+  }
+  return JSON.stringify(out);
+};
+
 // Ports something in the sandbox listens on (the dev server the agent started), from /proc/net/tcp*.
 function ports() {
   const out = new Set();
@@ -201,21 +328,55 @@ async function act(a) {
   touch();
   if (a.op === "quit") { setTimeout(quit, 30); return { ok: true }; }
   await ensure();
-  const w = clamp(a.w, 320, 1920, 1024), h = clamp(a.h, 240, 1600, 720), dpr = +a.dpr >= 1.5 ? 2 : 1;
+  const agent = a.agent === true;
+  if (agent && a.op === "size") agentVp = { w: clamp(a.w, 320, 1920, 1280), h: clamp(a.h, 240, 1600, 800) };
+  const w = agent ? agentVp.w : clamp(a.w, 320, 1920, 1024), h = agent ? agentVp.h : clamp(a.h, 240, 1600, 720), dpr = agent ? 1 : +a.dpr >= 1.5 ? 2 : 1;
   const key = w + "x" + h + "@" + dpr;
   if (key !== vp) {
     await send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: dpr, mobile: false });
     vp = key; await sleep(80);
   }
   let netError = "";
-  const before = a.op === "click" || a.op === "key" || a.op === "back" || a.op === "forward" ? await ev("location.href").catch(() => "") : "";
-  const x = clamp(a.x, 0, w, 0), y = clamp(a.y, 0, h, 0);
+  const before = a.op === "click" || a.op === "fill" || a.op === "key" || a.op === "back" || a.op === "forward" ? await ev("location.href").catch(() => "") : "";
+  let x = clamp(a.x, 0, w, 0), y = clamp(a.y, 0, h, 0);
+  const extra = {};
+  if (agent && a.op === "console") { const lines = logs.splice(0, logs.length); return { ok: true, logs: lines }; }
+  if (agent && a.op === "eval") {
+    const v = await ev(String(a.js || ""), true);
+    return { ok: true, value: v === undefined ? "undefined" : typeof v === "string" ? v : JSON.stringify(v) };
+  }
+  if (agent && a.op === "wait") {
+    const t0 = Date.now(), ms = clamp(a.ms, 100, 45000, 10000);
+    let found = null;
+    while (!found && Date.now() - t0 < ms) {
+      await layout();
+      found = JSON.parse((await ev("(" + FIND + ")(" + JSON.stringify(String(a.q || "")) + ", false)").catch(() => "null")) || "null");
+      if (!found) await sleep(150);
+    }
+    if (!found) throw fail("timeout", "nothing matching " + JSON.stringify(a.q) + " appeared within " + Math.round(ms / 1000) + " s");
+    extra.found = found;
+  }
+  if ((a.op === "click" || a.op === "fill") && a.q !== undefined) {
+    await layout();
+    const hit = JSON.parse((await ev("(" + FIND + ")(" + JSON.stringify(String(a.q)) + ", true)")) || "null");
+    if (!hit) throw fail("not-found", "nothing on the page matches " + JSON.stringify(a.q) + " (try: browser elements)");
+    // It was scrolled into view: measure again where it landed.
+    await layout();
+    const at = JSON.parse((await ev("(function(){var e=window.__asbHit;if(!e)return 'null';var b=e.getBoundingClientRect();return JSON.stringify({x:Math.round(b.left+b.width/2),y:Math.round(b.top+b.height/2)})})()")) || "null") || hit;
+    x = clamp(at.x, 0, w, 0); y = clamp(at.y, 0, h, 0);
+    extra.hit = hit;
+  }
   if (a.op === "pick") {
     const d = await ev("(" + PICK + ")(" + clamp(a.i, 0, 5000, 0) + ")");
     return { ok: true, pick: JSON.parse(d || "null") };
   }
   if (a.op === "goto" || (a.op === "open" && a.url)) netError = await nav(String(a.url));
-  else if (a.op === "reload") { loading = true; await send("Page.reload"); await settle(20000, 120); }
+  else if (a.op === "reload") {
+    // A reload keeps the place on the page, as a browser does.
+    const at = await ev("Math.round(scrollY)").catch(() => 0);
+    loading = true; await send("Page.reload"); await settle(20000, 120);
+    if (at > 0) { await sleep(120); await ev("scrollTo(scrollX, " + at + ")").catch(() => {}); await sleep(60); }
+  }
   else if (a.op === "back" || a.op === "forward") {
     const hs = await history();
     if (a.op === "back" ? hs.canBack : hs.canForward) {
@@ -224,11 +385,17 @@ async function act(a) {
       await settle(20000, 200);
       if ((await ev("location.href")) === before) { await ev(a.op === "back" ? "history.back()" : "history.forward()"); await settle(20000, 300); }
     }
-  } else if (a.op === "click") {
+  } else if (a.op === "click" || a.op === "fill") {
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
     await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
     await send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
-    await settle(15000, 220);
+    if (a.op === "fill") {
+      const kind = await ev("(" + CLEAR + ")(" + JSON.stringify(String(a.text || "")) + ")");
+      if (kind === "not-a-field" || kind === "gone") throw fail("not-a-field", JSON.stringify(a.q) + " is not something that can be typed into");
+      if (kind === "no-option") throw fail("not-found", "that list has no option " + JSON.stringify(a.text));
+      if (kind === "text" && a.text) await send("Input.insertText", { text: String(a.text).slice(0, 5000) });
+      await sleep(80);
+    } else await settle(15000, 220);
   } else if (a.op === "scroll") {
     await send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: clamp(a.dx, -20000, 20000, 0), deltaY: clamp(a.dy, -20000, 20000, 0) });
     await sleep(50);
@@ -244,6 +411,22 @@ async function act(a) {
   // A client-side route change renders after the click returns: give it a beat before the picture.
   if (before && (await ev("location.href").catch(() => before)) !== before) await sleep(350);
   const st = JSON.parse(await ev(STATE));
+  if (agent) {
+    // The agent gets words, and a picture only when it asks for one.
+    if (a.op === "text" || a.op === "elements") await layout();
+    const out = Object.assign({ ok: true, url: st.url, title: st.title, vw: st.vw, vh: st.vh, sy: st.sy, dh: st.dh }, extra);
+    if (netError) { out.ok = false; out.code = "net"; out.error = "could not load " + String(a.url) + ": " + netError; return out; }
+    if (a.op === "text") { const t = String(await ev("document.body ? document.body.innerText : ''")); out.text = t.length > 20000 ? t.slice(0, 20000) + "\n… (cut)" : t; }
+    if (a.op === "elements") out.elements = JSON.parse(await ev("(function(){" + selectorOf + "; return (" + ELEMS + ")(); })()"));
+    if (a.op === "shot") {
+      const full = a.full === true, fh = Math.min(Math.max(st.dh, st.vh), 8000);
+      let pic = await send("Page.captureScreenshot", full ? { format: "png", clip: { x: 0, y: 0, width: st.vw, height: fh, scale: 1 } } : { format: "png" });
+      if (pic.error && full) pic = await send("Page.captureScreenshot", { format: "png" });
+      if (pic.error) throw fail("failed", pic.error.message);
+      out.shot = pic.result.data; out.size = st.vw + "x" + (full ? fh : st.vh);
+    }
+    return out;
+  }
   const hs = await history();
   const band = Math.min(480, Math.round(st.vh * 0.6));
   const top = Math.max(0, Math.min(st.sy, band)), bottom = Math.max(0, Math.min(st.dh - st.vh - st.sy, band));
@@ -263,6 +446,7 @@ async function act(a) {
 }
 
 let chain = Promise.resolve();
+function serve() {
 http.createServer((req, res) => {
   if (req.method !== "POST") { res.end(JSON.stringify({ v: V })); return; }
   let body = "";
@@ -277,4 +461,98 @@ http.createServer((req, res) => {
   });
 }).listen(PORT, "127.0.0.1");
 touch();
+}
+
+// ---- the agent's command: browser <verb> ... ----
+const HELP = [
+  "browser: the page you and the person both see. It runs in this sandbox, so localhost is your dev server.",
+  "",
+  "  browser open <url>            go to a page (browser open localhost:3000)",
+  "  browser shot [--full] [file]  save a picture of the page; open the file with Read to look at it",
+  "  browser text                  the words on the page",
+  "  browser elements              what can be clicked or typed into, each with its selector",
+  "  browser click <target>        target is a CSS selector or the visible words (browser click \"Sign in\")",
+  "  browser fill <target> <text>  replace a field's content; picks an option in a list",
+  "  browser type <text>           type into whatever has focus",
+  "  browser key <Enter|Tab|Escape|ArrowDown|Backspace|...>",
+  "  browser wait <target> [secs]  wait until it is on the page (default 10); fails if it never shows",
+  "  browser scroll <pixels>       down, or negative for up",
+  "  browser eval <javascript>     run in the page and print the result",
+  "  browser console               what the page logged, threw or failed to load since you last asked",
+  "  browser back | forward | reload | url",
+  "  browser size <width> <height> the size you see the page at (default 1280 800; 390 844 is a phone)",
+  "",
+  "Every command prints the page's title and address, and exits non-zero when it fails, so a list of",
+  "commands in a script is an end to end test. The person may be watching the same page.",
+].join("\n");
+
+async function cli(argv) {
+  const U = "http://127.0.0.1:" + PORT + "/";
+  const die = (m) => { process.stderr.write("browser: " + m + "\n"); process.exit(1); };
+  const ping = async () => { try { return (await (await fetch(U, { signal: AbortSignal.timeout(1200) })).json()).v || ""; } catch (e) { return null; } };
+  const post = async (a, ms) => (await fetch(U, { method: "POST", body: JSON.stringify(a), signal: AbortSignal.timeout(ms) })).json();
+  const verb = argv[0], rest = argv.slice(1);
+  if (!verb || verb === "help" || verb === "--help" || verb === "-h") { process.stdout.write(HELP + "\n"); return; }
+  let a = null;
+  const addr = (u) => (/^[a-z][a-z0-9+.-]*:\/\//i.test(u) || u === "about:blank" ? u : (/^(localhost|127\.|0\.0\.0\.0|\[|[\w-]+:\d+$)/i.test(u) ? "http://" : "https://") + u);
+  if (verb === "open" || verb === "goto") { if (!rest[0]) die("open needs an address"); a = { op: "goto", url: addr(rest[0]) }; }
+  else if (verb === "shot" || verb === "screenshot") { const full = rest.indexOf("--full") >= 0; a = { op: "shot", full: full, file: rest.filter((x) => x !== "--full")[0] }; }
+  else if (verb === "text" || verb === "elements" || verb === "console" || verb === "back" || verb === "forward" || verb === "reload") a = { op: verb };
+  else if (verb === "url") a = { op: "url" };
+  else if (verb === "click") { if (!rest[0]) die("click needs a selector or the visible words"); a = { op: "click", q: rest.join(" ") }; }
+  else if (verb === "fill") { if (rest.length < 2) die("fill needs a target and the text"); a = { op: "fill", q: rest[0], text: rest.slice(1).join(" ") }; }
+  else if (verb === "type") { if (!rest.length) die("type needs the text"); a = { op: "type", text: rest.join(" ") }; }
+  else if (verb === "key" || verb === "press") { if (!KEYS[rest[0]]) die("unknown key; one of " + Object.keys(KEYS).join(", ")); a = { op: "key", key: rest[0] }; }
+  else if (verb === "wait") { if (!rest[0]) die("wait needs a selector or the visible words"); const last = rest[rest.length - 1], secs = rest.length > 1 && /^\d+(\.\d+)?$/.test(last) ? +last : 0; a = { op: "wait", q: (secs ? rest.slice(0, -1) : rest).join(" "), ms: secs ? secs * 1000 : 10000 }; }
+  else if (verb === "scroll") a = { op: "scroll", dy: +(rest[0] || 600) || 600, x: 400, y: 300 };
+  else if (verb === "eval") { if (!rest.length) die("eval needs some JavaScript"); a = { op: "eval", js: rest.join(" ") }; }
+  else if (verb === "size") { if (!(+rest[0] >= 320) || !(+rest[1] >= 240)) die("size needs a width (320 or more) and a height (240 or more)"); a = { op: "size", w: +rest[0], h: +rest[1] }; }
+  else if (verb === "quit") a = { op: "quit" };
+  else die("unknown command " + JSON.stringify(verb) + ". Run: browser help");
+  a.agent = true;
+
+  let v = await ping();
+  if (a.op === "quit" && v === null) return;
+  if (v !== null && v !== V) { try { await post({ op: "quit" }, 3000); } catch (e) {} await sleep(400); v = null; }
+  if (v === null) {
+    cp.spawn(process.execPath, [__filename], { detached: true, stdio: "ignore" }).unref();
+    for (let i = 0; i < 50 && v === null; i++) { await sleep(100); v = await ping(); }
+    if (v === null) die("the browser helper did not start");
+  }
+  let r;
+  try { r = await post(a, 60000); } catch (e) { die(String((e && e.message) || e)); }
+  if (r && r.code === "not-installed" && fs.existsSync("/usr/local/bin/asb-moli-install")) {
+    process.stderr.write("browser: installing the browser (once, a few seconds)\n");
+    cp.spawnSync("/usr/local/bin/asb-moli-install", [], { stdio: "ignore", timeout: 240000 });
+    try { r = await post(a, 60000); } catch (e) { die(String((e && e.message) || e)); }
+  }
+  if (!r || !r.ok) die((r && r.error) || "failed");
+  const say = (t) => process.stdout.write(t + "\n");
+  const where = (r.title ? r.title + "  " : "") + (r.url || "");
+  if (a.op === "console") { if (!r.logs.length) say("(nothing logged)"); r.logs.forEach((l) => say("[" + l.level + "] " + l.text)); return; }
+  if (a.op === "eval") { say(r.value); return; }
+  if (a.op === "quit") return;
+  if (a.op === "text") { say(where); say(""); say(r.text); return; }
+  if (a.op === "elements") {
+    say(where);
+    if (!r.elements.length) say("(nothing to click or type into)");
+    r.elements.forEach((e) => say(e.kind + "  " + JSON.stringify(e.text) + (e.value ? "  value=" + JSON.stringify(e.value) : "") + (e.disabled ? "  disabled" : "") + (e.off ? "  off-screen" : "") + "  " + e.sel));
+    return;
+  }
+  if (a.op === "shot") {
+    let file = a.file;
+    if (!file) { const dir = path.join(process.env.TMPDIR || os.tmpdir(), "browser"); fs.mkdirSync(dir, { recursive: true }); file = path.join(dir, "shot-" + Date.now().toString(36) + ".png"); }
+    fs.writeFileSync(file, Buffer.from(r.shot, "base64"));
+    say("saved " + path.resolve(file) + " (" + r.size + ")  " + where);
+    say("Open that file with the Read tool to look at the page.");
+    return;
+  }
+  if (a.op === "click" && r.hit) say("clicked " + r.hit.tag + " " + JSON.stringify(r.hit.text));
+  if (a.op === "fill" && r.hit) say("filled " + r.hit.tag + " " + JSON.stringify(r.hit.text));
+  if (a.op === "wait" && r.found) say("there: " + r.found.tag + " " + JSON.stringify(r.found.text));
+  say(where + "  (" + r.vw + "x" + r.vh + (r.dh > r.vh ? ", scrolled " + r.sy + " of " + (r.dh - r.vh) : "") + ")");
+}
+
+if (process.argv.length > 2) cli(process.argv.slice(2)).then(() => process.exit(0), (e) => { process.stderr.write("browser: " + String((e && e.message) || e) + "\n"); process.exit(1); });
+else serve();
 `;

@@ -35,6 +35,22 @@ export function hitTest(map: readonly MappedElement[], x: number, y: number): nu
   return best;
 }
 
+/**
+ * An address that only means something inside the sandbox: the dev server the agent started. In the
+ * person's own browser `localhost:3000` is their machine, so a link like this opens in the Browser
+ * pane instead. Takes a link's href or the words of an inline code span; returns the address or null.
+ */
+export function sandboxAddress(text: string): string | null {
+  const s = text.trim();
+  if (!s || s.length > 300 || /\s/.test(s)) return null;
+  const m = /^(?:https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(:\d{2,5})?(\/[^\s]*)?$/i.exec(s);
+  if (!m) return null;
+  // A bare "localhost" is a word, not an address someone means to open.
+  if (!m[2] && !/^https?:\/\//i.test(s)) return null;
+  const host = m[1] === "0.0.0.0" ? "localhost" : m[1];
+  return `http://${host}${m[2] ?? ""}${m[3] ?? "/"}`;
+}
+
 /** A component name worth telling the agent: a production build's `f` or `t` is noise. */
 const realComponent = (name: string | undefined): string => (name && /^[A-Z][A-Za-z0-9_]{2,}$/.test(name) ? name : "");
 

@@ -38,3 +38,13 @@ test("elementNote falls back to the map's label and leaves out a minified compon
   assert.equal(elementNote(1, "https://react.dev/", map[2], null), 'Element 1, picked in the browser on https://react.dev/: selector `a.button`; text "Start free"; 120 x 40 px.');
   assert.doesNotMatch(elementNote(1, "https://react.dev/", map[2], { component: "t" }), /component/);
 });
+
+test("sandboxAddress: only an address inside the sandbox, from a link or from inline code", async () => {
+  const { sandboxAddress } = await import("./browser-model");
+  assert.equal(sandboxAddress("http://localhost:3000"), "http://localhost:3000/");
+  assert.equal(sandboxAddress("localhost:5173/pricing?x=1"), "http://localhost:5173/pricing?x=1");
+  assert.equal(sandboxAddress("http://127.0.0.1:8080/app"), "http://127.0.0.1:8080/app");
+  assert.equal(sandboxAddress("0.0.0.0:3000"), "http://localhost:3000/");
+  assert.equal(sandboxAddress("http://localhost/"), "http://localhost/");
+  for (const no of ["localhost", "https://example.com", "http://localhost.evil.com:3000", "npm run dev", "localhost:3000 and more", "file:///etc/passwd", ""]) assert.equal(sandboxAddress(no), null, no);
+});

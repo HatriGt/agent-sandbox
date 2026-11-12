@@ -14,6 +14,7 @@ import type { CodeRef } from "@/lib/code-refs";
 import type { OpenRequest } from "./WorkspacePane";
 const BrowserPane = React.lazy(() => import("./BrowserPane").then((m) => ({ default: m.BrowserPane })));
 import type { BrowserTag } from "./BrowserPane";
+import { sandboxAddress } from "@/lib/browser-model";
 import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
 import { currentDiskTier, currentMemoryTier, deadlineLabel, deadlineOf, displayState, fmtDuration, offerableTiers, tierGib, usageLevel } from "@/lib/lifecycle";
 import { MemoryBumpCard } from "./MemoryCard";
@@ -235,9 +236,12 @@ export function Thread({
   // The browser (BrowserPane): a fourth aside under the same one-at-a-time rule.
   const [browserOpen, setBrowserOpen] = React.useState(false);
   const [browserFull, setBrowserFull] = React.useState(false);
+  const [browserGoTo, setBrowserGoTo] = React.useState<{ url: string; n: number } | null>(null);
+  const [browserSent, setBrowserSent] = React.useState(0);
   const closeBrowser = React.useCallback(() => {
     setBrowserOpen(false);
     setBrowserFull(false);
+    setBrowserGoTo(null);
   }, []);
   // The side chat is a third aside under the same one-at-a-time rule. Its open flag lives in the
   // per-box store (persisted), so each aside's opener closes the others itself.
@@ -311,6 +315,24 @@ export function Thread({
     setInspectorOpen(false);
     side.close();
     closeWorkspace();
+    setBrowserOpen(true);
+  };
+  // `localhost:3000` in the agent's words is the sandbox's localhost, not the reader's: a click on
+  // such a link (or on the address written as inline code) opens it in the Browser pane.
+  const onThreadClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (sleeping || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+    const el = e.target as HTMLElement;
+    if (el.closest("textarea, input, [contenteditable=true], pre")) return;
+    const link = el.closest("a[href]");
+    const code = link ? null : el.closest("code");
+    const url = link ? sandboxAddress(link.getAttribute("href") ?? "") : code ? sandboxAddress(code.textContent ?? "") : null;
+    if (!url || window.getSelection()?.toString()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setInspectorOpen(false);
+    side.close();
+    closeWorkspace();
+    setBrowserGoTo({ url, n: Date.now() });
     setBrowserOpen(true);
   };
   // A picked element (or a screenshot) joins the message being written: its words in the text, its
@@ -412,6 +434,7 @@ export function Thread({
   const echo = React.useCallback((text: string) => {
     onRepliedRef.current(stampReply(text, echoBasis.current.sentLines, echoBasis.current.logClock));
     jumpToLatest.current();
+    setBrowserSent((n) => n + 1);
   }, []);
   const replyMatch = React.useMemo(() => matchReplies(replies, sentLines), [replies, sentLines]);
   const pendingReplies = replyMatch.pending;
@@ -1007,7 +1030,7 @@ export function Thread({
       />
 
       <div className="relative flex min-h-0 flex-1">
-      <div data-thread className={cn("flex min-h-0 min-w-0 flex-1 flex-col", ((showWorkspace && workspaceFull) || (browserOpen && browserFull && !sleeping)) && "hidden md:hidden")}>
+      <div data-thread onClickCapture={onThreadClick} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", ((showWorkspace && workspaceFull) || (browserOpen && browserFull && !sleeping)) && "hidden md:hidden")}>
       <div className="@container relative min-h-0 min-w-0 flex-1">
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
         <SchedulePill box={box.name} runState={String(runState ?? "")} />
@@ -1344,7 +1367,7 @@ export function Thread({
       <AnimatePresence initial={false}>
         {browserOpen && !sleeping && !showWorkspace && (
           <React.Suspense key="browser" fallback={null}>
-            <BrowserPane key={box.name} session={box.name} live={runState === "running"} onClose={closeBrowser} onTag={tagFromBrowser} full={browserFull} onToggleFull={() => setBrowserFull((v) => !v)} />
+            <BrowserPane key={box.name} session={box.name} live={runState === "running"} onClose={closeBrowser} onTag={tagFromBrowser} goTo={browserGoTo} sent={browserSent} full={browserFull} onToggleFull={() => setBrowserFull((v) => !v)} />
           </React.Suspense>
         )}
       </AnimatePresence>

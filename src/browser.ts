@@ -3,11 +3,14 @@
  * out and paints them without Chromium: about 100 to 200 MB of memory for a page where a headless
  * Chrome wants 400 and up, which is what makes a browser affordable inside a 1 GB box.
  *
- * Two readers use it. The agent runs it from its shell (`moli fetch ...`). The person in the
- * dashboard gets a pane beside the conversation: the controller sends one action at a time (go,
- * click, scroll, type, pick an element) to a helper inside the box (src/browser-daemon.ts) and gets
- * the page state and a picture back. Because the browser is IN the box, `localhost` is the dev
- * server the agent started, which is the point: look at what it built and point at what is wrong.
+ * Two readers share ONE page. The person in the dashboard gets a pane beside the conversation: the
+ * controller sends one action at a time (go, click, scroll, type, pick an element) to a helper
+ * inside the box (src/browser-daemon.ts) and gets the page state and a picture back. The agent has
+ * the `browser` command (the same helper file, run with arguments): open, click, fill, wait, read
+ * the text, save a picture and look at it. Because the browser is IN the box, `localhost` is the
+ * dev server the agent started, which is the point: the person looks at what it built and points
+ * at what is wrong, the agent checks its own work by eye and runs a flow end to end, and each can
+ * watch what the other does.
  *
  * Nothing here is reachable from outside the box: the helper and Moli's protocol port both listen
  * on the box's loopback, and every action arrives through `msb exec` like any other controller call.
@@ -37,10 +40,22 @@ export function moliInstallSh(): string {
   );
 }
 
-/** One line for the agent's standing prompt. States what exists, not what to do with it. */
+/**
+ * For the agent's standing prompt: the browser exists, what it is for, and the two habits that make
+ * the person's side work (a server that outlives the turn, and saying its address).
+ */
 export const MOLI_PROMPT_HINT =
-  "A headless browser may be installed: when `command -v moli` succeeds, `moli fetch --dump markdown <url>` prints a page as text and " +
-  "`moli fetch --layout --dump screenshot <url> > page.png` renders it to an image, including a dev server on localhost.";
+  "You have a browser: the `browser` command (`browser help` lists it all). `browser open localhost:3000` loads a page, `browser shot` saves a " +
+  "picture you open with Read to see it, and `browser click`, `fill`, `wait`, `text`, `elements` and `console` drive and inspect it; each fails " +
+  "with a non-zero exit, so a list of them is an end to end test. After you build or change something with a UI, look at it this way before you " +
+  "say it works. The person has a Browser pane on the same page: they can watch what you do there and point at elements, which reach you as a " +
+  "picture with the element's selector and markup. So start a dev server detached from your turn (`nohup npm run dev >/tmp/dev.log 2>&1 &`, " +
+  "bound to localhost) and tell them its address, such as http://localhost:3000.";
+
+/** Where the agent's `browser` command lives in a box. */
+export const BROWSER_TOOL_PATH = "/usr/local/bin/browser";
+const BROWSER_TOOL_LIB = "/usr/local/lib/asb/browser.cjs";
+const MOLI_INSTALLER = "/usr/local/bin/asb-moli-install";
 
 export const BROWSER_OPS = ["open", "goto", "reload", "back", "forward", "click", "scroll", "type", "key", "shot", "pick", "quit"] as const;
 export type BrowserOp = (typeof BROWSER_OPS)[number];
@@ -133,6 +148,26 @@ export function parseBrowserAction(body: unknown): { ok: true; action: BrowserAc
 /** Changes whenever the helper's source does, so a box running an older helper replaces it. */
 export const BROWSER_DAEMON_VERSION = createHash("sha256").update(BROWSER_DAEMON_SRC).digest("hex").slice(0, 12);
 const DAEMON_SRC = BROWSER_DAEMON_SRC.replace("@@V@@", BROWSER_DAEMON_VERSION);
+
+/**
+ * Put the agent's `browser` command in a box: the helper file (which is the command when run with
+ * arguments), a two-line launcher, and the installer the command calls the first time in a box whose
+ * image predates Moli. The helper's source arrives on stdin (`input`), never as a shell word: it is
+ * tens of kilobytes, past what one argument may hold. Idempotent; runs on every turn so a deploy
+ * that changes the helper reaches a thread that is already open.
+ */
+export function browserToolSetup(): { sh: string; input: string } {
+  const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
+  const launcher = `#!/bin/sh\nexec node ${BROWSER_TOOL_LIB} "$@"\n`;
+  const installer = `#!/bin/sh\n${moliInstallSh()}\n`;
+  return {
+    sh:
+      `mkdir -p ${BROWSER_TOOL_LIB.slice(0, BROWSER_TOOL_LIB.lastIndexOf("/"))} && cat > ${BROWSER_TOOL_LIB}.new && mv ${BROWSER_TOOL_LIB}.new ${BROWSER_TOOL_LIB} && ` +
+      `printf '%s' '${b64(launcher)}' | base64 -d > ${BROWSER_TOOL_PATH} && chmod +x ${BROWSER_TOOL_PATH} && ` +
+      `printf '%s' '${b64(installer)}' | base64 -d > ${MOLI_INSTALLER} && chmod +x ${MOLI_INSTALLER}`,
+    input: DAEMON_SRC,
+  };
+}
 const REPLY_MARK = "@@ASB-BROWSER@@";
 
 /**

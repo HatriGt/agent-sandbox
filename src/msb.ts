@@ -59,7 +59,7 @@ import { INBOX_APPEND_SH, INBOX_RESET_SH, INBOX_TAKE_DELIVERED_SH, inboxLine, ty
 import { isStalled } from "./stall.js";
 import { EXIT_DISK_FULL } from "./run-health.js";
 import { parseBakedManifest, type LastProvision } from "./package-watch.js";
-import { MOLI_BIN, MOLI_PROMPT_HINT, moliInstallSh } from "./browser.js";
+import { MOLI_BIN, MOLI_PROMPT_HINT, browserToolSetup, moliInstallSh } from "./browser.js";
 import { orphanSandboxDirs, parseDfPk, parseDirListing, type DiskReading } from "./host-disk.js";
 
 // The driver pieces used to live here; re-exported so every existing importer keeps working.
@@ -1033,6 +1033,12 @@ export function gitCredentialsScript(ownerTokens: Record<string, string>, fallba
 
 
 
+/** The agent's `browser` command (src/browser.ts). Best-effort: a run must not fail to start over it. */
+export async function installBrowserTool(cfg: Config, box: string): Promise<void> {
+  const { sh, input } = browserToolSetup();
+  await exec(cfg, box, sh, { input }).catch((e) => console.error(`[browser] could not install the browser command in ${box}: ${String((e as Error)?.message ?? e).slice(0, 200)}`));
+}
+
 /** On-disk temp dir for everything that runs in a box (see agentEnvFlags: /tmp is a 256M tmpfs). */
 export const BOX_TMPDIR = "/root/.tmp";
 
@@ -1748,6 +1754,7 @@ export async function runAgentTask(
     timed("mcp", installMcpConfig(cfg, box)),
     timed("skills", installSkills(cfg, box)),
     timed("memory", installMemory(cfg, box, task, { firstTurn: true })),
+    timed("browser", installBrowserTool(cfg, box)),
   ]);
   const t3 = Date.now();
   const r = await msb(cfg, ["exec", box, ...agentEnv, ...skillHintFlags(box, task, skills, true, memory.hint), "--", "sh", "-lc", guardedAgentSh(workdir, false, agent)]);
@@ -1948,6 +1955,7 @@ export async function resumeAgentTask(
     installMemory(cfg, box, message),
     exec(cfg, box, streamFmtScript()),
     exec(cfg, box, askHookScript()),
+    installBrowserTool(cfg, box),
     // A non-claude thread also refreshes ITS formatter and gate (same reasoning: a deploy that
     // changes the log grammar or a guard rule must reach long-running threads) and re-checks the
     // driver install for boxes bootstrapped before this thread's first turn — a no-op when present.

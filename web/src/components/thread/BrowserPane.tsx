@@ -10,7 +10,7 @@ import { Kbd } from "@/components/ui/kbd";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { clampTo, defaultPaneWidth, paneRange, type Range } from "@/lib/workspace-model";
 import { cn } from "@/lib/utils";
-import { elementNote, hitTest, type MappedElement } from "@/lib/browser-model";
+import { elementNote, hitTest, sandboxAddress, type MappedElement } from "@/lib/browser-model";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 const STORE_W = "asb-browser-w";
@@ -36,7 +36,28 @@ type Phase = "starting" | "installing" | "ready" | "error";
  * the real scroll catches up underneath; and in Select mode the page's element boxes are fetched
  * once per picture, so the highlight follows the pointer with no round trip at all.
  */
-export function BrowserPane({ session, live, onClose, onTag, full = false, onToggleFull }: { session: string; /** The agent is working: re-read the page every few seconds. */ live: boolean; onClose: () => void; onTag: (tag: BrowserTag) => void; full?: boolean; onToggleFull?: () => void }) {
+export function BrowserPane({
+  session,
+  live,
+  onClose,
+  onTag,
+  full = false,
+  onToggleFull,
+  goTo,
+  sent = 0,
+}: {
+  session: string;
+  /** The agent is working: re-read the page every few seconds. */
+  live: boolean;
+  onClose: () => void;
+  onTag: (tag: BrowserTag) => void;
+  full?: boolean;
+  onToggleFull?: () => void;
+  /** An address to open, from a link in the conversation. `n` changes per request. */
+  goTo?: { url: string; n: number } | null;
+  /** Counts messages sent: the elements picked for a message are done with once it is on its way. */
+  sent?: number;
+}) {
   const still = useReducedMotion();
   const phone = useMediaQuery("(max-width: 767px)");
 
@@ -192,8 +213,9 @@ export function BrowserPane({ session, live, onClose, onTag, full = false, onTog
   React.useEffect(() => {
     if (opened.current || view.w < 320 || stage.h === 0) return;
     opened.current = true;
-    void run(() => ({ op: "open" }), { nav: true });
-  }, [run, view.w, stage.h]);
+    wentTo.current = goTo?.n ?? 0;
+    void run(() => ({ op: "open", url: goTo?.url }), { nav: true });
+  }, [run, view.w, stage.h, goTo]);
 
   // The stage changed size (pane dragged, device switched): lay the page out again, once it settles.
   const sized = React.useRef("");
@@ -242,6 +264,36 @@ export function BrowserPane({ session, live, onClose, onTag, full = false, onTog
     void run(() => ({ op: "goto", url: u }), { nav: true });
     stageRef.current?.focus({ preventScroll: true });
   };
+
+  // A localhost link clicked in the conversation while the pane is already open.
+  const wentTo = React.useRef(0);
+  React.useEffect(() => {
+    if (!goTo || !opened.current || wentTo.current === goTo.n) return;
+    wentTo.current = goTo.n;
+    setPins([]);
+    target.current = 0;
+    void run(() => ({ op: "goto", url: goTo.url }), { nav: true });
+  }, [goTo, run]);
+
+  // The message went: its numbered marks have done their job, and the next pick starts at 1.
+  React.useEffect(() => {
+    if (!sent) return;
+    setPins([]);
+    setSelect(false);
+    setHover(-1);
+  }, [sent]);
+
+  // The agent just finished a turn: load the page again so what it changed is what is shown. A dev
+  // server with hot reload already did; a plain file server did not. Only for the sandbox's own pages.
+  const wasLive = React.useRef(live);
+  React.useEffect(() => {
+    const ended = wasLive.current && !live;
+    wasLive.current = live;
+    const url = pageRef.current?.url ?? "";
+    if (!ended || phase !== "ready" || !sandboxAddress(url.replace(/[?#].*$/, ""))) return;
+    setPins([]);
+    void run(() => ({ op: "reload", map: selectRef.current }), { quiet: true });
+  }, [live, phase, run]);
 
   // ── select mode: the page's element boxes, hit-tested here ──
   const toggleSelect = React.useCallback(() => {

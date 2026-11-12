@@ -92,3 +92,21 @@ test("makeBoxQueue runs one box's actions in order and lets other boxes through"
   assert.deepEqual(await all, ["a1", "a2", "b1"]);
   assert.deepEqual(seen, ["b1", "a1", "a2", "a3-failed", "a4"]);
 });
+
+test("the agent's browser command is the helper file plus a launcher, and the source rides stdin", async () => {
+  const { browserToolSetup, MOLI_PROMPT_HINT, BROWSER_OPS } = await import("../src/browser.ts");
+  const { sh, input } = browserToolSetup();
+  new Script(input);
+  assert.ok(!input.includes("@@V@@"));
+  assert.ok(input.includes(BROWSER_DAEMON_VERSION), "the command and the pane's helper agree on a version, so neither restarts the other");
+  assert.ok(sh.length < 4000, "nothing large in the shell words");
+  assert.match(sh, /cat > \/usr\/local\/lib\/asb\/browser\.cjs\.new && mv /, "written whole, then swapped in");
+  const launcher = Buffer.from(/printf '%s' '([A-Za-z0-9+/=]+)' \| base64 -d > \/usr\/local\/bin\/browser /.exec(sh)![1], "base64").toString();
+  assert.equal(launcher, '#!/bin/sh\nexec node /usr/local/lib/asb/browser.cjs "$@"\n');
+  const installer = Buffer.from(/printf '%s' '([A-Za-z0-9+/=]+)' \| base64 -d > \/usr\/local\/bin\/asb-moli-install /.exec(sh)![1], "base64").toString();
+  assert.ok(installer.includes(moliInstallSh()));
+  assert.match(MOLI_PROMPT_HINT, /`browser` command/);
+  // What only the agent may do inside its own box is not an action the dashboard route accepts.
+  for (const op of ["eval", "fill", "wait", "text", "elements", "console", "size"]) assert.ok(!(BROWSER_OPS as readonly string[]).includes(op), op);
+  assert.equal(parseBrowserAction({ op: "shot", agent: true, full: true, js: "1" }).ok && "agent" in (parseBrowserAction({ op: "shot", agent: true }) as { action: object }).action, false);
+});
