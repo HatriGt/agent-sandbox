@@ -16,7 +16,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isDeadSession } from "./mcp-session.js";
 import { loadDotEnv } from "./dotenv.js";
-import { loadConfig } from "./config.js";
+import { configuredImage, loadConfig } from "./config.js";
 import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
 import { deps as rawDeps, resolveCredsForBox, detectSetupInBox } from "./deps.js";
@@ -41,7 +41,8 @@ import { StartFailureStreak, isStartFailure, logTail, startFailureAlertText } fr
 import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, type CanaryResult } from "./canary.js";
 import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-disk.js";
 import { fetchLatestVersions, outdatedPackages, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
-import { hostDisk, mcpProvisionState, sweepOrphanSandboxDirs } from "./msb.js";
+import { clearImageOverride, makeImageUpdater, planImageUpdate, writeImageOverride } from "./image-update.js";
+import { bakeAgentImage, hostDisk, mcpProvisionState, sweepOrphanSandboxDirs } from "./msb.js";
 import { claimNonce, mintNonce, questionChoices, releaseNonce } from "./answer-choice.js";
 import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
 import { fetchPinned } from "./net-guard.js";
@@ -4567,11 +4568,72 @@ const rebakeTick = async (): Promise<void> => {
   }
 };
 
-/** The service's own health, for the dashboard's Sandboxes page: canary, host disk, start failures, baked packages. */
+/**
+ * The image update behind the notice's button (src/image-update.ts): bake the versions the notice
+ * names, boot new sandboxes from the result, run the canary, and go back if it fails. `cfg` is the
+ * one object every boot path reads, so switching is an assignment plus the override file that makes
+ * it survive a restart.
+ */
+const imageBefore = { claudeImage: cfg.claudeImage, claudeCodeVersion: cfg.claudeCodeVersion };
+const imageUpdater = makeImageUpdater({
+  now: () => Date.now(),
+  bake: async (tag, claudeCodeVersion, pins) => {
+    await bakeAgentImage({ ...cfg, claudeCodeVersion }, tag, pins, "claude");
+  },
+  use: (next) => {
+    if (next) {
+      imageBefore.claudeImage = cfg.claudeImage;
+      imageBefore.claudeCodeVersion = cfg.claudeCodeVersion;
+      cfg.claudeImage = next.claudeImage;
+      cfg.claudeCodeVersion = next.claudeCodeVersion;
+      writeImageOverride(cfg.dataDir, { ...next, base: configuredImage(), at: Date.now() });
+      // What the boxes report from now on is the new manifest; until one does, do not keep saying "behind".
+      rebakeDue = [];
+    } else {
+      cfg.claudeImage = imageBefore.claudeImage;
+      cfg.claudeCodeVersion = imageBefore.claudeCodeVersion;
+      const base = configuredImage();
+      if (base.claudeImage === cfg.claudeImage && base.claudeCodeVersion === cfg.claudeCodeVersion) clearImageOverride(cfg.dataDir);
+      else writeImageOverride(cfg.dataDir, { claudeImage: cfg.claudeImage, claudeCodeVersion: cfg.claudeCodeVersion, base, at: Date.now() });
+      void rebakeTick();
+    }
+  },
+  verify: async () => {
+    const r = await canary.runNow();
+    return { ok: !!r?.ok, detail: r?.detail ?? "the test task did not run" };
+  },
+  log: (m) => console.error(m),
+});
+
+/**
+ * The service's own health, for the dashboard's Sandboxes page: canary, host disk, start failures,
+ * baked packages. The host's disk, other people's failed runs and the image's package versions are
+ * the operator's business and nothing a tenant can act on: a signed-in user who is not an admin
+ * gets the one fact that concerns them (does a new task currently finish) and nothing else.
+ */
 app.get("/health.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
+  if (!isAdmin(principalOf(res))) {
+    const c = canary.state();
+    res.json({
+      admin: false,
+      canary: { enabled: cfg.canaryIntervalMs > 0, intervalMs: cfg.canaryIntervalMs, last: c ? { ok: c.ok, ms: c.ms, detail: c.ok ? c.detail : "", at: c.at, failures: c.failures, lastOkAt: c.lastOkAt } : null },
+      hostDisk: { at: 0, alertPct: cfg.hostDiskAlertPct, home: "" },
+      orphanSweep: null,
+      startFailures: { streak: 0, alertedAt: 0 },
+      baked: {},
+      lastProvision: null,
+      rebakeDue: [],
+      rebakeCheckedAt: 0,
+      claudeSource: null,
+      imageUpdate: { phase: "idle" },
+    });
+    return;
+  }
   const { baked, last } = mcpProvisionState();
   res.json({
+    admin: true,
+    imageUpdate: imageUpdater.state(),
     canary: { enabled: cfg.canaryIntervalMs > 0, intervalMs: cfg.canaryIntervalMs, last: canary.state() },
     hostDisk: { ...hostDiskState, alertPct: cfg.hostDiskAlertPct, home: cfg.msbHome },
     orphanSweep: lastOrphanSweep ?? null,
@@ -4582,6 +4644,23 @@ app.get("/health.json", (req: Request, res: Response) => {
     rebakeCheckedAt,
     claudeSource: cfg.claudeImage ? { kind: "image", name: cfg.claudeImage } : cfg.snapshot ? { kind: "snapshot", name: cfg.snapshot } : { kind: "cold", name: cfg.image },
   });
+});
+/** Start the image update the notice offers. Admins only; answers at once, progress is on /health.json. */
+app.post("/health/image-update.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  if (!isAdmin(principalOf(res))) {
+    res.status(403).json({ error: "admins only" });
+    return;
+  }
+  if (!cfg.claudeImage) {
+    res.status(409).json({ error: "claude boxes do not boot from an image here (MSB_CLAUDE_IMAGE is unset) — bake one first, see the runbook" });
+    return;
+  }
+  try {
+    res.json(imageUpdater.start(planImageUpdate(mcpProvisionState().baked, rebakeDue, cfg.claudeCodeVersion)));
+  } catch (e) {
+    res.status(409).json({ error: (e as Error).message });
+  }
 });
 app.post("/health/canary.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;

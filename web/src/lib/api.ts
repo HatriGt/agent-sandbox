@@ -499,7 +499,19 @@ export interface HealthResponse {
   lastProvision: { at: number; box: string; skipped: string[]; failed: string[]; dropped: string[] } | null;
   rebakeDue: { name: string; baked: string; latest: string }[];
   rebakeCheckedAt: number;
-  claudeSource: { kind: "image" | "snapshot" | "cold"; name: string };
+  /** Null for a signed-in user who is not an admin: where boxes boot from is the operator's business. */
+  claudeSource: { kind: "image" | "snapshot" | "cold"; name: string } | null;
+  /** False when the reader is not an admin: the payload then carries the canary and nothing else. */
+  admin?: boolean;
+  /** The image update started from the notice: its phase, the tag being built and what changes. */
+  imageUpdate?: {
+    phase: "idle" | "building" | "verifying" | "done" | "rolled-back" | "failed";
+    startedAt?: number;
+    finishedAt?: number;
+    tag?: string;
+    changes?: { name: string; baked: string; latest: string }[];
+    detail?: string;
+  };
 }
 
 /** Walk-away notifications: the owner's webhook + which run events fire it. */
@@ -1002,6 +1014,8 @@ export const api = {
   memoryNotes: (signal?: AbortSignal) => fetch(url("/memory-notes.json"), { headers: authHeaders, signal }).then(parse<MemoryNotesResponse>),
   /** The service's own health (canary, host disk, start failures, baked packages). */
   health: (signal?: AbortSignal) => fetch(url("/health.json"), { headers: authHeaders, signal }).then(parse<HealthResponse>),
+  /** Build an image with the newer versions, switch to it, test it, switch back if the test fails. Admins only. */
+  updateImage: () => post<NonNullable<HealthResponse["imageUpdate"]>>("/health/image-update.json", {}),
   memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean; repo?: string }) =>
     post<MemoryNotesResponse>("/memory-notes.json", body),
   /** Add a preference/rule by hand (the composer on the Memory page). */

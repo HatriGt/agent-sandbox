@@ -582,7 +582,25 @@ one from the inside. All of them are best-effort and never throw into the sweep 
 baked, lastProvision, rebakeDue, claudeSource. The Fleet page shows the canary, the host disk and the
 boot source under its heading.
 
-### Baking the claude image on the VPS
+### Updating the claude image from the dashboard
+
+When baked packages fall behind, the Fleet page shows "Newer versions are available for the sandbox
+image" with an **Update image** button (admins only; other users are sent no operator facts at all,
+`/health.json` answers them with the canary alone). The button (`POST /health/image-update.json`,
+`src/image-update.ts`) does the whole job:
+
+1. plans the new image: the packages the notice names move to their latest, every other baked
+   package is pinned at its current version, Claude Code included;
+2. bakes `agent-claude:<yyyymmddhhmm>`;
+3. switches new sandboxes to it by writing `DATA_DIR/image-override.json` (no `.env` edit, no
+   restart; running sandboxes are not touched, the warm pool turns over within its max age);
+4. runs the canary. If it fails, the previous image and Claude Code version come back.
+
+The override only applies on top of the settings it was made on: change `MSB_CLAUDE_IMAGE` or
+`CLAUDE_CODE_VERSION` by hand afterwards and the hand edit wins. Old image tags stay in msb's store;
+remove the ones you no longer want with `msb image rm` when disk matters.
+
+### Baking the claude image on the VPS (by hand)
 
     docker exec -e BAKE_NPX='@cap-js/mcp-server@0.1.0,btp-mcp-server@1.2.3' agent-sandbox       node dist/bake-claude-image.js agent-claude:1
     # then in /root/agent-sandbox-deploy/.env: MSB_CLAUDE_IMAGE=agent-claude:1

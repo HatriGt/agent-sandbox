@@ -101,6 +101,7 @@ export async function fetchLatestVersions(
 
 export function rebakeDueText(list: readonly Outdated[], publicUrl: string): string {
   const items = list.map((o) => `${o.name} ${o.baked} → ${o.latest}`).join(", ");
-  const where = publicUrl ? ` ${publicUrl.replace(/\/+$/, "")}/dashboard/#/mcp` : "";
-  return `Rebake due: ${list.length === 1 ? "a baked MCP server package has" : `${list.length} baked MCP server packages have`} a newer release (${items}). Boxes keep the baked versions until the next bake.${where}`;
+  // The alert ends where the fix is: the Fleet page's notice has the Update image button.
+  const where = publicUrl ? ` Update it from ${publicUrl.replace(/\/+$/, "")}/dashboard/#/sandboxes` : " Update it from the Fleet page.";
+  return `Sandbox image behind: ${list.length === 1 ? "a baked package has" : `${list.length} baked packages have`} a newer release (${items}). Sandboxes keep the current versions until the image is updated.${where}`;
 }

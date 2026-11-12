@@ -1,3 +1,4 @@
+import { readImageOverride, resolveImage } from "./image-update.js";
 /**
  * Runtime configuration for the orchestrator, loaded from environment.
  *
@@ -208,7 +209,18 @@ const DEFAULT_EGRESS = [
   "objects.githubusercontent.com",
 ];
 
+/**
+ * The claude image and Claude Code version as the operator set them (env, else the default),
+ * before a dashboard image update is laid over them (src/image-update.ts).
+ */
+export function configuredImage(): { claudeImage: string; claudeCodeVersion: string } {
+  // Bump the default deliberately (after a smoke run), not automatically: the agent's behavior IS the product.
+  return { claudeImage: process.env.MSB_CLAUDE_IMAGE || "", claudeCodeVersion: req("CLAUDE_CODE_VERSION", "2.1.273") };
+}
+
 export function loadConfig(): Config {
+  const dataDir = process.env.DATA_DIR || "./data";
+  const image = resolveImage(configuredImage(), readImageOverride(dataDir));
   const anthropicBaseUrl = req("ANTHROPIC_BASE_URL", "https://your-ccproxy.example.com");
 
   // Always allow the ccproxy host itself so the in-box agent can reach the model.
@@ -233,12 +245,11 @@ export function loadConfig(): Config {
     msb: req("MSB", "/root/.local/bin/msb"),
     image: req("MSB_IMAGE", "node"),
     snapshot: process.env.MSB_SNAPSHOT || "",
-    claudeImage: process.env.MSB_CLAUDE_IMAGE || "",
+    claudeImage: image.claudeImage,
     msbHome: (process.env.MSB_HOME || "/root/.microsandbox").replace(/\/+$/, ""),
     canaryIntervalMs: Math.max(0, Number(process.env.CANARY_INTERVAL_MS ?? "3600000") || 0),
     hostDiskAlertPct: Math.min(100, Math.max(1, Number(process.env.HOST_DISK_ALERT_PCT ?? "85") || 85)),
-    // Bump deliberately (after a smoke run), not automatically: the agent's behavior IS the product.
-    claudeCodeVersion: req("CLAUDE_CODE_VERSION", "2.1.273"),
+    claudeCodeVersion: image.claudeCodeVersion,
     ompVersion: req("OMP_VERSION", "latest"),
     ompSnapshot: process.env.MSB_OMP_SNAPSHOT || "",
     ompImage: process.env.MSB_OMP_IMAGE || "",
@@ -289,7 +300,7 @@ export function loadConfig(): Config {
     httpToken: process.env.MCP_HTTP_TOKEN || undefined,
     dashboardToken: process.env.DASHBOARD_TOKEN || process.env.MCP_HTTP_TOKEN || undefined,
     authMode: process.env.AUTH_MODE === "saas" ? "saas" : "token",
-    dataDir: process.env.DATA_DIR || "./data",
+    dataDir,
     publicUrl: (process.env.PUBLIC_URL || (process.env.ASB_DOMAIN ? `https://${process.env.ASB_DOMAIN}` : "")).replace(/\/+$/, "") || undefined,
     boxOperatorMcp: process.env.BOX_SELF_MCP === "1",
     githubOauthClientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET || undefined,

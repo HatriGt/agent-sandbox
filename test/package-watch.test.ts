@@ -32,7 +32,7 @@ test("outdatedPackages compares to latest; unknown latest is not outdated", () =
   const baked = { a: "1.0.0", b: "2.0.0", c: "3.0.0" };
   assert.deepEqual(outdatedPackages(baked, { a: "1.0.0", b: "2.1.0", c: undefined }), [{ name: "b", baked: "2.0.0", latest: "2.1.0" }]);
   assert.deepEqual(outdatedPackages(baked, { a: "9", b: "9" }, ["b@2.0.0"]), [{ name: "b", baked: "2.0.0", latest: "9" }]);
-  assert.match(rebakeDueText([{ name: "b", baked: "2.0.0", latest: "2.1.0" }], "https://x/"), /^Rebake due: a baked MCP server package has a newer release \(b 2\.0\.0 → 2\.1\.0\)/);
+  assert.match(rebakeDueText([{ name: "b", baked: "2.0.0", latest: "2.1.0" }], "https://x/"), /^Sandbox image behind: a baked package has a newer release \(b 2\.0\.0 → 2\.1\.0\).*Update it from https:\/\/x\/dashboard\/#\/sandboxes$/);
 });
 
 test("fetchLatestVersions hits the registry per name and swallows failures", async () => {
