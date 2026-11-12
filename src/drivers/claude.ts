@@ -293,6 +293,8 @@ export function streamFmtScript(): string {
 const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep TodoWrite TaskCreate TaskUpdate TaskList WebFetch WebSearch Skill Agent";
 
 /** Shell for one Claude Code turn: `claude [-c] -p`, piped through stream-fmt.js into the log. */
+export const CLAUDE_MCP_WAIT_MS = 3000;
+
 export function claudeLaunchSh(resume: boolean): string {
   // --setting-sources user: load ONLY user settings, so a cloned repo's own .claude/settings.json
   // (and its hooks) is never loaded. Target repos commonly ship a UserPromptSubmit "plugin gate"
@@ -312,8 +314,13 @@ export function claudeLaunchSh(resume: boolean): string {
   // installMcpConfig); when the file has content, claude loads them. Their tools are allowed via the
   // mcp__<server>__* wildcard so the agent can actually call them.
   const mcpFlag = `$([ -s ${MCP_CONFIG_PATH} ] && printf -- '--mcp-config ${MCP_CONFIG_PATH}')`;
+  // Before its first request Claude Code waits for every MCP server to connect, up to 5 s. One
+  // server that is slow to start (or a remote one that hangs) held every task and every follow-up
+  // for that long. Three seconds is enough for servers that work; a server that connects later
+  // still joins the run, its tools arrive on a later turn.
+  const mcpWait = `CLAUDE_CODE_MCP_STARTUP_WAIT_MS=${CLAUDE_MCP_WAIT_MS} `;
   const claude =
-    `claude ${cont}-p "$AGENT_TASK" ${settingSources} ${streamFmt} ${mcpFlag} ` +
+    `${mcpWait}claude ${cont}-p "$AGENT_TASK" ${settingSources} ${streamFmt} ${mcpFlag} ` +
     `--append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} ` +
     `$([ -s ${MCP_CONFIG_PATH} ] && printf -- '%s' "$(node -e 'const c=require(\"${MCP_CONFIG_PATH}\");process.stdout.write(Object.keys(c.mcpServers||{}).map(n=>\"mcp__\"+n).join(\" \"))')")`;
   return `${claude} 2>> ${AGENT_LOG} | node "$HOME/.claude/stream-fmt.js" ${AGENT_LOG}; `;

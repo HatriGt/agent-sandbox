@@ -76,7 +76,9 @@ async function ensure() {
     const free = memAvailableKb();
     if (free !== null && free < 160000) throw fail("low-memory", "the sandbox has " + Math.round(free / 1024) + " MB of memory free and the browser needs about 200. Try again when the agent is doing less.");
     try { if (moli) moli.kill("SIGKILL"); } catch (e) {}
-    moli = cp.spawn(BIN, ["serve", "--layout", "--host", "127.0.0.1", "-p", String(CDP)], { stdio: "ignore" });
+    // --image and --font: without them Moli fetches neither, and every page was drawn with empty
+    // boxes for its pictures and a fallback for its type.
+    moli = cp.spawn(BIN, ["serve", "--layout", "--image", "--font", "--host", "127.0.0.1", "-p", String(CDP)], { stdio: "ignore" });
     moli.on("exit", () => { moli = null; });
     moli.on("error", () => { moli = null; });
     for (let i = 0; i < 80 && !t; i++) { await sleep(100); t = await targets(); }
@@ -329,13 +331,40 @@ const ELEMS = function () {
 // with the page and is missing from every picture taken further down. Before a picture, each one
 // is moved to where a browser would hold it (against the top or bottom edge, never past its
 // parent) with the translate property, which Moli does paint and which leaves the page's own
-// transform alone. The list is found once per page and looked for again every few seconds.
-const STICK = function () {
-  var now = Date.now(), list = window.__asbSticky;
-  if (!list || window.__asbStickyUrl !== location.href || now - (window.__asbStickyAt || 0) > 4000) {
-    list = [];
+// transform alone.
+//
+// Two steps, because a picture is the only thing that lays a Moli page out and every picture costs
+// a full paint of the document (half a second on a long page, measured, whatever its size).
+// Measuring used to take a picture of its own, so every look was two paints. Now the places are
+// remembered in page coordinates: STICK_SET moves the elements from the scroll position alone
+// (no layout needed), the picture is taken, and STICK_MEASURE reads the places again from the
+// layout that picture just made. Only when that finds something out of place (the first picture
+// of a page opened scrolled, a page that grew) is the picture taken a second time.
+const STICK_SET = function () {
+  var list = window.__asbSticky;
+  if (!list || window.__asbStickyUrl !== location.href) return 0;
+  var vh = innerHeight, sy = scrollY, moved = 0;
+  for (var j = 0; j < list.length; j++) {
+    var c = list[j], el = c.e;
+    if (!el.isConnected) continue;
+    var nt = c.top - sy, nb = c.bot - sy, shift = 0;
+    if (!isNaN(c.t) && nt < c.t) shift = Math.max(0, Math.min(c.t - nt, c.pbot - sy - nb));
+    else if (!isNaN(c.b) && nb > vh - c.b) shift = Math.min(0, Math.max(vh - c.b - nb, c.ptop - sy - nt));
+    shift = Math.round(shift);
+    if (shift !== (el.__asbShift || 0)) {
+      if (el.__asbTranslate === undefined) el.__asbTranslate = el.style.translate || "";
+      el.style.translate = shift ? "0px " + shift + "px" : el.__asbTranslate;
+      el.__asbShift = shift; moved++;
+    }
+  }
+  return moved;
+};
+// Run right after a picture. With full, the page is searched for sticky elements again.
+const STICK_MEASURE = function (full, set) {
+  var old = window.__asbSticky, els = [];
+  if (full || !old || window.__asbStickyUrl !== location.href) {
     var all = document.body ? document.body.querySelectorAll("*") : [];
-    for (var i = 0; i < all.length && i < 4000 && list.length < 60; i++) {
+    for (var i = 0; i < all.length && i < 4000 && els.length < 60; i++) {
       var e = all[i], cs;
       try { cs = getComputedStyle(e); } catch (x) { continue; }
       if (cs.position !== "sticky") continue;
@@ -345,39 +374,36 @@ const STICK = function () {
         var o = ""; try { o = getComputedStyle(p).overflowY; } catch (x) {}
         if (o === "auto" || o === "scroll" || o === "hidden") { inner = true; break; }
       }
-      if (!inner) list.push(e);
+      if (!inner) els.push(e);
     }
-    (window.__asbSticky || []).forEach(function (e) { if (list.indexOf(e) < 0 && e.__asbShift) { e.style.translate = e.__asbTranslate || ""; e.__asbShift = 0; } });
-    window.__asbSticky = list; window.__asbStickyUrl = location.href; window.__asbStickyAt = now;
-  }
-  var vh = innerHeight, moved = 0;
-  for (var j = 0; j < list.length; j++) {
-    var el = list[j];
+    (old || []).forEach(function (c) { if (els.indexOf(c.e) < 0 && c.e.__asbShift) { c.e.style.translate = c.e.__asbTranslate || ""; c.e.__asbShift = 0; } });
+  } else els = old.map(function (c) { return c.e; });
+  var sy = scrollY, list = [];
+  for (var j = 0; j < els.length; j++) {
+    var el = els[j];
     if (!el.isConnected || !el.parentElement) continue;
-    var st = getComputedStyle(el), top = parseFloat(st.top), bottom = parseFloat(st.bottom);
-    var prev = el.__asbShift || 0, r = el.getBoundingClientRect(), par = el.parentElement.getBoundingClientRect();
-    var nt = r.top - prev, nb = r.bottom - prev, shift = 0;
-    if (!isNaN(top) && nt < top) shift = Math.max(0, Math.min(top - nt, par.bottom - nb));
-    else if (!isNaN(bottom) && nb > vh - bottom) shift = Math.min(0, Math.max(vh - bottom - nb, par.top - nt));
-    shift = Math.round(shift);
-    if (shift !== prev) {
-      if (el.__asbTranslate === undefined) el.__asbTranslate = el.style.translate || "";
-      el.style.translate = shift ? "0px " + shift + "px" : el.__asbTranslate;
-      el.__asbShift = shift; moved++;
-    }
+    var st = getComputedStyle(el), prev = el.__asbShift || 0, r = el.getBoundingClientRect(), par = el.parentElement.getBoundingClientRect();
+    list.push({ e: el, top: r.top - prev + sy, bot: r.bottom - prev + sy, ptop: par.top + sy, pbot: par.bottom + sy, t: parseFloat(st.top), b: parseFloat(st.bottom) });
   }
-  return list.length + ":" + moved;
+  window.__asbSticky = list; window.__asbStickyUrl = location.href;
+  return list.length + ":" + set();
 };
-let hasSticky = true, stickAt = 0;
-// Hold the sticky elements where they belong before a picture. A page without any pays one small
-// script every few seconds and nothing else.
-async function stick() {
-  if (!hasSticky && Date.now() - stickAt < 4000) return;
-  await layout();
-  let r = "0:0";
-  try { r = String(await ev("(" + STICK + ")()")); } catch (e) { return; }
-  stickAt = Date.now();
-  hasSticky = r.split(":")[0] !== "0";
+let hasSticky = true, stickFull = 0;
+async function stickBefore() {
+  if (!hasSticky) return;
+  try { await ev("(" + STICK_SET + ")()"); } catch (e) {}
+}
+// True when the picture just taken has a sticky element in the wrong place and should be retaken.
+// A page without any pays one small script every few seconds and nothing else.
+async function stickAfter() {
+  const now = Date.now(), full = now - stickFull >= 4000;
+  if (!hasSticky && !full) return false;
+  let r;
+  try { r = String(await ev("(" + STICK_MEASURE + ")(" + full + ", " + STICK_SET + ")")); } catch (e) { return false; }
+  if (full) stickFull = now;
+  const p = r.split(":");
+  hasSticky = p[0] !== "0";
+  return +p[1] > 0;
 }
 
 // Ports something in the sandbox listens on (the dev server the agent started), from /proc/net/tcp*.
@@ -395,41 +421,6 @@ function ports() {
   return Array.from(out).sort((a, b) => a - b).slice(0, 8);
 }
 
-// Moli draws text with the fonts installed in the box and does not load a page's web fonts, so a
-// page set in Fraunces showed up in DejaVu. Most pages an agent builds take their fonts from Google
-// Fonts, which also serves plain .ttf files: fetch those once into ~/.fonts and the page's own
-// font names resolve. Only that host, only font files, a bounded number, each stylesheet once.
-const FONT_DIR = path.join(os.homedir(), ".fonts", "asb");
-const md5 = (t) => crypto.createHash("md5").update(t).digest("hex").slice(0, 16);
-async function bridgeFonts() {
-  let hrefs = [];
-  try {
-    hrefs = JSON.parse(await ev("JSON.stringify(Array.prototype.map.call(document.querySelectorAll('link[href]'), function (l) { return l.href; }).filter(function (h) { return h.indexOf('https://fonts.googleapis.com/css') === 0; }).slice(0, 6))"));
-  } catch (e) { return false; }
-  let added = 0;
-  for (const href of hrefs) {
-    const mark = path.join(FONT_DIR, md5(href) + ".done");
-    if (fs.existsSync(mark)) continue;
-    try {
-      fs.mkdirSync(FONT_DIR, { recursive: true });
-      if (fs.readdirSync(FONT_DIR).length > 400) return false;
-      // A client that does not say it is a browser is given TrueType, which is what the box can use.
-      const css = await (await fetch(href, { headers: { "user-agent": "curl/8.0" }, signal: AbortSignal.timeout(8000) })).text();
-      const urls = Array.from(new Set(css.match(/https:\/\/fonts\.gstatic\.com\/[A-Za-z0-9_\/.-]+\.(?:ttf|otf)/g) || [])).slice(0, 24);
-      for (const u of urls) {
-        const file = path.join(FONT_DIR, md5(u) + u.slice(-4));
-        if (fs.existsSync(file)) continue;
-        const buf = Buffer.from(await (await fetch(u, { signal: AbortSignal.timeout(15000) })).arrayBuffer());
-        if (buf.length < 1000 || buf.length > 4000000) continue;
-        fs.writeFileSync(file, buf); added++;
-      }
-      fs.writeFileSync(mark, href.slice(0, 500));
-    } catch (e) {}
-  }
-  if (added) { try { cp.spawnSync("fc-cache", ["-f", FONT_DIR], { stdio: "ignore", timeout: 15000 }); } catch (e) {} }
-  return added > 0;
-}
-// Fonts are read when the browser starts: start it again, at the size it had.
 let vpSpec = null;
 async function applyVp() {
   if (!vpSpec) return;
@@ -438,15 +429,6 @@ async function applyVp() {
   // The new size only takes hold at the next paint (see layout): without this the first picture
   // after the agent looked at a phone width is that phone layout, stretched to the pane.
   await layout(); await sleep(40); await layout();
-}
-async function restartBrowser() {
-  try { if (moli) moli.kill("SIGKILL"); else cp.spawnSync("pkill", ["-f", "[m]oli serve --layout --host 127.0.0.1 -p " + CDP], { stdio: "ignore" }); } catch (e) {}
-  try { if (ws) ws.close(); } catch (e) {}
-  ws = null; moli = null;
-  for (let i = 0; i < 30 && (await targets()); i++) await sleep(100);
-  await ensure();
-  spawned = false;
-  await applyVp();
 }
 
 const KEYS = { Enter: 13, Backspace: 8, Tab: 9, Escape: 27, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39, Delete: 46, Home: 36, End: 35, PageUp: 33, PageDown: 34 };
@@ -458,13 +440,12 @@ async function history() {
   return { entries, cur, canBack: cur > first, canForward: cur < entries.length - 1 };
 }
 
-async function nav(url, again) {
-  loading = true; pageErrs = []; hasSticky = true;
+async function nav(url) {
+  loading = true; pageErrs = []; hasSticky = true; stickFull = 0;
   const r = await send("Page.navigate", { url });
   if (r.error) { loading = false; throw fail("failed", r.error.message); }
   await settle(20000, 120);
   await sleep(250);
-  if (!again && (await bridgeFonts())) { await restartBrowser(); return nav(url, true); }
   return r.result && r.result.errorText ? String(r.result.errorText) : "";
 }
 
@@ -596,10 +577,7 @@ async function act(a) {
     await settle(15000, 150);
   }
   // A client-side route change renders after the click returns: give it a beat before the picture.
-  if (before && (await ev("location.href").catch(() => before)) !== before) {
-    await sleep(350);
-    if (await bridgeFonts()) { const here = await ev("location.href"); await restartBrowser(); netError = await nav(here, true); }
-  }
+  if (before && (await ev("location.href").catch(() => before)) !== before) await sleep(350);
   const st = JSON.parse(await ev(STATE));
   saveLast(st);
   if (agent) {
@@ -613,7 +591,7 @@ async function act(a) {
     if (a.op === "text") { const t = String(await ev("document.body ? document.body.innerText : ''")); out.text = t.length > 20000 ? t.slice(0, 20000) + "\n… (cut)" : t; }
     if (a.op === "elements") out.elements = JSON.parse(await ev("(function(){" + selectorOf + "; return (" + ELEMS + ")(); })()"));
     if (a.op === "shot") {
-      await stick();
+      await stickBefore();
       const full = a.full === true, fh = Math.min(Math.max(st.dh, st.vh), 8000);
       let clip = full ? { x: 0, y: 0, width: st.vw, height: fh, scale: 1 } : null, size = st.vw + "x" + (full ? fh : st.vh);
       if (a.q !== undefined) {
@@ -621,7 +599,9 @@ async function act(a) {
         const b = JSON.parse(await ev("(function(){var e=window.__asbHit;if(!e)return 'null';var b=e.getBoundingClientRect();return JSON.stringify([Math.round(b.left+scrollX),Math.round(b.top+scrollY),Math.round(b.width),Math.round(b.height)])})()") || "null");
         if (b && b[2] > 0 && b[3] > 0) { clip = { x: Math.max(0, b[0] - 12), y: Math.max(0, b[1] - 12), width: b[2] + 24, height: Math.min(b[3] + 24, 4000), scale: 1 }; size = clip.width + "x" + clip.height; }
       }
-      let pic = await send("Page.captureScreenshot", clip ? { format: "png", clip: clip } : { format: "png" });
+      const snap = () => send("Page.captureScreenshot", clip ? { format: "png", clip: clip } : { format: "png" });
+      let pic = await snap();
+      if (!pic.error && (await stickAfter())) pic = await snap();
       if (pic.error && clip) pic = await send("Page.captureScreenshot", { format: "png" });
       if (pic.error) throw fail("failed", pic.error.message);
       out.shot = pic.result.data; out.size = size;
@@ -631,15 +611,17 @@ async function act(a) {
   // Back and Forward only change when the page does: a scroll or a look does not ask again.
   if (!hist || (a.op !== "scroll" && a.op !== "shot") || st.url !== histUrl) { hist = await history(); histUrl = st.url; }
   const hs = hist;
-  await stick();
+  await stickBefore();
   // Extra page above and below what is shown, so a scroll moves at once and the next picture
   // catches up. More in the direction of travel (down, when nobody is scrolling: that is the way
   // people read), so a long scroll does not run into blank page.
   const up = a.op === "scroll" && +a.dy < 0, big = Math.min(1400, Math.round(st.vh * 1.4)), small = Math.min(450, Math.round(st.vh * 0.45));
   const top = Math.max(0, Math.min(st.sy, up ? big : small)), bottom = Math.max(0, Math.min(st.dh - st.vh - st.sy, up ? small : big));
   // Text needs a high quality to keep clean edges; at two device pixels per CSS pixel a lower one reads the same.
-  const q = dpr >= 1.75 ? 74 : 86;
-  let shot = await send("Page.captureScreenshot", { format: "jpeg", quality: q, clip: { x: st.sx, y: st.sy - top, width: st.vw, height: st.vh + top + bottom, scale: 1 } });
+  const q = dpr >= 1.75 ? 80 : 86;
+  const snap = () => send("Page.captureScreenshot", { format: "jpeg", quality: q, clip: { x: st.sx, y: st.sy - top, width: st.vw, height: st.vh + top + bottom, scale: 1 } });
+  let shot = await snap();
+  if (!shot.error && (await stickAfter())) shot = await snap();
   let over = [top, bottom];
   if (shot.error) { shot = await send("Page.captureScreenshot", { format: "jpeg", quality: q }); over = [0, 0]; }
   if (shot.error) throw fail("failed", shot.error.message);

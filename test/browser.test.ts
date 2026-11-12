@@ -160,8 +160,45 @@ test("a cut of the page is clamped to the viewport, and release never starts a b
 
 test("the helper holds sticky elements in place before a picture", () => {
   assert.match(BROWSER_DAEMON_SRC, /cs\.position !== "sticky"/);
-  assert.match(BROWSER_DAEMON_SRC, /await stick\(\);/);
   // The page's own transform is left alone: the shift uses the separate translate property.
   assert.match(BROWSER_DAEMON_SRC, /el\.style\.translate = /);
   assert.doesNotMatch(BROWSER_DAEMON_SRC, /el\.style\.transform/);
+  // Placing them costs no picture of its own: a picture is a full paint of the page.
+  const before = BROWSER_DAEMON_SRC.match(/async function stickBefore\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  const after = BROWSER_DAEMON_SRC.match(/async function stickAfter\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.ok(before && after);
+  assert.doesNotMatch(before + after, /layout\(\)|captureScreenshot/);
+});
+
+test("sticky elements are placed from the scroll position alone, and measured after a picture", () => {
+  const src = (name: string) => BROWSER_DAEMON_SRC.match(new RegExp("const " + name + " = (function \\([^)]*\\) \\{[\\s\\S]*?\\n\\});"))?.[1] ?? "";
+  const win: Record<string, unknown> = {};
+  let sy = 0;
+  // A 50px header that sits 100px down the page inside a 5000px parent, sticky at top: 0.
+  const body = { parentElement: null };
+  const parent = { parentElement: body, getBoundingClientRect: () => ({ top: -sy, bottom: 5000 - sy }) };
+  const el: Record<string, any> = { isConnected: true, parentElement: parent, style: { translate: "" } };
+  el.getBoundingClientRect = () => ({ top: 100 - sy + (el.__asbShift || 0), bottom: 150 - sy + (el.__asbShift || 0) });
+  const document = { body: Object.assign(body, { querySelectorAll: () => [el] }), documentElement: {} };
+  const getComputedStyle = (e: unknown) => (e === el ? { position: "sticky", top: "0px", bottom: "auto" } : { overflowY: "visible" });
+  const call = (name: string, ...args: unknown[]) =>
+    new Function("window", "location", "innerHeight", "scrollY", "document", "getComputedStyle", "args", "return (" + src(name) + ").apply(null, args)")(win, { href: "http://x/" }, 800, sy, document, getComputedStyle, args);
+  const set = () => call("STICK_SET");
+  assert.equal(set(), 0, "nothing is known before the first picture");
+  assert.equal(call("STICK_MEASURE", true, set), "1:0", "found, and in place at the top of the page");
+  sy = 1000;
+  assert.equal(set(), 1);
+  assert.equal(el.style.translate, "0px 900px", "held against the top edge");
+  assert.equal(set(), 0, "not moved twice");
+  assert.equal(call("STICK_MEASURE", false, set), "1:0", "the measure after the picture agrees");
+  sy = 4990;
+  set();
+  assert.equal(el.style.translate, "0px 4850px", "never past its parent's end");
+  sy = 0;
+  assert.equal(set(), 1);
+  assert.equal(el.style.translate, "", "back where the page put it");
+});
+
+test("the browser is started with pictures and web fonts switched on", () => {
+  assert.match(BROWSER_DAEMON_SRC, /\["serve", "--layout", "--image", "--font", "--host", "127\.0\.0\.1"/);
 });

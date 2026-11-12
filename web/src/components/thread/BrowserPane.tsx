@@ -285,30 +285,60 @@ export function BrowserPane({
     return () => window.clearTimeout(t);
   }, [view.w, view.h, dpr, phase, run]);
 
-  // While the agent works, the page it is building changes under you: look again every few seconds.
+  // A page changes on its own: a counter runs, pictures arrive, a dev server reloads, the agent
+  // clicks. The pane used to look again only while the agent worked, so a page that moved by
+  // itself (a speed test counting up) froze on its first picture. Now it keeps looking and paces
+  // itself by what it finds: half a second after a picture that differed, then slower and slower
+  // while nothing changes. A look that finds the same picture is answered without one.
+  const pace = React.useRef(600);
+  const touched = React.useRef(Date.now());
+  const restart = React.useRef<() => void>(() => {});
+  const liveRef = React.useRef(live);
+  liveRef.current = live;
+  const editingRef = React.useRef(editing);
+  editingRef.current = editing;
+  const blank = page?.blank;
   React.useEffect(() => {
-    if (!live || phase !== "ready" || page?.blank) return;
-    // Every 4 s while it works; every 1.3 s while it is the one driving this page, so its clicks
-    // and typing are seen as they happen.
-    let tick = 0;
-    const t = window.setInterval(() => {
-      if (document.visibilityState !== "visible" || editing) return;
-      const driving = Date.now() - agentAt.current < 20_000;
-      if (!driving && ++tick % 3 !== 0) return;
-      void run(() => ({ op: "shot" }), { quiet: true });
-    }, 1300);
-    return () => window.clearInterval(t);
-  }, [live, phase, page?.blank, editing, run]);
+    if (phase !== "ready" || blank) return;
+    let timer = 0;
+    let stop = false;
+    const tick = async () => {
+      // Nobody has touched the page or seen it change for five minutes and the agent is idle:
+      // stop asking, so the sandbox can take the browser's memory back.
+      const asleep = !liveRef.current && Date.now() - touched.current > 300_000;
+      if (document.visibilityState === "visible" && !editingRef.current && !asleep) {
+        const before = hashRef.current;
+        await run(() => ({ op: "shot" }), { quiet: true });
+        if (stop) return;
+        const driving = Date.now() - agentAt.current < 20_000;
+        if (hashRef.current !== before) {
+          // Still fresh from a click or a scroll: follow closely. A page that has been moving by
+          // itself for a while (a carousel) is followed at an easier rate.
+          const recent = Date.now() - touched.current < 30_000;
+          pace.current = recent || driving ? 450 : 1500;
+        } else pace.current = Math.min(driving ? 1300 : liveRef.current ? 4000 : 10_000, Math.round(pace.current * 1.6));
+      }
+      if (!stop) timer = window.setTimeout(tick, pace.current);
+    };
+    restart.current = () => {
+      window.clearTimeout(timer);
+      if (!stop) timer = window.setTimeout(tick, pace.current);
+    };
+    timer = window.setTimeout(tick, pace.current);
+    return () => {
+      stop = true;
+      window.clearTimeout(timer);
+      restart.current = () => {};
+    };
+  }, [phase, blank, run]);
 
-  // A click, a key or a new page can set off work that lands after the first picture: look again.
-  // Most late work lands within half a second, a fetch-then-render within a few. A look that finds
-  // the same picture is answered without one, so these are cheap.
-  const lateLook = React.useRef<number[]>([]);
+  // A click, a key, a scroll or a new page can set off work that lands after the first picture:
+  // look again soon, and keep looking while it changes.
   const lookAgain = React.useCallback(() => {
-    lateLook.current.forEach((t) => window.clearTimeout(t));
-    lateLook.current = [450, 1600, 4000].map((ms) => window.setTimeout(() => void run(() => ({ op: "shot" }), { quiet: true }), ms));
-  }, [run]);
-  React.useEffect(() => () => lateLook.current.forEach((t) => window.clearTimeout(t)), []);
+    touched.current = Date.now();
+    pace.current = 450;
+    restart.current();
+  }, []);
 
   const shown = page?.netError && page.tried ? page.tried : page?.blank ? "" : (page?.url ?? "");
   React.useEffect(() => {
@@ -331,8 +361,8 @@ export function BrowserPane({
     wentTo.current = goTo.n;
     setPins([]);
     target.current = 0;
-    void run(() => ({ op: "goto", url: goTo.url }), { nav: true });
-  }, [goTo, run]);
+    void run(() => ({ op: "goto", url: goTo.url }), { nav: true }).then(lookAgain);
+  }, [goTo, run, lookAgain]);
 
   // The message went: its numbered marks have done their job, and the next pick starts at 1.
   React.useEffect(() => {
@@ -459,10 +489,10 @@ export function BrowserPane({
           const d = Math.round(target.current - (cur?.sy ?? 0));
           if (!d) return null;
           return { op: "scroll", x: at.x, y: at.y, dy: d, seq: wheelSeq.current };
-        }, { quiet: true });
+        }, { quiet: true }).then(lookAgain);
       }, 60);
     },
-    [run]
+    [run, lookAgain]
   );
   React.useEffect(() => {
     const el = stageRef.current;
@@ -539,8 +569,8 @@ export function BrowserPane({
     window.clearTimeout(typeTimer.current);
     const text = typed.current;
     typed.current = "";
-    if (text) void run(() => ({ op: "type", text }), { quiet: true });
-  }, [run]);
+    if (text) void run(() => ({ op: "type", text }), { quiet: true }).then(lookAgain);
+  }, [run, lookAgain]);
   // Picking puts the caret in the message, so Esc has to end selecting from there too.
   React.useEffect(() => {
     if (!select) return;

@@ -1149,8 +1149,15 @@ export const OMP_MIN_MEMORY = "2G";
  */
 export const OMP_CPUS = 2;
 
+/**
+ * vCPUs every other box boots with. Claude Code waits for the account's MCP servers before its
+ * first request too: measured live on one vCPU, four server processes starting beside Claude Code
+ * took 2.6 s together (1.3 s for the slowest alone) and the first request left 5.2 s after launch.
+ */
+export const BOX_CPUS = 2;
+
 function cpuFlags(cfg: Config): string[] {
-  return cfg.cpus && cfg.cpus > 0 ? ["-c", String(cfg.cpus)] : [];
+  return ["-c", String(cfg.cpus && cfg.cpus > 0 ? cfg.cpus : BOX_CPUS)];
 }
 
 /**
