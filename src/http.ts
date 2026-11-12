@@ -40,7 +40,7 @@ import { detectTransitions, formatNotification, makeNotifier, shouldNotify, togg
 import { StartFailureStreak, isStartFailure, logTail, startFailureAlertText } from "./run-health.js";
 import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, type CanaryResult } from "./canary.js";
 import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-disk.js";
-import { fetchLatestVersions, outdatedPackages, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
+import { BAKED_MCP_PACKAGES, BASE_PACKAGES, fetchLatestVersions, imageChanges, packageNameOf, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
 import { clearImageOverride, makeImageUpdater, planImageUpdate, writeImageOverride } from "./image-update.js";
 import { bakeAgentImage, hostDisk, mcpProvisionState, sweepOrphanSandboxDirs } from "./msb.js";
 import { claimNonce, mintNonce, questionChoices, releaseNonce } from "./answer-choice.js";
@@ -4553,11 +4553,12 @@ let rebakeCheckedAt = 0;
 let rebakeAlertedAt = 0;
 const rebakeTick = async (): Promise<void> => {
   const { baked } = mcpProvisionState();
-  const names = Object.keys(baked).filter((n) => n !== "npm" && n !== "corepack");
+  const names = Object.keys(baked).filter((n) => !BASE_PACKAGES.has(n));
+  // Nothing reported yet: no box has started since boot, so there is no image to compare.
   if (!names.length) return;
   try {
-    const latest = await fetchLatestVersions(names);
-    rebakeDue = outdatedPackages(baked, latest, names);
+    const latest = await fetchLatestVersions([...new Set([...names, ...BAKED_MCP_PACKAGES.map(packageNameOf)])]);
+    rebakeDue = imageChanges(baked, latest);
     rebakeCheckedAt = Date.now();
     if (rebakeDue.length && Date.now() - rebakeAlertedAt >= 7 * 24 * 3600_000) {
       rebakeAlertedAt = Date.now();

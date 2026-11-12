@@ -607,7 +607,11 @@ remove the ones you no longer want with `msb image rm` when disk matters.
     docker compose up -d
     msb rm --force <the warm pool box>   # so the pool reseeds from the image
 
-The MCP store's own `npx` specs are baked without listing them; `BAKE_NPX` adds (or pins) more.
+The image is shared by every user, so it bakes the list chosen for everyone (`BAKED_MCP_PACKAGES` in
+`src/package-watch.ts`: mcp-remote, context7, sequential-thinking, with the reasons), not the
+operator's own MCP servers. `BAKE_NPX` adds (or pins) more. Servers not in the image are installed
+when a task starts. The daily check reports both newer releases and differences from the list
+(added / removed), and the Update image button brings the image in line.
 
 ## What a sandbox can and cannot reach (audited 2026-11-11)
 

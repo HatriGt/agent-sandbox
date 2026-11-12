@@ -98,7 +98,14 @@ type Problem = {
   retry?: boolean;
 };
 
-const changesText = (list: { name: string; baked: string; latest: string }[]) => list.map((o) => `${o.name.replace(/^@[^/]+\//, "")} ${o.baked} → ${o.latest}`).join(", ");
+/** `claude-code 2.1.273 → 2.1.322`, `context7-mcp added`, `btp-mcp-server removed`; scopes dropped for reading. */
+const changesText = (list: { name: string; baked: string; latest: string }[]) =>
+  list
+    .map((o) => {
+      const name = o.name.replace(/^@[^/]+\//, "");
+      return !o.baked ? `${name} added` : !o.latest ? `${name} removed` : `${name} ${o.baked} → ${o.latest}`;
+    })
+    .join(", ");
 
 /** Each thing that is wrong, with its consequence and the next step. Empty when the service is healthy. */
 export function problemsOf(h: HealthResponse, nowMs = Date.now()): Problem[] {
@@ -169,9 +176,9 @@ export function problemsOf(h: HealthResponse, nowMs = Date.now()): Problem[] {
     out.push({
       key: "image",
       tone: "attention",
-      title: "Newer versions are available for the sandbox image",
+      title: h.rebakeDue.every((o) => o.baked && o.latest) ? "Newer versions are available for the sandbox image" : "The sandbox image can be updated",
       body:
-        `${changesText(h.rebakeDue)}. Sandboxes keep working on the current versions until you update.` +
+        `${changesText(h.rebakeDue)}. Sandboxes keep working with what they have until you update.` +
         (fromImage ? "" : " This server boots sandboxes without a baked image, so there is nothing to update from here: bake one first (runbook, \"Baking the claude image\")."),
       action: fromImage ? "update-image" : undefined,
     });

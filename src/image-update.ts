@@ -15,32 +15,30 @@
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Outdated } from "./package-watch.js";
-
-export const CLAUDE_CODE_PACKAGE = "@anthropic-ai/claude-code";
-/** In the baked manifest but not ours to pin: they come with the base image's node. */
-const BASE_PACKAGES = new Set(["npm", "corepack"]);
+import { BAKED_MCP_PACKAGES, BASE_PACKAGES, CLAUDE_CODE_PACKAGE, packageNameOf, type Outdated } from "./package-watch.js";
 
 export interface ImagePlan {
   /** The Claude Code version the new image carries. */
   claudeCodeVersion: string;
-  /** Every other baked package, pinned: the due ones to their latest, the rest to what is baked. */
+  /** The baked list, pinned: a due package to its latest, the rest to what is baked now. */
   pins: string[];
   /** What changes, for the record and the UI. */
   changes: Outdated[];
 }
 
 /**
- * The new image differs from the current one in the packages the notice named and nothing else.
+ * The new image differs from the current one in the changes the notice named and nothing else.
  * An unpinned bake would also take that day's latest of every OTHER package — the drift the pins
  * exist to prevent (2026-10-26: one server's new release pulled in a runtime that no longer fit).
+ * A package that is baked but no longer on the list is simply not installed.
  */
-export function planImageUpdate(baked: Readonly<Record<string, string>>, due: readonly Outdated[], currentClaudeCode: string): ImagePlan {
-  const latest = new Map(due.map((o) => [o.name, o.latest]));
+export function planImageUpdate(baked: Readonly<Record<string, string>>, due: readonly Outdated[], currentClaudeCode: string, list: readonly string[] = BAKED_MCP_PACKAGES): ImagePlan {
+  const latest = new Map(due.filter((o) => o.latest).map((o) => [o.name, o.latest]));
   const pins: string[] = [];
-  for (const [name, version] of Object.entries(baked)) {
+  for (const name of new Set(list.map(packageNameOf))) {
     if (BASE_PACKAGES.has(name) || name === CLAUDE_CODE_PACKAGE) continue;
-    pins.push(`${name}@${latest.get(name) ?? version}`);
+    const version = latest.get(name) ?? baked[name];
+    pins.push(version ? `${name}@${version}` : name);
   }
   return {
     claudeCodeVersion: latest.get(CLAUDE_CODE_PACKAGE) ?? currentClaudeCode,

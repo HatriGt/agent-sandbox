@@ -1,3 +1,4 @@
+import { BAKED_MCP_PACKAGES } from "./package-watch.js";
 /**
  * Thin wrapper over the microsandbox CLI (`msb`), exposing only the operations the
  * orchestrator needs. Command shapes are the ones verified in docs/runbook.md.
@@ -721,14 +722,9 @@ export async function bakeAgentImage(cfg: Config, tag: string, extraNpx: string[
   const digest = insp.stdout.match(/^Digest:\s+(sha256:[0-9a-f]{64})$/m)?.[1];
   if (!digest) throw new Error(`cannot resolve the digest of ${cfg.image}`);
   const repo = cfg.image.replace(/[:@].*$/, "");
-  let specs: string[] = [];
-  try {
-    const conf = toClaudeMcpConfig(await loadMcpStore(cfg), boxSecretPolicy(cfg));
-    if (conf) specs = npxPackagesOf(conf);
-  } catch {
-    // no operator MCP store reachable from this process — OMP_BAKE_NPX alone
-  }
-  const df = agentImageDockerfile(cfg, `${repo}@${digest}`, bakeSpecOrder(specs, extraNpx), agent);
+  // The image is shared by every user, so it carries the list chosen for everyone
+  // (BAKED_MCP_PACKAGES), not the operator's own servers; `extraNpx` adds or pins more.
+  const df = agentImageDockerfile(cfg, `${repo}@${digest}`, bakeSpecOrder([...BAKED_MCP_PACKAGES], extraNpx), agent);
   const q = shellQuote(tag);
   const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, 'sh -c "$(cat)"'], {
     timeoutMs: 1_800_000,
