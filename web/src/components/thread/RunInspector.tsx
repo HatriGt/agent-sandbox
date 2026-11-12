@@ -233,6 +233,30 @@ function RunTab({
         {!agentName && !model && !box.harness && !box.workflow && !box.skills?.length && <p className="text-faint text-micro">Defaults.</p>}
       </Section>
 
+      {box.memory && (
+        <Section title="Memory">
+          <Row label="Handed over">
+            {[box.memory.picked > 0 && `${box.memory.picked} for this task`, box.memory.core > 0 && `${box.memory.core} always on`, box.memory.episodes > 0 && `${box.memory.episodes} earlier run${box.memory.episodes === 1 ? "" : "s"}`].filter(Boolean).join(", ") || "nothing"}
+          </Row>
+          {box.memory.areas.length > 0 && (
+            <Row label="Areas">
+              <span className="stamp">{box.memory.areas.join(", ")}</span>
+            </Row>
+          )}
+          {box.memory.notes.length > 0 && (
+            <ul className="mt-1.5 flex flex-col gap-1">
+              {box.memory.notes.slice(0, 6).map((n) => (
+                <li key={n.id} className="text-muted-foreground line-clamp-2 text-micro leading-snug" title={n.text}>
+                  <span className="text-faint">{n.kind}</span> {n.text}
+                </li>
+              ))}
+              {box.memory.picked > 6 && <li className="text-faint text-micro">and {box.memory.picked - 6} more</li>}
+            </ul>
+          )}
+          {!box.memory.matched && box.memory.picked === 0 && box.memory.core + box.memory.episodes > 0 && <p className="text-faint mt-1 text-micro">No note matched the task, so only the standing ones went in.</p>}
+        </Section>
+      )}
+
       <Section title="Repositories">
         {repos.length ? (
           <ul className="flex flex-col gap-1">

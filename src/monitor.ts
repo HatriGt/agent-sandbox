@@ -72,6 +72,8 @@ export interface BoxView {
   harness?: { id: string; name: string; line: string };
   /** Skills the run was pointed at: explicit `/name` from the user, or the controller's auto match. */
   skills?: { name: string; how: "explicit" | "auto" }[];
+  /** What the latest turn was handed from memory (src/memory-store.ts MemoryReceipt). */
+  memory?: import("./memory-store.js").MemoryReceipt;
 }
 
 /** A used/total pair in MiB — the shape a usage meter needs. */

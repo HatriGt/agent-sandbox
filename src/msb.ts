@@ -15,7 +15,7 @@ import { guardNodeProgram } from "./guard.js";
 import { loadMcpStore, toClaudeMcpConfig, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
 import { boxSkillSelection, buildSkillsTarBase64, loadSkillStore, skillsForBox, type SkillDef } from "./skill-store.js";
 import { SKILLS_DIR, SKILLS_INDEX, recordSkillPicks, skillTurnHint, skillsIndex } from "./skill-match.js";
-import { loadMemoryStore, markPlaybooksUsed, playbookHint, renderMemoryArchive, renderMemoryMd, saveMemoryStore, selectMemory } from "./memory-store.js";
+import { loadMemoryStore, markUsed, playbookHint, receiptOf, recordReceipt, renderMemoryArchive, renderMemoryMd, saveMemoryStore, selectMemory, type MemoryReceipt } from "./memory-store.js";
 import { MEMORY_ALL_MD, MEMORY_MD, memorySetup } from "./drivers/memory-tool.js";
 import { repoSlugFromUrl } from "./setup-store.js";
 import { harnessPromptHint, reposPromptHint, type RepoLayout } from "./agent-prompt.js";
@@ -1486,32 +1486,71 @@ export async function boxRepoSlugs(cfg: Config, box: string): Promise<string[]> 
   return repos;
 }
 
+/** Notes already counted as recalled by a box: a twenty-turn thread is one use, not twenty. */
+const recalledBy = new Map<string, Set<string>>();
+/** The latest receipt per box, so the watch path never has to open the owner's store. */
+const memoryReceipts = new Map<string, MemoryReceipt | null>();
+
+/**
+ * What the box's latest turn was handed from memory, for the thread. Read from this process when
+ * it installed it; otherwise once from the owner's store (a restart, a sleeping box).
+ */
+export function memoryReceiptOf(box: string, owner?: string): MemoryReceipt | undefined {
+  if (!memoryReceipts.has(box)) {
+    try {
+      memoryReceipts.set(box, loadMemoryStore(owner).receipts?.[box] ?? null);
+    } catch {
+      return undefined;
+    }
+  }
+  return memoryReceipts.get(box) ?? undefined;
+}
+
+/** A box is gone: forget what this process knew of its recalls. */
+export function forgetMemoryReceipt(box: string): void {
+  recalledBy.delete(box);
+  memoryReceipts.delete(box);
+}
+
 /**
  * Drop the owner's memory (src/memory-store.ts) into the box before every run/resume: MEMORY.md
  * (Core + the notes relevant to `task`) and MEMORY-all.md (every note, for `memory search`), for
  * the operator plus the repos checked out here. Replaced whole every turn, so a dashboard edit or
  * delete reaches the next turn; removed when there is nothing (or memory is off) so a stale file
- * never lingers. Playbooks the task matched get their use counter bumped, and on the first turn
- * the returned `hint` names them (it rides the skill-hint env, see skillHintFlags). Best-effort:
- * memory must never block a run.
+ * never lingers. Every note the task brought up counts one recall per run (it decides what the
+ * caps keep and tells the Memory page which notes earn their place), the turn's receipt is kept
+ * for the thread ("Memory: 6 notes"), and on the first turn the returned `hint` names the matched
+ * playbooks (it rides the skill-hint env, see skillHintFlags). Best-effort: memory must never
+ * block a run.
  */
 export async function installMemory(cfg: Config, box: string, task?: string, opts: { firstTurn?: boolean } = {}): Promise<{ hint: string }> {
   try {
     const store = loadMemoryStore();
     const rm = `rm -f ${[...MEMORY_PATHS, ...MEMORY_ALL_PATHS].join(" ")}`;
-    if (!store.enabled || (!store.global.length && !Object.keys(store.repos).length)) {
+    if (!store.enabled || (!store.global.length && !Object.keys(store.repos).length && !Object.keys(store.episodes ?? {}).length)) {
       await exec(cfg, box, rm);
       return { hint: "" };
     }
     const repos = await boxRepoSlugs(cfg, box);
-    const md = renderMemoryMd(store, repos, task);
-    const all = renderMemoryArchive(store, repos);
-    if (!md || !all) {
+    const md = renderMemoryMd(store, repos, task, { box });
+    // A repo with history but no notes yet still gets MEMORY.md; the archive then says so.
+    const all = renderMemoryArchive(store, repos) ?? "# Memory archive\n\nNo notes yet for this operator and these repos.\n";
+    if (!md) {
       await exec(cfg, box, rm);
       return { hint: "" };
     }
-    const matched = selectMemory(store, repos, task).matchedPlaybooks;
-    if (markPlaybooksUsed(matched)) {
+    const sel = selectMemory(store, repos, task, { box });
+    const matched = sel.matchedPlaybooks;
+    // Only a real turn is a recall: the pool's warm-up installs memory with no task and no reader.
+    if (task?.trim()) {
+      const counted = recalledBy.get(box) ?? new Set<string>();
+      recalledBy.set(box, counted);
+      const fresh = sel.picked.filter((n) => !counted.has(n.id));
+      for (const n of fresh) counted.add(n.id);
+      markUsed(fresh);
+      const receipt = receiptOf(sel);
+      recordReceipt(store, box, receipt);
+      memoryReceipts.set(box, receipt);
       try {
         saveMemoryStore(store);
       } catch {

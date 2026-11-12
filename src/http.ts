@@ -21,7 +21,7 @@ import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
 import { deps as rawDeps, resolveCredsForBox, detectSetupInBox } from "./deps.js";
 import { SETUP_SENTINEL, parseSentinel, type SetupProfile } from "./setup-profile.js";
-import { addManualNote, deleteNote, exportMemoryMarkdown, getNote, importMemoryMarkdown, loadMemoryStore, noteHistory, playbookToSkill, saveMemoryStore, updateNote, viewMemory, type MemoryStore } from "./memory-store.js";
+import { addManualNote, deleteNote, exportMemoryMarkdown, getNote, importMemoryMarkdown, forgetEpisode, loadMemoryStore, noteHistory, playbookToSkill, recordEpisode, saveMemoryStore, updateNote, viewMemory, type MemoryReceipt, type MemoryStore } from "./memory-store.js";
 import { MemoryHarvester } from "./memory-harvest.js";
 import { deleteSetup, getSetup, listSetups, recordLearned, repoKey, repoSlugFromUrl, saveSetup } from "./setup-store.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
@@ -92,7 +92,7 @@ import { FILE_INDEX_CAP, fileDetailsCommand, makeFileIndex, parseFileDetails, pa
 import { confineFsOp, exitCodeOf, fsCommand, fsFailure } from "./fs-ops.js";
 import { canRevert, captureCmd, checkpointForMessage, listCmd, parseCkptLs, revertCmd, withBoxLock } from "./checkpoint.js";
 import { fetchModels, isAllowedModel } from "./models.js";
-import { execInBox, boxRepoSlugs } from "./msb.js";
+import { execInBox, boxRepoSlugs, forgetMemoryReceipt, memoryReceiptOf } from "./msb.js";
 import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount, setDefaultAccount } from "./gh-token-store.js";
 import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
@@ -494,6 +494,7 @@ const retriesOf = (box: string) => verifyRetrier?.retriesOf(box) ?? 0;
     verifyRetrier?.forget(session);
     dispatcher.forget(session);
     memoryHarvester.forget(session);
+    forgetMemoryReceipt(session);
     boxRepoCache.delete(session);
     memoryTickAt.delete(session);
   };
@@ -693,6 +694,7 @@ const runProvenance = (box: string, agent: string | undefined): {
   provider?: string;
   startedBy?: ReturnType<typeof startedByOf>;
   skills?: SkillPick[];
+  memory?: MemoryReceipt;
 } => {
   const model = boxModels.get(box);
   const provider = boxProviders.get(box);
@@ -708,8 +710,18 @@ const runProvenance = (box: string, agent: string | undefined): {
     ...(provider ? { provider } : {}),
     ...(startedBy ? { startedBy } : {}),
     ...skillPicksView(box),
+    ...memoryReceiptView(box),
   };
 };
+/** What the run's latest turn was handed from memory ("Memory: 6 notes"); absent when nothing was. */
+function memoryReceiptView(box: string): { memory?: MemoryReceipt } {
+  try {
+    const r = memoryReceiptOf(box, ownerOf(db, box) ?? OPERATOR_OWNER);
+    return r && (r.core || r.picked || r.episodes || r.areas.length) ? { memory: r } : {};
+  } catch {
+    return {};
+  }
+}
 /** The skills a run was pointed at ("Skills: fix-issue (auto)"); absent when none. */
 function skillPicksView(box: string): { skills?: SkillPick[] } {
   try {
@@ -850,8 +862,17 @@ async function memoryTick(boxes: BoxView[]): Promise<void> {
  * not seen yet, plus the questions the operator answered as decisions. Stamps the digest with this
  * run's total (live + final) by kind.
  */
-const finishMemory = (box: string, owner: string, log: string, digest: RunDigest, repos: string[]): void => {
+const finishMemory = (box: string, owner: string, log: string, digest: RunDigest, repos: string[], closing = ""): void => {
   const { added } = harvestMemory(box, owner, log, repos, { force: true, questions: digest.questions });
+  // The episodic half: what this run was asked and how it ended, for the next run in the same repo.
+  if (repos.length && (digest.state === "done" || digest.state === "failed") && !digest.startFailure) {
+    try {
+      const store = loadMemoryStore(owner);
+      if (recordEpisode(store, repos, { box, task: digest.task, state: digest.state, summary: closing, files: digest.files.map((f) => f.path) })) saveMemoryStore(store, owner);
+    } catch (e) {
+      console.error(`[memory] ${box}: episode not saved: ${(e as Error).message.slice(0, 200)}`);
+    }
+  }
   if (added.length) console.error(`[memory] ${box}: remembered ${added.length} note${added.length === 1 ? "" : "s"} at finish`);
   const kinds = memoryHarvester.rememberedKinds(box);
   const total = Object.values(kinds).reduce((a, b) => a + (b ?? 0), 0);
@@ -948,7 +969,8 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet
   // that is already down keeps its notes too (as global ones — the repo can no longer be asked).
   const repos = up ? await collectRepoSetup(box, runOwner).catch((e) => (console.error(`[setup] ${box}: ${(e as Error).message.slice(0, 200)}`), [])) : [];
   try {
-    finishMemory(box, runOwner, snap.log ?? "", digest, repos.map((r) => r.slug));
+    const closing = [...events].reverse().find((e) => e.kind === "say")?.text ?? "";
+    finishMemory(box, runOwner, snap.log ?? "", digest, repos.map((r) => r.slug), closing);
     // Knowledge-base drift: notes anchored to files this run touched are now "unverified" until a
     // later run (or the operator) confirms them. Only files the box could still report count.
     const stale = memoryHarvester.markStale(box, runOwner, repos.map((r) => r.slug), files.map((f) => f.path));
@@ -1207,6 +1229,7 @@ const readFleet = makeFleetReader(
       ...harnessLineOf(b.name),
       ...workflowLineOf(b.name),
       ...skillPicksView(b.name),
+      ...memoryReceiptView(b.name),
       // The task and any pending question are operator/agent text too — same redaction as the log.
       ...(b.task ? { task: redactor.redact(b.task) } : {}),
       ...(b.question ? { question: redactor.redact(b.question) } : {}),
@@ -2648,6 +2671,9 @@ const memoryOwner = (res: Response): string => {
 // A revised note carries its earlier versions (capped at 10); every other note stays as it is.
 const memoryView = (store: MemoryStore) => ({
   enabled: store.enabled,
+  // The episodic half and the proof of use: what runs did, and what each recent run was handed.
+  episodes: Object.entries(store.episodes ?? {}).flatMap(([repo, list]) => list.map((e) => ({ ...e, repo }))).sort((a, b) => b.at - a.at),
+  receipts: Object.entries(store.receipts ?? {}).map(([box, r]) => ({ box, at: r.at, core: r.core, areas: r.areas, picked: r.picked, episodes: r.episodes, matched: r.matched })).sort((a, b) => b.at - a.at),
   notes: viewMemory(store).map((n) => {
     if (!n.supersedes) return n;
     const history = noteHistory(store, n.id);
@@ -2699,9 +2725,15 @@ app.delete("/memory-notes.json", async (req: Request, res: Response) => {
   const owner = memoryOwner(res);
   // The contract is ?id=; a body id is still honoured for clients built before it.
   const id = typeof req.query.id === "string" ? req.query.id : typeof (req.body as { id?: unknown } | undefined)?.id === "string" ? String((req.body as { id: string }).id) : "";
+  // ?episode=<box> forgets what a run did, the same way ?id= forgets a note.
+  const episode = typeof req.query.episode === "string" ? req.query.episode : "";
   try {
     const store = await withStoreLock("memory", async () => {
       const store = loadMemoryStore(owner);
+      if (episode && forgetEpisode(store, episode)) {
+        saveMemoryStore(store, owner);
+        res.locals.auditAction = "memory.forget";
+      }
       if (id && deleteNote(store, id)) {
         saveMemoryStore(store, owner);
         memoryHarvester.noteDeleted(id);

@@ -18,6 +18,7 @@ import { Bar } from "@/components/thread/Skeletons";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { Swap } from "@/components/ui/swap";
 import { MemoryOverview } from "@/components/memory/MemoryOverview";
+import { MemoryUse } from "@/components/memory/MemoryUse";
 import { areaId, sectionId } from "@/components/memory/MemoryGraph";
 import { Inline, NoteStatement, noteHeadline } from "@/components/memory/noteText";
 import { isOperatorKind, KIND_ICON, KIND_LABEL, KIND_PLURAL, KINDS, plural } from "@/components/memory/kinds";
@@ -209,7 +210,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
   const promote = async (n: MemoryNote) => {
     try {
       const r = await api.memoryPromote(n.id);
-      cached.setData({ enabled: r.enabled, notes: r.notes });
+      cached.setData({ ...cached.data, enabled: r.enabled, notes: r.notes });
       toast.success(`Skill "${r.skill.name}" drafted`, {
         action: {
           label: "Open",
@@ -223,6 +224,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
   };
 
   const total = notes?.length ?? 0;
+  const forgetEpisode = (box: string) => void apply(api.memoryEpisodeDelete(box), "Run forgotten");
   const selectNote = (id: string) => reveal(`mem-note-${id}`);
   const dim = !data?.enabled && "opacity-60";
 
@@ -260,6 +262,18 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
         )
       }
     >
+      {data && !data.enabled && (
+        <div role="status" className="border-attention/40 bg-attention/5 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border px-4 py-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-foreground text-body font-medium">Memory is off</p>
+            <p className="text-muted-foreground text-meta">Runs start from scratch: none of this is handed to them, and nothing they learn is saved.</p>
+          </div>
+          <Button size="sm" onClick={() => void apply(api.memoryNoteUpdate({ enabled: true }), "Memory on")}>
+            Turn on
+          </Button>
+        </div>
+      )}
+
       <Collapse open={composing}>
         <Composer
           id="memory-composer"
@@ -281,18 +295,22 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
           ))}
         </ul>
       ) : total === 0 ? (
-        <MemoryOverview notes={[]} pending={0} onReview={() => {}} onSelect={() => {}} onSection={() => {}} />
+        <div className="flex flex-col gap-4">
+          <MemoryOverview notes={[]} pending={0} onReview={() => {}} onSelect={() => {}} onSection={() => {}} />
+          {!!data?.episodes?.length && <MemoryUse notes={[]} episodes={data.episodes} receipts={data.receipts ?? []} onForgetEpisode={forgetEpisode} />}
+        </div>
       ) : (
         <>
           <div className="flex flex-col gap-4">
             <MemoryOverview notes={notes} pending={model.pending.length} onReview={() => reviewRef.current?.focus()} onSelect={selectNote} onSection={(id) => reveal(id)} />
+            <MemoryUse notes={notes} episodes={data?.episodes ?? []} receipts={data?.receipts ?? []} onForgetEpisode={forgetEpisode} />
 
             <Collapse open={model.pending.length > 0}>
               <section
                 ref={reviewRef}
                 tabIndex={-1}
                 aria-labelledby="memory-review-title"
-                className="border-attention/40 bg-card shadow-e1 focus-visible:ring-ring rounded-xl border border-l-4 focus-visible:ring-2 focus-visible:outline-none"
+                className="border-attention/40 bg-card shadow-e1 focus-visible:ring-ring rounded-xl border focus-visible:ring-2 focus-visible:outline-none"
               >
                 <header className="flex flex-wrap items-baseline gap-x-2 px-3.5 pt-3 pb-1">
                   <h2 id="memory-review-title" className="text-foreground text-body font-medium">
@@ -832,7 +850,9 @@ function NoteRow({
               </>
             )}
             {note.pinned && " · pinned"}
-            {playbook && uses > 0 && ` · used ${uses}×`}
+            {uses > 0 && (
+              <span title={note.lastUsed ? `Last handed to a run ${fmtAgo(Math.floor(note.lastUsed / 1000))}` : undefined}>{` · used by ${uses} run${uses === 1 ? "" : "s"}`}</span>
+            )}
             {note.paths && note.paths.length > 0 && (
               <>
                 {" · "}

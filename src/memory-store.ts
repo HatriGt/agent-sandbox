@@ -53,7 +53,10 @@ export interface MemoryNote {
   supersedes?: string;
   /** Set when a newer note superseded this one: it leaves MEMORY.md and the caps, stays as history. */
   until?: number;
-  /** Playbooks: how often a task matched it (promote-to-skill signal) and when last. */
+  /**
+   * Recall: how many runs were handed this note because their task matched it, and when last. A
+   * playbook's count is its promote-to-skill signal; for every kind it decides what the caps keep.
+   */
   uses?: number;
   lastUsed?: number;
   /**
@@ -77,6 +80,45 @@ export interface MemoryStore {
   repos: Record<string, MemoryNote[]>;
   /** Keys of notes the operator forgot: a re-harvest of an old run's log must not bring them back. */
   forgotten?: string[];
+  /** What finished runs did, per repo, newest last (see recordEpisode). The episodic half of memory. */
+  episodes?: Record<string, Episode[]>;
+  /** What each recent run was handed, by box (see recordReceipt). */
+  receipts?: Record<string, MemoryReceipt>;
+}
+
+/**
+ * One finished run in a repo: what was asked, how it ended, what it touched. Notes say what is true
+ * about a product; an episode says what happened, so the next run on the same thing starts from the
+ * last one instead of from nothing. Written by the controller at the finish edge, never by the agent.
+ */
+export interface Episode {
+  box: string;
+  at: number;
+  /** The first message of the run, trimmed. */
+  task: string;
+  state: "done" | "failed";
+  /** The agent's closing words, trimmed. */
+  summary?: string;
+  files?: string[];
+  /** Finished turns in this run so far. */
+  turns: number;
+}
+
+/** What one run was handed before its latest turn: the proof that memory was used, and how. */
+export interface MemoryReceipt {
+  at: number;
+  /** Always-on notes (preferences, rules, pinned). */
+  core: number;
+  /** Knowledge-base areas served in full. */
+  areas: string[];
+  /** The notes picked for the task (area pages and "For this task"), first line each. */
+  notes: Array<{ id: string; kind: MemoryKind; text: string }>;
+  /** How many notes were picked (the list above is capped). */
+  picked: number;
+  /** Earlier runs listed under "Recent work". */
+  episodes: number;
+  /** True when the task matched something; false when the newest were served for want of a match. */
+  matched: boolean;
 }
 
 /** A note as parsed from the sentinel grammar, before it has an id/scope/status. */
@@ -121,6 +163,20 @@ export const MEMORY_LIMITS = {
   maxPathChars: 120,
   /** Stem overlap (0..1) at which a new same-kind note in the same area revises an existing one. */
   revisionOverlap: 0.6,
+  /** The same for notes outside any area: only a near-copy counts, there is no page to narrow it. */
+  duplicateOverlap: 0.8,
+  /** Episodes kept per repo, shown per turn, and the trims of their parts. */
+  episodesPerRepo: 20,
+  episodesShown: 5,
+  episodeTaskChars: 200,
+  episodeSummaryChars: 280,
+  episodeFiles: 6,
+  /** Receipts kept (one per box) and the notes each one lists. */
+  receipts: 40,
+  receiptNotes: 12,
+  /** One recall keeps a note as long as this much extra age would lose it (see keepRank). */
+  useWorthMs: 14 * 86_400_000,
+  maxUsesCounted: 12,
 } as const;
 
 /** A pending (proposed) note nobody acted on is kept after this long — the toast is a veto, not a gate. */
@@ -155,12 +211,61 @@ export function parseMemoryStore(raw: string): MemoryStore {
       const repos: Record<string, MemoryNote[]> = {};
       if (obj.repos && typeof obj.repos === "object") for (const [k, v] of Object.entries(obj.repos)) repos[k] = notes(v, "repo");
       const forgotten = Array.isArray(obj.forgotten) ? obj.forgotten.filter((k: unknown): k is string => typeof k === "string") : [];
-      return { enabled: obj.enabled !== false, global: notes(obj.global, "operator"), repos, ...(forgotten.length ? { forgotten } : {}) };
+      const episodes = parseEpisodes(obj.episodes);
+      const receipts = parseReceipts(obj.receipts);
+      return {
+        enabled: obj.enabled !== false,
+        global: notes(obj.global, "operator"),
+        repos,
+        ...(forgotten.length ? { forgotten } : {}),
+        ...(Object.keys(episodes).length ? { episodes } : {}),
+        ...(Object.keys(receipts).length ? { receipts } : {}),
+      };
     }
   } catch {
     /* fall through */
   }
   return emptyMemoryStore();
+}
+
+function parseEpisodes(v: unknown): Record<string, Episode[]> {
+  const out: Record<string, Episode[]> = {};
+  if (!v || typeof v !== "object") return out;
+  for (const [repo, list] of Object.entries(v as Record<string, unknown>)) {
+    if (!Array.isArray(list)) continue;
+    const eps = list
+      .filter((e) => e && typeof e.box === "string" && typeof e.task === "string" && typeof e.at === "number")
+      .map((e): Episode => ({
+        box: e.box,
+        at: e.at,
+        task: e.task,
+        state: e.state === "failed" ? "failed" : "done",
+        ...(typeof e.summary === "string" && e.summary ? { summary: e.summary } : {}),
+        ...(Array.isArray(e.files) && e.files.length ? { files: e.files.filter((f: unknown): f is string => typeof f === "string") } : {}),
+        turns: typeof e.turns === "number" && e.turns > 0 ? e.turns : 1,
+      }));
+    if (eps.length) out[repo] = eps;
+  }
+  return out;
+}
+
+function parseReceipts(v: unknown): Record<string, MemoryReceipt> {
+  const out: Record<string, MemoryReceipt> = {};
+  if (!v || typeof v !== "object") return out;
+  for (const [box, r] of Object.entries(v as Record<string, Record<string, unknown>>)) {
+    if (!r || typeof r.at !== "number") continue;
+    const notes = Array.isArray(r.notes) ? r.notes.filter((n) => n && typeof n.id === "string" && typeof n.text === "string" && isMemoryKind(n.kind)) : [];
+    out[box] = {
+      at: r.at,
+      core: typeof r.core === "number" ? r.core : 0,
+      areas: Array.isArray(r.areas) ? r.areas.filter((a): a is string => typeof a === "string") : [],
+      notes: notes.map((n) => ({ id: n.id, kind: n.kind, text: n.text })),
+      picked: typeof r.picked === "number" ? r.picked : notes.length,
+      episodes: typeof r.episodes === "number" ? r.episodes : 0,
+      matched: r.matched === true,
+    };
+  }
+  return out;
 }
 
 function migrateNote(n: Record<string, unknown>, scope: MemoryScope): MemoryNote {
@@ -251,7 +356,7 @@ export function pathMatches(anchor: string, file: string): boolean {
 }
 
 export function serializeMemoryStore(store: MemoryStore): string {
-  return JSON.stringify(store, null, 2);
+  return JSON.stringify(store);
 }
 
 /** Case/whitespace/punctuation-insensitive key, so "Use pnpm." and "use pnpm" are one fact. */
@@ -473,12 +578,14 @@ export function textOverlap(a: string, b: string): number {
  * knowledge rather than a rewrite.
  */
 export function findRevised(list: MemoryNote[], p: ParsedNote): MemoryNote | undefined {
-  if (!p.area || OPERATOR_KINDS.has(p.kind)) return undefined;
+  if (OPERATOR_KINDS.has(p.kind)) return undefined;
+  // Inside an area a rewrite is likely; outside one only a near-copy is taken for the same note.
+  const bar = p.area ? MEMORY_LIMITS.revisionOverlap : MEMORY_LIMITS.duplicateOverlap;
   let best: { n: MemoryNote; s: number } | undefined;
   for (const n of list) {
-    if (!isActive(n) || n.kind !== p.kind || n.area !== p.area) continue;
+    if (!isActive(n) || n.kind !== p.kind || (n.area ?? "") !== (p.area ?? "")) continue;
     const s = textOverlap(n.text, p.text);
-    if (s >= MEMORY_LIMITS.revisionOverlap && (!best || s > best.s)) best = { n, s };
+    if (s >= bar && (!best || s > best.s)) best = { n, s };
   }
   return best?.n;
 }
@@ -589,8 +696,17 @@ export function addNotes(list: MemoryNote[], facts: string[], meta: { source: st
 }
 
 /**
- * Caps: per kind, the OLDEST UNPINNED active notes go first; superseded history is capped on its
- * own. Everything pinned means nothing of that kind is evicted — the operator asked for all of it.
+ * What a note is worth keeping: when it was last written or recalled, plus a fixed span for every
+ * run that was handed it. A note runs keep reaching for outlives a newer one nobody has read.
+ */
+export function keepRank(n: MemoryNote): number {
+  return Math.max(n.at, n.lastUsed ?? 0) + Math.min(n.uses ?? 0, MEMORY_LIMITS.maxUsesCounted) * MEMORY_LIMITS.useWorthMs;
+}
+
+/**
+ * Caps: per kind, the LEAST USEFUL UNPINNED active notes go first (keepRank: oldest and never
+ * recalled); superseded history is capped on its own. Everything pinned means nothing of that kind
+ * is evicted — the operator asked for all of it.
  */
 function evict(list: MemoryNote[], caps: Partial<Record<MemoryKind, number>> = MEMORY_LIMITS.perKind): void {
   for (const kind of MEMORY_KINDS) {
@@ -598,7 +714,7 @@ function evict(list: MemoryNote[], caps: Partial<Record<MemoryKind, number>> = M
     for (;;) {
       const active = list.filter((n) => isActive(n) && n.kind === kind);
       if (active.length <= cap) break;
-      const victim = active.find((n) => !n.pinned);
+      const victim = active.filter((n) => !n.pinned).reduce<MemoryNote | undefined>((low, n) => (!low || keepRank(n) < keepRank(low) ? n : low), undefined);
       if (!victim) break;
       list.splice(list.indexOf(victim), 1);
     }
@@ -846,8 +962,14 @@ export interface MemorySelection {
   core: MemoryNote[];
   /** Facts/decisions/lessons/playbooks for the box's repos, relevant to the task (else the newest). */
   relevant: MemoryNote[];
-  /** Playbooks the task matched, for uses++ and the first-turn hint. */
+  /** Playbooks the task matched, for the first-turn hint. */
   matchedPlaybooks: MemoryNote[];
+  /** Every note picked for the task: the area pages and "For this task". Core is not a pick. */
+  picked: MemoryNote[];
+  /** True when at least one of those was chosen by score rather than recency. */
+  matched: boolean;
+  /** Earlier runs in these repos, newest first (see selectEpisodes). */
+  episodes: Array<Episode & { repo: string; similar: boolean }>;
   /** True when `relevant` was chosen by score rather than recency. */
   byRelevance: boolean;
   /** Knowledge base: every area of the box's repos (the index) and the ones shown in full for this task. */
@@ -925,15 +1047,17 @@ export function scoreNote(task: string, n: MemoryNote): number {
  * `relevantMax` notes scoring at or above the threshold against the task, or — when nothing or no
  * task is given — the newest `relevantMax`. Pinned notes sit in Core and are not repeated.
  */
-export function selectMemory(store: MemoryStore, repos: string[], task?: string): MemorySelection {
+export function selectMemory(store: MemoryStore, repos: string[], task?: string, opts: { box?: string } = {}): MemorySelection {
   const visible = visibleNotes(store, repos);
   const core = visible.filter((n) => OPERATOR_KINDS.has(n.kind) || n.pinned).sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || a.at - b.at);
   // Area notes are served as pages; "For this task" is for the notes nobody filed under an area.
   const rest = visible.filter((n) => !OPERATOR_KINDS.has(n.kind) && !n.pinned && !n.area);
   const areas = areaIndex(store, repos);
   let areaPages: AreaSummary[] = [];
+  let areasMatched = false;
   if (areas.length) {
     const scoredAreas = task?.trim() ? areas.map((a) => ({ a, s: scoreArea(task, a) })).filter((x) => x.s >= MEMORY_LIMITS.relevanceThreshold) : [];
+    areasMatched = scoredAreas.length > 0;
     areaPages = scoredAreas.length
       ? scoredAreas.sort((x, y) => y.s - x.s || y.a.updated - x.a.updated).slice(0, MEMORY_LIMITS.relevantAreas).map((x) => x.a)
       : [...areas].sort((x, y) => y.updated - x.updated).slice(0, 1);
@@ -950,7 +1074,108 @@ export function selectMemory(store: MemoryStore, repos: string[], task?: string)
   // Chronological inside the section so the file reads as a history.
   relevant.sort((a, b) => a.at - b.at);
   const matchedPlaybooks = byRelevance ? [...relevant, ...areaPages.flatMap((a) => a.notes)].filter((n) => n.kind === "playbook") : [];
-  return { core, relevant, matchedPlaybooks, byRelevance, areas, areaPages };
+  // What counts as recalled: only what the task itself brought up. The newest-notes fallback is
+  // served, but nothing asked for it, so it earns no use.
+  const picked = [...(areasMatched ? areaPages.flatMap((a) => a.notes.slice(0, MEMORY_LIMITS.areaPageMax)) : []), ...(byRelevance ? relevant : [])];
+  return { core, relevant, matchedPlaybooks, byRelevance, areas, areaPages, picked, matched: areasMatched || byRelevance, episodes: selectEpisodes(store, repos, task, opts.box) };
+}
+
+/* ───────────────────────── episodes: what earlier runs did ───────────────────────── */
+
+const oneLine = (s: string, max: number): string => {
+  const t = s.replace(/<!--[\s\S]*?-->/g, " ").replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t;
+};
+
+/**
+ * File a finished turn under each of the run's repos. One episode per box: a later turn of the same
+ * run updates it (the first task stays — it names the work; the summary and files are the latest).
+ * Returns false when memory is off or the run had no repo to file under.
+ */
+export function recordEpisode(store: MemoryStore, repos: string[], ep: { box: string; task: string; state: "done" | "failed"; summary?: string; files?: string[]; now?: number }): boolean {
+  if (!store.enabled || !repos.length) return false;
+  const task = oneLine(ep.task, MEMORY_LIMITS.episodeTaskChars);
+  if (!task) return false;
+  const at = ep.now ?? Date.now();
+  const summary = ep.summary ? oneLine(ep.summary, MEMORY_LIMITS.episodeSummaryChars) : "";
+  const files = (ep.files ?? []).slice(0, MEMORY_LIMITS.episodeFiles);
+  store.episodes ??= {};
+  for (const r of new Set(repos.map(memoryRepoKey))) {
+    const list = (store.episodes[r] ??= []);
+    const i = list.findIndex((e) => e.box === ep.box);
+    const prev = i >= 0 ? list.splice(i, 1)[0] : undefined;
+    list.push({ box: ep.box, at, task: prev?.task ?? task, state: ep.state, ...(summary ? { summary } : {}), ...(files.length ? { files } : {}), turns: (prev?.turns ?? 0) + 1 });
+    if (list.length > MEMORY_LIMITS.episodesPerRepo) list.splice(0, list.length - MEMORY_LIMITS.episodesPerRepo);
+  }
+  return true;
+}
+
+/** Drop a run's episode everywhere (the dashboard's Forget on an episode row). */
+export function forgetEpisode(store: MemoryStore, box: string): boolean {
+  let hit = false;
+  for (const [repo, list] of Object.entries(store.episodes ?? {})) {
+    const next = list.filter((e) => e.box !== box);
+    if (next.length === list.length) continue;
+    hit = true;
+    if (next.length) store.episodes![repo] = next;
+    else delete store.episodes![repo];
+  }
+  return hit;
+}
+
+/**
+ * The earlier runs a box is told about: the ones whose task reads like this one first, then the
+ * newest, never the box's own (it already has that conversation).
+ */
+export function selectEpisodes(store: MemoryStore, repos: string[], task?: string, box?: string): Array<Episode & { repo: string; similar: boolean }> {
+  const all: Array<Episode & { repo: string; similar: boolean }> = [];
+  for (const r of new Set(repos.map(memoryRepoKey))) {
+    for (const e of store.episodes?.[r] ?? []) {
+      if (e.box === box) continue;
+      const similar = !!task?.trim() && scoreSkill(task, { name: "", description: `${e.task} ${e.summary ?? ""} ${(e.files ?? []).join(" ")}` }) >= MEMORY_LIMITS.relevanceThreshold;
+      all.push({ ...e, repo: r, similar });
+    }
+  }
+  return all.sort((a, b) => Number(b.similar) - Number(a.similar) || b.at - a.at).slice(0, MEMORY_LIMITS.episodesShown);
+}
+
+function episodeLine(e: Episode & { repo: string; similar: boolean }, showRepo: boolean): string {
+  const files = e.files?.length ? ` {files: ${e.files.join(", ")}}` : "";
+  return `- ${isoDay(e.at)} · ${e.state}${e.similar ? " · similar task" : ""}${showRepo ? ` (${e.repo})` : ""} · "${e.task}"${e.summary ? ` — ${e.summary}` : ""}${files}`;
+}
+
+/* ───────────────────────── recall: what a run was handed ───────────────────────── */
+
+/** Count a recall on each note. Returns true when anything changed. */
+export function markUsed(notes: MemoryNote[], now = Date.now()): boolean {
+  for (const n of notes) {
+    n.uses = (n.uses ?? 0) + 1;
+    n.lastUsed = now;
+  }
+  return notes.length > 0;
+}
+
+export function receiptOf(sel: MemorySelection, now = Date.now()): MemoryReceipt {
+  return {
+    at: now,
+    core: sel.core.length,
+    areas: sel.areaPages.map((a) => a.area),
+    notes: sel.picked.slice(0, MEMORY_LIMITS.receiptNotes).map((n) => ({ id: n.id, kind: n.kind, text: oneLine(n.kind === "playbook" ? playbookTitle(n.text) : n.text, 110) })),
+    picked: sel.picked.length,
+    episodes: sel.episodes.length,
+    matched: sel.matched,
+  };
+}
+
+/** Keep a box's latest receipt; the oldest boxes fall off past the cap. */
+export function recordReceipt(store: MemoryStore, box: string, r: MemoryReceipt): void {
+  store.receipts ??= {};
+  store.receipts[box] = r;
+  const boxes = Object.keys(store.receipts);
+  if (boxes.length > MEMORY_LIMITS.receipts) {
+    boxes.sort((a, b) => store.receipts![a].at - store.receipts![b].at);
+    for (const b of boxes.slice(0, boxes.length - MEMORY_LIMITS.receipts)) delete store.receipts[b];
+  }
 }
 
 const isoDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
@@ -1006,10 +1231,10 @@ export function renderAreaPage(a: AreaSummary, showRepo: boolean, max = MEMORY_L
  * The MEMORY.md a box receives: Core + For this task + how to add. Null when there is nothing to
  * say (the installer then removes a stale file).
  */
-export function renderMemoryMd(store: MemoryStore, repos: string[], task?: string): string | null {
+export function renderMemoryMd(store: MemoryStore, repos: string[], task?: string, opts: { box?: string } = {}): string | null {
   if (!store.enabled) return null;
-  const sel = selectMemory(store, repos, task);
-  if (!sel.core.length && !sel.relevant.length && !sel.areas.length) return null;
+  const sel = selectMemory(store, repos, task, opts);
+  if (!sel.core.length && !sel.relevant.length && !sel.areas.length && !sel.episodes.length) return null;
   const showRepo = repos.length !== 1;
   const sections: string[] = [];
   if (sel.core.length) sections.push(`## Core\n\n${sel.core.map((n) => noteLine(n, showRepo)).join("\n")}`);
@@ -1032,6 +1257,13 @@ export function renderMemoryMd(store: MemoryStore, repos: string[], task?: strin
     const head = sel.byRelevance ? "## For this task" : "## Recent";
     const scope = repos.length ? `${repos.join(", ")} and this operator` : "this operator";
     sections.push(`${head}\n\n${sel.byRelevance ? `Notes about ${scope} that match the task` : `The newest notes about ${scope}`} — the rest are in MEMORY-all.md (\`memory search <words>\`).\n\n${sel.relevant.map((n) => noteLine(n, showRepo)).join("\n")}`);
+  }
+  if (sel.episodes.length) {
+    sections.push(
+      `## Recent work${repos.length === 1 ? " in this repo" : ""}\n\n` +
+        "What earlier runs here were asked and how they ended, newest first. Before repeating one, read what it changed; a failed one is a path already tried.\n\n" +
+        sel.episodes.map((e) => episodeLine(e, showRepo)).join("\n")
+    );
   }
   return (
     "# Memory from earlier runs\n\n" +
@@ -1071,14 +1303,8 @@ export function renderMemoryArchive(store: MemoryStore, repos: string[]): string
   return `# Memory archive\n\nEvery note for this operator and these repos; MEMORY.md is the relevant slice. Searched by \`memory search\`; \`memory area <slug>\` prints one area.\n\n${kb}${groups.join("\n\n")}\n`;
 }
 
-/** Bump the use counters of the playbooks a task matched. Returns true when anything changed. */
-export function markPlaybooksUsed(notes: MemoryNote[], now = Date.now()): boolean {
-  for (const n of notes) {
-    n.uses = (n.uses ?? 0) + 1;
-    n.lastUsed = now;
-  }
-  return notes.length > 0;
-}
+/** Kept for callers that only count playbooks; see markUsed. */
+export const markPlaybooksUsed = markUsed;
 
 /** The first-turn one-liner for matched playbooks (same channel as the skill hint). Empty when none. */
 export function playbookHint(notes: MemoryNote[]): string {

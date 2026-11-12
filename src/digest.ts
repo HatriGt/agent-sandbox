@@ -46,6 +46,8 @@ export interface DigestInput {
   startedBy?: StartedBy;
   /** Skills the controller pointed the run at (src/skill-match.ts), explicit or auto. */
   skills?: SkillPick[];
+  /** What the run was handed from memory (src/memory-store.ts). */
+  memory?: import("./memory-store.js").MemoryReceipt;
 }
 
 /** Receipt provenance: who ran this. Only known facts; absent fields were not recorded. */
@@ -58,6 +60,8 @@ export interface DigestProvenance {
   startedBy?: StartedBy;
   /** Skills suggested (auto) or requested (explicit) for the run. */
   skills?: SkillPick[];
+  /** Memory the run was handed: how many notes, which areas, how many earlier runs. */
+  memory?: { core: number; picked: number; areas: string[]; episodes: number };
 }
 
 export interface DigestPlanStep extends PlanItem {
@@ -224,6 +228,7 @@ export function buildDigest(input: DigestInput): RunDigest {
     ...(input.provider ? { provider: input.provider } : {}),
     ...(input.startedBy ? { startedBy: input.startedBy } : {}),
     ...(input.skills?.length ? { skills: input.skills } : {}),
+    ...(input.memory ? { memory: { core: input.memory.core, picked: input.memory.picked, areas: input.memory.areas, episodes: input.memory.episodes } } : {}),
   };
 
   return {

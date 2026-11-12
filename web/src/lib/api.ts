@@ -47,6 +47,8 @@ export interface BoxView {
   workflow?: WorkflowRunView;
   /** Skills the run was pointed at: explicit `/name` from the user, or the controller's auto match. */
   skills?: { name: string; how: "explicit" | "auto" }[];
+  /** What the latest turn was handed from memory; absent when nothing was. */
+  memory?: MemoryReceipt;
 }
 
 export type ProviderKind = "anthropic" | "openai" | "openai-compatible" | "ollama" | "ccproxy";
@@ -254,7 +256,7 @@ export interface MemoryNote {
   supersedes?: string;
   /** Set when a newer note replaced this one: it leaves MEMORY.md but stays as history. */
   until?: number;
-  /** Playbooks: how many runs matched it (promote-to-skill signal). */
+  /** How many runs were handed this note because their task matched it, and when last. */
   uses?: number;
   lastUsed?: number;
   /** Knowledge base: the area (page) a repo note belongs to, the code it describes, related areas. */
@@ -276,9 +278,33 @@ export interface MemoryNoteVersion {
   /** When this version was superseded. */
   until?: number;
 }
+/** One finished run in a repo, kept so the next run there starts from it (src/memory-store.ts Episode). */
+export interface MemoryEpisode {
+  repo: string;
+  box: string;
+  at: number;
+  task: string;
+  state: "done" | "failed";
+  summary?: string;
+  files?: string[];
+  turns: number;
+}
+/** What a run's latest turn was handed from memory. */
+export interface MemoryReceipt {
+  at: number;
+  core: number;
+  areas: string[];
+  notes: { id: string; kind: MemoryKind; text: string }[];
+  picked: number;
+  episodes: number;
+  matched: boolean;
+}
+export type MemoryReceiptRow = Omit<MemoryReceipt, "notes"> & { box: string };
 export interface MemoryNotesResponse {
   enabled: boolean;
   notes: MemoryNote[];
+  episodes?: MemoryEpisode[];
+  receipts?: MemoryReceiptRow[];
 }
 /** A note a running box just produced, carried on the watch snapshot so the thread can show the confirm toast. */
 export interface MemoryNew {
@@ -1063,6 +1089,8 @@ export const api = {
     post<MemoryNotesResponse>("/memory-notes.json", body),
   /** Add a preference/rule by hand (the composer on the Memory page). */
   memoryNoteAdd: (add: { kind: MemoryKind; text: string; why?: string; repo?: string; area?: string; paths?: string; links?: string }) => post<MemoryNotesResponse>("/memory-notes.json", { add }),
+  memoryEpisodeDelete: (box: string) =>
+    fetch(url("/memory-notes.json", { episode: box }), { method: "DELETE", headers: authHeaders }).then(parse<MemoryNotesResponse>),
   memoryNoteDelete: (id: string) =>
     fetch(url("/memory-notes.json", { id }), { method: "DELETE", headers: authHeaders }).then(parse<MemoryNotesResponse>),
   /** Turn a playbook note into a SKILL.md draft in the skill store. 409 when a skill of that name exists. */
