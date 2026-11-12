@@ -252,7 +252,14 @@ test("preinstallSh: a package is installed only when the disk can take it, a fai
   assert.ok(sh.includes(`echo mcp-fail:'btp-mcp-server'; D="$D "'btp-mcp-server'; rm -rf "$R"/'btp-mcp-server'`));
   // npm's temp dir leaves the 256M tmpfs for the root disk, and onnxruntime's GPU download is skipped.
   assert.ok(sh.includes("TMPDIR=/root/.npm-tmp ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm i -g --no-audit --no-fund 'chrome-devtools-mcp@latest'"));
-  assert.ok(sh.startsWith(`R=/usr/local/lib/node_modules; [ -d "$R" ] || R=$(npm root -g); D=; mkdir -p /root/.npm-tmp; `), "D starts empty so the rewriter sees only this run's decisions");
+  assert.ok(sh.startsWith(`R=/usr/local/lib/node_modules; [ -d "$R" ] || R=$(npm root -g); D=; M=/root/.asb/mcp-failed; mkdir -p /root/.npm-tmp; `), "D starts empty so the rewriter sees only this run's decisions");
+  // A copy in the package store is linked instead of installed, and is looked for before anything else.
+  assert.ok(sh.includes(`S=$(ls -d /opt/asb-store/'p_btp-mcp-server'/v*/lib/node_modules/'btp-mcp-server' 2>/dev/null | sort | tail -1)`));
+  assert.ok(sh.includes(`if [ -n "$S" ] && [ -f "$S/package.json" ]; then mkdir -p "$(dirname "$R"/'btp-mcp-server')" && ln -sfn "$S" "$R"/'btp-mcp-server'; elif`));
+  // A failure is noted in the box and not tried again for six hours: it used to cost 20 s on every turn.
+  assert.ok(sh.includes(`rm -rf "$R"/'btp-mcp-server'; mkdir -p "$M"; : > "$M"/'btp-mcp-server';`));
+  assert.ok(sh.includes(`elif [ -n "$(find "$M"/'btp-mcp-server' -mmin -360 2>/dev/null)" ]; then echo mcp-fail:'btp-mcp-server'" not-retried"; D="$D "'btp-mcp-server';`));
+  assert.ok(preinstallSh(["@cap-js/mcp-server"]).includes(`"$M"/'@cap-js_mcp-server'`), "a scoped name is one file name");
   assert.ok(sh.endsWith("; rm -rf /root/.npm-tmp; true"), "best-effort: the exec never fails the run start, and the temp dir goes");
   assert.deepEqual(mcpInstallNotes("x\nmcp-skip:'btp-mcp-server' free=120000k\nnoise\n mcp-drop:btp-cf \n"), ["mcp-skip:'btp-mcp-server' free=120000k", "mcp-drop:btp-cf"]);
 });

@@ -64,6 +64,7 @@ import { BLANK_OWNER, ownerTag } from "./warm-owners.js";
 import { withOwner } from "./user-store.js";
 import { MOLI_BIN, MOLI_PROMPT_HINT, browserToolSetup, moliInstallSh } from "./browser.js";
 import { orphanSandboxDirs, parseDfPk, parseDirListing, type DiskReading } from "./host-disk.js";
+import { PKG_STORE_MOUNT, STORE_BOX_PREFIX, isStoreBox, makePkgStore, specName, storable, storeKey, storedPathSh } from "./pkg-store.js";
 
 // The driver pieces used to live here; re-exported so every existing importer keeps working.
 export { claudeInstallSh, streamFmtScript } from "./drivers/claude.js";
@@ -143,6 +144,107 @@ function egressFlags(cfg: Config, allowAll = cfg.egressAllowAll): string[] {
 /** Which stopped boxes the reaper has already said it is keeping, and why. */
 const saidKeeping = new Map<string, string>();
 
+// ---- the package store (src/pkg-store.ts): MCP packages installed once on the host ----
+let pkgStoreRoot: string | undefined;
+let pkgStoreLearned: Promise<void> | undefined;
+/** Find (and make) the store's directory on the host, once. Never throws; off with MCP_PKG_STORE=0. */
+export function learnPkgStore(cfg: Config): Promise<void> {
+  if (process.env.MCP_PKG_STORE === "0") return Promise.resolve();
+  return (pkgStoreLearned ??= (async () => {
+    try {
+      const r = await ssh(cfg, 'D="$HOME/.agent-sandbox/npm-store"; mkdir -p "$D/pkgs" "$D/stage" && echo "$D"', false);
+      const d = String(r.stdout ?? "").trim().split("\n").pop() ?? "";
+      if (r.code === 0 && /^\/[\w./-]+$/.test(d)) pkgStoreRoot = d;
+      else pkgStoreLearned = undefined;
+    } catch {
+      pkgStoreLearned = undefined;
+    }
+  })());
+}
+/** The read-only mount every image-booted box gets. Empty until the store is known. */
+function pkgStoreFlags(): string[] {
+  return pkgStoreRoot ? ["--mount-dir", `${pkgStoreRoot}/pkgs:${PKG_STORE_MOUNT}:ro`] : [];
+}
+/** Free host memory a builder box needs before it is started (its own 1 GB plus the reserve). */
+const STORE_BUILD_MIN_FREE_MB = 1536;
+/**
+ * Install one spec into the store: a throwaway box whose only writable mount is this package's
+ * staging directory runs npm there; the host then renames the finished directory into place and
+ * drops all but the two newest versions.
+ */
+async function buildStoredPackage(cfg: Config, spec: string, ver: string): Promise<void> {
+  if (!storable(spec) || !/^v\d+$/.test(ver)) throw new Error("not a package the store can hold");
+  await learnPkgStore(cfg);
+  if (!pkgStoreRoot) throw new Error("the store directory is not available on the host");
+  const free = await hostFreeMb(cfg);
+  if (free !== undefined && free < STORE_BUILD_MIN_FREE_MB) throw new Error(`the host has ${free} MB free; a build needs ${STORE_BUILD_MIN_FREE_MB}`);
+  await learnHostGuard(cfg);
+  const key = storeKey(spec), name = specName(spec);
+  const stage = `${pkgStoreRoot}/stage/${key}-${ver}`, dest = `${pkgStoreRoot}/pkgs/${key}`;
+  const box = `${STORE_BOX_PREFIX}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  await ssh(cfg, `rm -rf ${shellQuote(stage)} && mkdir -p ${shellQuote(stage)}`);
+  try {
+    await msb(cfg, ["run", "-d", "--name", box, "-m", "1G", "--max-memory", "1G", "--root-disk", "4G", "--net", "public", ...hostGuardFlags(), "--max-duration", "20m", "--pull", "never", "--mount-dir", `${stage}:/out`, cfg.image, "--", "sleep", "infinity"]);
+    const q = shellQuote(spec);
+    const r = await msb(
+      cfg,
+      [
+        "exec", box, "--", "sh", "-lc",
+        `mkdir -p /root/.npm-tmp && cd /root && ${NPM_INSTALL_ENV} npm i -g --no-audit --no-fund --prefix /out ${q} >/root/npm.log 2>&1 || { tail -c 400 /root/npm.log; exit 1; }; ` +
+          // The same trims the image bake makes: GPU and other-platform runtimes no box can use.
+          `find /out \\( -name libonnxruntime_providers_cuda.so -o -name libonnxruntime_providers_tensorrt.so \\) -delete; ` +
+          `for d in $(find /out -type d -path '*onnxruntime-node/bin/napi-v*'); do rm -rf "$d/darwin" "$d/win32" "$d/linux/arm64"; done; ` +
+          `test -f /out/lib/node_modules/${shellQuote(name)}/package.json && echo asb-stored`,
+      ],
+      false,
+      600_000
+    );
+    if (!String(r.stdout ?? "").includes("asb-stored")) throw new Error(`npm did not install it: ${String(r.stdout ?? "").replace(/\s+/g, " ").slice(-300)}`);
+  } catch (e) {
+    await ssh(cfg, `rm -rf ${shellQuote(stage)}`, false).catch(() => {});
+    throw e;
+  } finally {
+    await msb(cfg, ["stop", box], false).catch(() => {});
+    await msb(cfg, ["rm", "--force", box], false).catch(() => {});
+  }
+  await ssh(
+    cfg,
+    `mkdir -p ${shellQuote(dest)} && mv ${shellQuote(stage)} ${shellQuote(`${dest}/${ver}`)} && ` +
+      `ls -d ${shellQuote(dest)}/v* | sort | head -n -2 | while read -r old; do rm -rf "$old"; done`
+  );
+}
+let pkgStoreQueue: ReturnType<typeof makePkgStore> | undefined;
+/** Ask for these specs to be in the store; anything missing is built in the background. */
+export function wantStoredPackages(cfg: Config, specs: readonly string[]): void {
+  if (process.env.MCP_PKG_STORE === "0" || !specs.length) return;
+  pkgStoreQueue ??= makePkgStore({
+    nowSec: () => Math.floor(Date.now() / 1000),
+    list: async () => {
+      await learnPkgStore(cfg);
+      if (!pkgStoreRoot) throw new Error("the store directory is not available on the host");
+      return String((await ssh(cfg, `ls -d ${shellQuote(pkgStoreRoot)}/pkgs/*/v* 2>/dev/null; true`, false)).stdout ?? "");
+    },
+    build: (spec, ver) => buildStoredPackage(cfg, spec, ver),
+    log: (m) => console.error(m),
+  });
+  pkgStoreQueue.want(specs);
+}
+/** Builder boxes a restart left behind (a build is cut off when the controller stops). */
+export async function reapStoreBuilders(cfg: Config): Promise<void> {
+  try {
+    const r = await msb(cfg, ["ls", "--format", "json"], false, PROBE_TIMEOUT_MS);
+    for (const e of parseLsJson(r.stdout)) {
+      if (!isStoreBox(e.name)) continue;
+      await msb(cfg, ["stop", e.name], false);
+      await msb(cfg, ["rm", "--force", e.name], false);
+    }
+    await learnPkgStore(cfg);
+    if (pkgStoreRoot) await ssh(cfg, `rm -rf ${shellQuote(pkgStoreRoot)}/stage/* 2>/dev/null; true`, false);
+  } catch {
+    /* next start tries again */
+  }
+}
+
 /** Learn which addresses are the host's own, once, so boxes can be kept off them. Never throws. */
 export function learnHostGuard(cfg: Config): Promise<void> {
   return ensureHostGuard(async () => (await ssh(cfg, "hostname -I")).stdout);
@@ -191,6 +293,7 @@ export interface CreateBoxOpts {
  */
 export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void> {
   await learnHostGuard(cfg);
+  await learnPkgStore(cfg);
   const common = [
     "run",
     "-d",
@@ -209,7 +312,7 @@ export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void>
     // the operator grows from there (msb modify --root-disk is grow-only). Snapshot boots skip
     // the flag — a snapshot carries its own rootfs size (pinned at bake time in createBareBox),
     // and asking for a smaller disk than the snapshot was baked with would fail the boot.
-    ...(cfg.snapshot ? [] : ["--root-disk", cfg.rootDisk]),
+    ...(cfg.snapshot ? [] : ["--root-disk", cfg.rootDisk, ...pkgStoreFlags()]),
     ...egressFlags(cfg),
     "--idle-timeout",
     cfg.idleTimeout,
@@ -431,6 +534,7 @@ export async function hostFreeMb(cfg: Config): Promise<number | undefined> {
 
 async function bootAndWarm(cfg: Config, name: string, agent: AgentKind, owner: string | null = null): Promise<void> {
   await learnHostGuard(cfg);
+  await learnPkgStore(cfg);
   await msb(cfg, [
     "run",
     "-d",
@@ -453,6 +557,8 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind, owner: s
     warmMaxDuration(cfg.poolIdleTimeout, cfg.maxDuration),
     "--pull",
     "never",
+    // The package store, for image boots (a snapshot boot is left exactly as it was).
+    ...(cfg.snapshot ? [] : pkgStoreFlags()),
     // A snapshot carries its own rootfs size (pinned at bake time); an image boot sizes it here.
     ...rootSourceArgs(cfg),
     "--",
@@ -849,6 +955,7 @@ export async function countBoxes(cfg: Config): Promise<number> {
 
   let count = 0;
   for (const e of entries) {
+    if (isStoreBox(e.name)) continue;
     if (e.name.startsWith(POOL_PREFIX)) {
       // Only count claimed pool boxes; a dead/unexecable one doesn't hold a session.
       try {
@@ -1398,6 +1505,7 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<string
     }
     const json = JSON.stringify(conf);
     const specs = npxPackagesOf(conf);
+    wantStoredPackages(cfg, specs);
     // ONE exec for the config writes, the package pre-install AND the npx→direct-bin rewrite: each
     // exec is an SSH→msb→guest round trip on the task-start critical path.
     const direct = specs.length
@@ -1444,6 +1552,7 @@ export async function preinstallMcpPackages(cfg: Config, box: string): Promise<v
     const conf = toClaudeMcpConfig(await loadMcpStore(cfg), boxSecretPolicy(cfg));
     const specs = conf ? npxPackagesOf(conf) : [];
     if (!specs.length) return;
+    wantStoredPackages(cfg, specs);
     const s = Date.now();
     const r = await exec(cfg, box, preinstallSh(specs), { timeoutMs: 300_000 });
     const notes = mcpInstallNotes(r.stdout ?? "");
@@ -1510,6 +1619,9 @@ export function mcpInstallNotes(stdout: string): string[] {
  * hundred MB — dies there with ENOSPC however large the disk is (seen with @cap-js/mcp-server in
  * every box AND in the bake). That GPU download is also told to stay home: no microVM has a GPU.
  */
+/** Where a box notes the packages that failed to install, and for how long one is left alone. */
+const MCP_FAIL_DIR = "/root/.asb/mcp-failed";
+export const MCP_FAIL_RETRY_MIN = 360;
 const NPM_INSTALL_ENV = "TMPDIR=/root/.npm-tmp ONNXRUNTIME_NODE_INSTALL_CUDA=skip";
 /** The shell for the presence-guarded install, so callers can splice it into an existing exec. */
 export function preinstallSh(specs: string[]): string {
@@ -1523,16 +1635,23 @@ export function preinstallSh(specs: string[]): string {
     const q = shellQuote(spec);
     // A directory test, NOT `npm ls -g`: seven sequential npm invocations cost ~5s inside the box
     // on every run start (measured); the dir test is free and the no-op path is the common one.
+    // A package that failed here a while ago is not tried again on every turn: measured live, one
+    // package too big for the disk cost 20 s at the start of EVERY task and EVERY follow-up message.
+    const mark = `"$M"/${shellQuote(spec.replace(/[^\w.@-]/g, "_"))}`;
+    // First choice: the copy in the package store (src/pkg-store.ts), linked, not installed. A
+    // link left dangling (a box restored without the mount) is replaced by whichever path wins.
     return (
-      `[ -d ${dir} ] || { F=$(df -Pk / 2>/dev/null | awk 'NR==2{print $4}'); ` +
-      `if [ "\${F:-0}" -lt ${MCP_MIN_FREE_KB} ]; then echo mcp-skip:${q}" free=\${F}k"; D="$D "${q}; ` +
+      `[ -d ${dir} ] || { S=$(${storedPathSh(spec, shellQuote)}); F=$(df -Pk / 2>/dev/null | awk 'NR==2{print $4}'); [ -L ${dir} ] && rm -f ${dir}; ` +
+      `if [ -n "$S" ] && [ -f "$S/package.json" ]; then mkdir -p "$(dirname ${dir})" && ln -sfn "$S" ${dir}; ` +
+      `elif [ -n "$(find ${mark} -mmin -${MCP_FAIL_RETRY_MIN} 2>/dev/null)" ]; then echo mcp-fail:${q}" not-retried"; D="$D "${q}; ` +
+      `elif [ "\${F:-0}" -lt ${MCP_MIN_FREE_KB} ]; then echo mcp-skip:${q}" free=\${F}k"; D="$D "${q}; ` +
       `elif ${NPM_INSTALL_ENV} npm i -g --no-audit --no-fund ${q} >/dev/null 2>&1; then npm cache clean --force >/dev/null 2>&1; ` +
-      `else echo mcp-fail:${q}; D="$D "${q}; rm -rf ${dir}; npm cache clean --force >/dev/null 2>&1; fi; } || true`
+      `else echo mcp-fail:${q}; D="$D "${q}; rm -rf ${dir}; mkdir -p "$M"; : > ${mark}; npm cache clean --force >/dev/null 2>&1; fi; } || true`
     );
   });
   // The global root is /usr/local/lib/node_modules in every box image we ship; `npm root -g` is
   // itself a ~1s npm startup, so it is only the fallback for a nonstandard image.
-  return `R=/usr/local/lib/node_modules; [ -d "$R" ] || R=$(npm root -g); D=; mkdir -p /root/.npm-tmp; ${steps.join("; ")}; rm -rf /root/.npm-tmp; true`;
+  return `R=/usr/local/lib/node_modules; [ -d "$R" ] || R=$(npm root -g); D=; M=${MCP_FAIL_DIR}; mkdir -p /root/.npm-tmp; ${steps.join("; ")}; rm -rf /root/.npm-tmp; true`;
 }
 
 export async function preinstallNpmPackages(cfg: Config, box: string, specs: string[]): Promise<void> {
@@ -2218,7 +2337,7 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
   // sweep result deletes every entry from fleet run-memory AND the durable store, permanently losing
   // sleeping boxes' task/question metadata — and momentarily zeroes the capacity count.
   if (ls.code !== 0) throw new Error(`msb ls failed (exit ${ls.code}): ${ls.stderr.slice(0, 200)}`);
-  const entries = parseLsJson(ls.stdout);
+  const entries = parseLsJson(ls.stdout).filter((e) => !isStoreBox(e.name));
   const now = Date.now();
   for (const e of entries) lastLsStatus.set(e.name, { status: e.status, at: now });
   for (const name of [...lastLsStatus.keys()]) if (!entries.some((e) => e.name === name)) lastLsStatus.delete(name);

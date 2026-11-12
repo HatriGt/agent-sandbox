@@ -93,7 +93,7 @@ import { FILE_INDEX_CAP, fileDetailsCommand, makeFileIndex, parseFileDetails, pa
 import { confineFsOp, exitCodeOf, fsCommand, fsFailure } from "./fs-ops.js";
 import { canRevert, captureCmd, checkpointForMessage, listCmd, parseCkptLs, revertCmd, withBoxLock } from "./checkpoint.js";
 import { fetchModels, isAllowedModel } from "./models.js";
-import { execInBox, boxRepoSlugs, forgetMemoryReceipt, learnHostGuard, memoryReceiptOf } from "./msb.js";
+import { execInBox, boxRepoSlugs, forgetMemoryReceipt, learnHostGuard, memoryReceiptOf, reapStoreBuilders } from "./msb.js";
 import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount, setDefaultAccount } from "./gh-token-store.js";
 import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
@@ -4770,6 +4770,8 @@ app.post("/health/canary.json", async (req: Request, res: Response) => {
 app.listen(cfg.httpPort, cfg.httpHost, () => {
   // Before any box is started or rewound: which addresses are the host's own (src/host-guard.ts).
   void learnHostGuard(cfg);
+  // A package build cut off by the last stop leaves its builder box behind; the store itself is fine.
+  void reapStoreBuilders(cfg);
   console.error(`[agent-sandbox] HTTP MCP on ${cfg.httpHost}:${cfg.httpPort} (bearer-guarded)`);
   // Auto-seed the shared warm pool so the first remote delegation is fast too.
   void refillPool(cfg);
