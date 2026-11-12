@@ -12,6 +12,8 @@ import { SessionContext, SessionReposContext } from "@/lib/session-context";
 import { CodeNavContext } from "@/components/ui/code-ref";
 import type { CodeRef } from "@/lib/code-refs";
 import type { OpenRequest } from "./WorkspacePane";
+const BrowserPane = React.lazy(() => import("./BrowserPane").then((m) => ({ default: m.BrowserPane })));
+import type { BrowserTag } from "./BrowserPane";
 import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
 import { currentDiskTier, currentMemoryTier, deadlineLabel, deadlineOf, displayState, fmtDuration, offerableTiers, tierGib, usageLevel } from "@/lib/lifecycle";
 import { MemoryBumpCard } from "./MemoryCard";
@@ -230,6 +232,13 @@ export function Thread({
   const [workspaceFull, setWorkspaceFull] = React.useState(false);
   const [inspectorOpen, setInspectorOpen] = React.useState(false);
   const showWorkspace = workspaceOpen || openFile !== null;
+  // The browser (BrowserPane): a fourth aside under the same one-at-a-time rule.
+  const [browserOpen, setBrowserOpen] = React.useState(false);
+  const [browserFull, setBrowserFull] = React.useState(false);
+  const closeBrowser = React.useCallback(() => {
+    setBrowserOpen(false);
+    setBrowserFull(false);
+  }, []);
   // The side chat is a third aside under the same one-at-a-time rule. Its open flag lives in the
   // per-box store (persisted), so each aside's opener closes the others itself.
   const side = useSideChat(box.name);
@@ -239,8 +248,9 @@ export function Thread({
     if (openFile !== null) {
       setInspectorOpen(false);
       side.close();
+      closeBrowser();
     }
-  }, [openFile, side]);
+  }, [openFile, side, closeBrowser]);
   const closeWorkspace = () => {
     setWorkspaceOpen(false);
     setWorkspaceFull(false);
@@ -251,13 +261,14 @@ export function Thread({
   const openReview = React.useCallback(() => {
     setInspectorOpen(false);
     side.close();
+    closeBrowser();
     setWorkspaceOpen(true);
     setReviewNonce((n) => n + 1);
-  }, [side]);
+  }, [side, closeBrowser]);
   // THE plan placement, decided once: docked beside the conversation when the row is wide (xl)
   // and no other aside has the room; a card in the flow otherwise. Never both, never neither.
   const wide = useMediaQuery("(min-width: 80rem)");
-  const planPlacement: PlanVariant = wide && !showWorkspace && !inspectorOpen && !sideOpen ? "dock" : "card";
+  const planPlacement: PlanVariant = wide && !showWorkspace && !browserOpen && !inspectorOpen && !sideOpen ? "dock" : "card";
 
   // Esc closes the workspace pane — but never steals the key from a dialog, menu or focused input
   // (those own Escape themselves and either prevent default or match the focus guard below).
@@ -281,18 +292,34 @@ export function Thread({
         setWorkspaceOpen(false);
         setWorkspaceFull(false);
         setOpenFile(null);
+        closeBrowser();
         side.close();
       }
       return !v;
     });
-  }, [side]);
+  }, [side, closeBrowser]);
   const openSideChat = React.useCallback(() => {
     setInspectorOpen(false);
     setWorkspaceOpen(false);
     setWorkspaceFull(false);
     setOpenFile(null);
+    closeBrowser();
     side.open();
-  }, [side]);
+  }, [side, closeBrowser]);
+  const toggleBrowser = () => {
+    if (browserOpen) return closeBrowser();
+    setInspectorOpen(false);
+    side.close();
+    closeWorkspace();
+    setBrowserOpen(true);
+  };
+  // A picked element (or a screenshot) joins the message being written: its words in the text, its
+  // picture as an attachment. The composer has to be in view to show it arrived.
+  const tagFromBrowser = React.useCallback((t: BrowserTag) => {
+    setBrowserFull(false);
+    if (window.matchMedia("(max-width: 767px)").matches) setBrowserOpen(false);
+    setSeed({ text: t.text ?? "", n: Date.now(), append: true, image: t.image });
+  }, []);
   const toggleSideChat = React.useCallback(() => (side.chat.open ? side.close() : openSideChat()), [side, openSideChat]);
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -429,7 +456,7 @@ export function Thread({
   // in-box checkpoint taken when turn k-1 finished). Refetched whenever a turn settles.
   const [revertable, setRevertable] = React.useState<Set<number>>(new Set());
   const [revertAsk, setRevertAsk] = React.useState<{ message: number; discarded: number } | null>(null);
-  const [seed, setSeed] = React.useState<{ text: string; n: number; append?: boolean } | null>(null);
+  const [seed, setSeed] = React.useState<{ text: string; n: number; append?: boolean; image?: { name: string; dataUrl: string; label?: string; note?: string } } | null>(null);
   const [reverting, setReverting] = React.useState(false);
   const canRevertNow = !sleeping && runState !== "running";
   React.useEffect(() => {
@@ -948,6 +975,8 @@ export function Thread({
         stopping={stopping}
         showWorkspace={showWorkspace}
         showInspector={inspectorOpen && !showWorkspace}
+        showBrowser={browserOpen && !sleeping}
+        onToggleBrowser={toggleBrowser}
         onToggleInspector={toggleInspector}
         showSideChat={sideOpen}
         sideUnread={side.unread}
@@ -965,7 +994,7 @@ export function Thread({
         onSetDisk={setDisk}
         onBack={onBack}
         onNew={onNew}
-        onToggleWorkspace={() => (showWorkspace ? closeWorkspace() : (setInspectorOpen(false), side.close(), setWorkspaceOpen(true)))}
+        onToggleWorkspace={() => (showWorkspace ? closeWorkspace() : (setInspectorOpen(false), side.close(), closeBrowser(), setWorkspaceOpen(true)))}
         density={density}
         onToggleDensity={() => onDensity(density === "chat" ? "trace" : "chat")}
         onToggleKeep={toggleKeep}
@@ -978,7 +1007,7 @@ export function Thread({
       />
 
       <div className="relative flex min-h-0 flex-1">
-      <div data-thread className={cn("flex min-h-0 min-w-0 flex-1 flex-col", showWorkspace && workspaceFull && "hidden md:hidden")}>
+      <div data-thread className={cn("flex min-h-0 min-w-0 flex-1 flex-col", ((showWorkspace && workspaceFull) || (browserOpen && browserFull && !sleeping)) && "hidden md:hidden")}>
       <div className="@container relative min-h-0 min-w-0 flex-1">
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
         <SchedulePill box={box.name} runState={String(runState ?? "")} />
@@ -1309,6 +1338,13 @@ export function Thread({
             }
           >
             <WorkspacePane session={box.name} changes={changes} open={openFile} review={reviewNonce} onClose={closeWorkspace} onSaved={refreshChanges} repos={repos} full={workspaceFull} onToggleFull={() => setWorkspaceFull((v) => !v)} />
+          </React.Suspense>
+        )}
+      </AnimatePresence>
+      <AnimatePresence initial={false}>
+        {browserOpen && !sleeping && !showWorkspace && (
+          <React.Suspense key="browser" fallback={null}>
+            <BrowserPane key={box.name} session={box.name} live={runState === "running"} onClose={closeBrowser} onTag={tagFromBrowser} full={browserFull} onToggleFull={() => setBrowserFull((v) => !v)} />
           </React.Suspense>
         )}
       </AnimatePresence>

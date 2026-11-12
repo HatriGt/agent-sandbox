@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Check, Copy, FileText, FolderTree, HardDrive, Info, Link2, ListTree, Loader2, MemoryStick, MessageCircleQuestion, MessageSquareText, Moon, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Copy, FileText, FolderTree, Globe, HardDrive, Info, Link2, ListTree, Loader2, MemoryStick, MessageCircleQuestion, MessageSquareText, Moon, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
 import { Swap } from "@/components/ui/swap";
 import { IconSwap } from "@/components/ui/icon-swap";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -51,6 +51,8 @@ export function ThreadHeader({
   onStop,
   stopping,
   showWorkspace,
+  showBrowser,
+  onToggleBrowser,
   showInspector,
   onToggleInspector,
   showSideChat,
@@ -99,6 +101,8 @@ export function ThreadHeader({
   onStop?: () => void;
   stopping?: boolean;
   showWorkspace: boolean;
+  showBrowser: boolean;
+  onToggleBrowser: () => void;
   showInspector: boolean;
   onToggleInspector: () => void;
   showSideChat: boolean;
@@ -526,6 +530,17 @@ export function ThreadHeader({
 
         <Tooltip>
           <TooltipTrigger asChild>
+            <span tabIndex={sleeping ? 0 : -1} className="hidden rounded-md outline-none md:inline-flex">
+              <Button variant="ghost" size="icon-sm" onClick={onToggleBrowser} aria-pressed={showBrowser} aria-label="Browser" className={cn("text-muted-foreground", showBrowser && "bg-accent text-foreground")} disabled={sleeping}>
+                <Globe />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{sleeping ? "Browser — available once the sandbox is awake" : "Open a page inside the sandbox and point at what you mean"}</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-sm" onClick={onToggleInspector} aria-pressed={showInspector} aria-label="Inspector" className={cn("text-muted-foreground hidden md:inline-flex", showInspector && "bg-accent text-foreground")}>
               <PanelRight />
             </Button>
@@ -595,6 +610,11 @@ export function ThreadHeader({
               <FolderTree />
               {showWorkspace ? "Hide files" : "Files"}
               <MenuHint>{sleeping ? "asleep" : "browse, diff, edit"}</MenuHint>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onToggleBrowser} disabled={sleeping} className="md:hidden" aria-pressed={showBrowser}>
+              <Globe />
+              {showBrowser ? "Hide browser" : "Browser"}
+              <MenuHint>{sleeping ? "asleep" : "open a page, pick elements"}</MenuHint>
             </DropdownMenuItem>
             <DropdownMenuSeparator className="md:hidden" />
             {box.role !== "pool-free" && (

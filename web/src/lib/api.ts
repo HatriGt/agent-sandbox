@@ -748,6 +748,40 @@ export async function openSse(
   }
 }
 
+/** The page the sandbox's browser is on (src/browser-daemon.ts). Sizes are CSS pixels of the page. */
+export type BrowserPage = {
+  url: string;
+  title: string;
+  sx: number;
+  sy: number;
+  dw: number;
+  dh: number;
+  vw: number;
+  vh: number;
+  canBack: boolean;
+  canForward: boolean;
+  blank: boolean;
+  loading: boolean;
+  hash: string;
+  dpr?: number;
+  /** CSS pixels of page the picture carries above and below the viewport. */
+  over?: [number, number];
+  /** Ports something in the sandbox listens on, offered on the blank page. */
+  ports?: number[];
+  netError?: string;
+  tried?: string;
+};
+export type BrowserReply = BrowserPage & {
+  ok: boolean;
+  code?: string;
+  error?: string;
+  /** Base64 JPEG of the viewport; absent when `same`. */
+  shot?: string;
+  same?: boolean;
+  map?: import("./browser-model").MappedElement[];
+  pick?: import("./browser-model").PickDetail;
+};
+
 export const api = {
   /** Does the controller accept this token? (Used by the token gate before storing it.) */
   /** Which front door: one operator token, or sign-in. Public. */
@@ -1015,6 +1049,9 @@ export const api = {
   /** The service's own health (canary, host disk, start failures, baked packages). */
   health: (signal?: AbortSignal) => fetch(url("/health.json"), { headers: authHeaders, signal }).then(parse<HealthResponse>),
   /** Build an image with the newer versions, switch to it, test it, switch back if the test fails. Admins only. */
+  /** One action in the sandbox's browser; the answer is the page state and, usually, a JPEG. */
+  browser: (session: string, action: Record<string, unknown>) => post<BrowserReply>("/browser.json", { session, ...action }),
+  browserInstall: (session: string) => post<{ ok: true }>("/browser/install.json", { session }),
   updateImage: () => post<NonNullable<HealthResponse["imageUpdate"]>>("/health/image-update.json", {}),
   memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean; repo?: string }) =>
     post<MemoryNotesResponse>("/memory-notes.json", body),

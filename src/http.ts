@@ -42,6 +42,7 @@ import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, 
 import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-disk.js";
 import { BAKED_MCP_PACKAGES, BASE_PACKAGES, fetchLatestVersions, imageChanges, packageNameOf, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
 import { clearImageOverride, makeImageUpdater, planImageUpdate, writeImageOverride } from "./image-update.js";
+import { browserStubScript, makeBoxQueue, moliInstallSh, parseBrowserAction, parseBrowserReply } from "./browser.js";
 import { bakeAgentImage, hostDisk, mcpProvisionState, sweepOrphanSandboxDirs } from "./msb.js";
 import { claimNonce, mintNonce, questionChoices, releaseNonce } from "./answer-choice.js";
 import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
@@ -258,13 +259,17 @@ app.use((req: Request, res: Response, next) => {
 // Rate limit state-changing calls per caller (60/min): a runaway script or a hostile key cannot spin
 // machines or hammer sign-in faster than that. Reads are unlimited; /mcp has its own transport.
 const mutationLimiter = makeRateLimiter({ limit: Number(process.env.RATE_LIMIT_PER_MIN ?? "60") || 60, windowMs: 60_000 });
+const BROWSER_ACT_PATH = "/browser.json";
+const browserLimiter = makeRateLimiter({ limit: 600, windowMs: 60_000 });
 app.use((req: Request, res: Response, next) => {
   // /hooks/ has its own per-trigger limiter (trigger-routes.ts): GitHub delivers every tenant's
   // events from a shared pool of addresses, so a per-IP anonymous cap would throttle them all together.
   if (!MUTATING.has(req.method) || req.path === "/mcp" || req.path.startsWith("/mcp/") || req.path.startsWith("/hooks/")) return next();
   const p = res.locals.principal as Principal | null;
   const key = p ? (p.kind === "user" ? p.userId : "operator") : `anon:${clientOf(req.headers, req.socket.remoteAddress)}`;
-  if (mutationLimiter.over(key)) {
+  // The browser pane sends one call per click, scroll and keystroke burst: a person reading a page
+  // passes 60 a minute without trying. It gets its own, wider budget instead of the shared one.
+  if (req.path === BROWSER_ACT_PATH ? browserLimiter.over(key) : mutationLimiter.over(key)) {
     res.setHeader("Retry-After", "60");
     res.status(429).json({ error: "slow down — too many requests this minute" });
     return;
@@ -274,7 +279,9 @@ app.use((req: Request, res: Response, next) => {
 
 // Audit every state-changing call (not /mcp — the MCP transport has its own tool-level log lines).
 app.use((req: Request, res: Response, next) => {
-  if (!MUTATING.has(req.method) || req.path === "/mcp" || req.path.startsWith("/mcp/")) return next();
+  // Browser actions change nothing the account owns (they move a page inside the caller's own box),
+  // and a row per scroll would bury the trail the audit exists to keep readable.
+  if (!MUTATING.has(req.method) || req.path === "/mcp" || req.path.startsWith("/mcp/") || req.path === BROWSER_ACT_PATH) return next();
   const started = Date.now();
   res.on("finish", () => {
     const p = res.locals.principal as Principal | null;
@@ -3524,6 +3531,48 @@ app.get("/files.json", async (req: Request, res: Response) => {
     res.json(await fileIndex(session, q));
   } catch (e) {
     failWith(res, e);
+  }
+});
+
+// ---- The browser pane (src/browser.ts) -----------------------------------------------------------
+// One action per call, in order per box; the reply is the page state and a JPEG. The box name is
+// validated and ownership-checked at the edge like every other box route.
+const browserQueue = makeBoxQueue();
+app.post(BROWSER_ACT_PATH, async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = boxParam(req.body);
+  if (!isBoxName(session)) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  const parsed = parseBrowserAction(req.body);
+  if (!parsed.ok) {
+    res.status(400).json({ error: parsed.message });
+    return;
+  }
+  try {
+    const r = await browserQueue(session, () => execInBox(cfg, session, "node -", { input: browserStubScript(parsed.action), timeoutMs: 70_000 }));
+    res.setHeader("Cache-Control", "no-store");
+    res.json(parseBrowserReply(r.stdout));
+  } catch (e) {
+    res.status(422).json({ error: clientError(e, 300) });
+  }
+});
+// A box born from an image that predates the browser gets it on first use: one download, then
+// it stays for the life of the box.
+app.post("/browser/install.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = boxParam(req.body);
+  if (!isBoxName(session)) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  try {
+    await browserQueue(session, () => execInBox(cfg, session, moliInstallSh(), { timeoutMs: 240_000 }));
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(`[browser] install failed in ${session}: ${redactor.redact(String((e as Error)?.message ?? e)).slice(-400)}`);
+    res.status(422).json({ error: "The browser could not be downloaded into this sandbox. Check that it can reach github.com, then try again." });
   }
 });
 

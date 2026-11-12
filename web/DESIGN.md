@@ -1358,3 +1358,31 @@ A pass over the conversation page for what was uneven or cut, measured before it
 - **Question card.** The footer sentence was truncated on desktop. It now fits: "Press a number or pick one. The run stays paused until you answer."
 
 Evidence: `.shots/r12/b-*` before, `a-*` after; `.shots/probe-rhythm.js` for the gaps, `.shots/probe-steps.js` for the cap and fades.
+
+## Round: a browser beside the conversation (2026-11-11)
+
+A Globe button in the thread header opens a browser that runs inside the sandbox, next to the agent, so
+`localhost:3000` is the agent's dev server. It shares the right-hand slot with Files: one pane at a time.
+
+- **It is a picture, and it has to not feel like one.** Every action returns a JPEG of the page. A wheel
+  moves the current picture at once and the fresh one lands under it; each picture carries a band of
+  page above and below the viewport so a scroll shows real page, not a blank strip. A navigation
+  crossfades over the old page with a 2px progress line under the address bar. A click draws a ripple
+  where it landed before the answer is back.
+- **Select.** The page reports its visible elements once; hovering is then hit-tested in the browser with
+  no round trip. The hover box and its `tag.class 120 x 40` chip are `--live`, the one colour for "the
+  thing being pointed at". A pick leaves a numbered pin on the page and lands in the composer as a
+  picture chip named "Element 1", cropped with its surroundings and outlined. The selector, text,
+  markup and component name go to the agent as a note beside the picture; the person never has to read
+  or keep them in their message. Esc leaves select mode.
+- **Blank state offers what is listening.** With no page open the pane lists the ports that answer inside
+  the sandbox as chips, so the usual first step is one click.
+- **States.** Starting ("It runs inside this sandbox, next to the agent"), installing on a box whose image
+  predates the browser, an error with the likely reason and Try again, a page that would not load with
+  the address that was tried. The pane is disabled while the sandbox sleeps.
+- **Phone.** The button moves into the More menu, the pane takes the screen, the Select label becomes its
+  icon (named for a screen reader), and a pick closes the pane so the chip is seen landing.
+
+Left out: a live video stream (the box has 1 GB and the picture view costs nothing between actions);
+drawing on the page; more than one tab. Proof: `.shots/thread-fixture.mjs running <out>
+--interact=browser` (add `--dark`, `--w=390 --h=844`, `--browser=down|slow`).

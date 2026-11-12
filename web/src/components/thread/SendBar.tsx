@@ -67,7 +67,7 @@ export function SendBar({
   onReplyFailed?: (text: string) => void;
   /** Text to drop into the composer (e.g. a starter prompt); `n` changes to re-apply the same text.
    *  `append` adds it after a non-empty draft instead of replacing it (a quoted selection). */
-  seed?: { text: string; n: number; append?: boolean } | null;
+  seed?: { text: string; n: number; append?: boolean; /** A picture that arrives with the text (a browser element, a screenshot). */ image?: { name: string; dataUrl: string; label?: string; note?: string } } | null;
 }) {
   const busy = runState === "running" && !sleeping;
   const [value, setValue] = React.useState(() => readDraft(boxName));
@@ -100,7 +100,9 @@ export function SendBar({
   const findSkill = (name: string) => (skillsCache.data?.skills ?? []).find((s) => s.enabled && s.name === name) ?? null;
   // Images pasted, dropped or picked: kept as data URLs for the preview, uploaded into the sandbox on
   // send (/workspace/.attachments) and referenced in the message so the agent opens them with Read.
-  const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string; size: number }[]>([]);
+  // `label` is what the chip is called; `note` is what the agent is told about the picture (a browser
+  // element's selector and markup). Neither is prose the person has to read or keep in their message.
+  const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string; size: number; label?: string; note?: string }[]>([]);
   const [dragOver, setDragOver] = React.useState(false);
   const [preview, setPreview] = React.useState<{ name: string; dataUrl: string } | null>(null);
   const fileInput = React.useRef<HTMLInputElement>(null);
@@ -165,7 +167,10 @@ export function SendBar({
   }, [onFocusRequest]);
   React.useEffect(() => {
     if (!seed) return;
-    setValue((prev) => (seed.append && prev.trim() ? `${prev.trimEnd()}\n\n${seed.text}` : seed.text));
+    // A seed that is only a picture (a browser element) leaves the words being written alone.
+    if (seed.text || !seed.image) setValue((prev) => (seed.append && prev.trim() ? `${prev.trimEnd()}\n\n${seed.text}` : seed.text));
+    const image = seed.image;
+    if (image) setImages((prev) => [...prev, { id: `${seed.n}-${prev.length}`, name: image.name, dataUrl: image.dataUrl, size: Math.round(image.dataUrl.length * 0.75), label: image.label, note: image.note }]);
     requestAnimationFrame(() => {
       const t = textarea();
       if (!t) return;
@@ -286,7 +291,7 @@ export function SendBar({
         for (const [i, img] of attachedImages.entries()) {
           const rel = `${ATTACHMENTS_DIR}/${stamp}-${i + 1}-${img.name}`;
           await api.writeFile(boxName, rel, img.dataUrl, "base64");
-          paths.push(`/workspace/${rel}`);
+          paths.push(`/workspace/${rel}${img.note ? `\n  ${img.note}` : ""}`);
         }
         imagesTail = `Attached ${paths.length === 1 ? "image" : "images"} (open with the Read tool):\n${paths.map((p) => `- ${p}`).join("\n")}`;
         message = `${message}${message ? "\n\n" : ""}${imagesTail}`;
@@ -411,7 +416,7 @@ export function SendBar({
                   <button type="button" onClick={() => setPreview(img)} aria-label={`Preview ${img.name}`} className="block size-full cursor-zoom-in">
                     <img src={img.dataUrl} alt={img.name} className="size-full object-cover transition-transform duration-200 group-hover:scale-105" />
                   </button>
-                  <span className="stamp absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-px text-[9px] text-white">{img.name}</span>
+                  <span className="stamp absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-px text-[9px] text-white">{img.label ?? img.name}</span>
                   <button
                     type="button"
                     onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))}

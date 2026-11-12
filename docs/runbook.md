@@ -641,3 +641,26 @@ the in-box config (the MCP page shows it as **Kept out**, the controller log say
 need the controller get a per-user API key from the Account page; `BOX_SELF_MCP=1` restores the
 old behaviour on purpose. If a token was ever exposed this way, rotate `MCP_HTTP_TOKEN` and
 `DASHBOARD_TOKEN` in the host `.env` and restart.
+
+## A browser in every sandbox (2026-11-11)
+
+The dashboard's Browser pane and the agent share one headless browser, Moli (`/usr/local/bin/moli`,
+version and sha256 pinned in `src/browser.ts`).
+
+- **Where it comes from.** `agentImageDockerfile` installs it, so an image baked after this change
+  carries it. A box from an older image installs it the first time the pane opens
+  (`POST /browser/install.json`, about 4 s, archive checked against the pinned sha256, downloaded to
+  `/var/tmp` because `/tmp` is a 256 MB tmpfs). It costs 107 MB of disk.
+- **How the pane talks to it.** `POST /browser.json {session, op, ...}` runs a small script in the box
+  over `msb exec`. The script makes sure a helper (`~/.asb/browser-daemon.cjs`, source in
+  `src/browser-daemon.ts`) is running, restarts it when the controller's copy is newer, and posts the
+  action. The helper listens on the box's `127.0.0.1:9334` and drives Moli over CDP on
+  `127.0.0.1:9333`. Neither port leaves the box. One action per box runs at a time.
+- **Cost.** About 220 MB of the box's memory while open (helper 65 MB, Moli 154 MB). Both exit after 15
+  idle minutes. About 0.4 s per action.
+- **Limits on the route.** Addresses are http or https only (`normalizeUrl`); the action is parsed to a
+  fixed shape and embedded as JSON, never as shell. The route has its own limiter (600 a minute; a
+  scroll is several calls) and writes no audit row per action. The global box-ownership check applies.
+- **The agent.** Its system prompt says the browser exists and how to start it (`MOLI_PROMPT_HINT`).
+- **When it misbehaves.** In the box: `curl -s -X POST -d '{"op":"quit"}' http://127.0.0.1:9334/` stops
+  the helper and Moli; the next action starts them again. `moli --version` says whether it is installed.

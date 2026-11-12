@@ -59,6 +59,7 @@ import { INBOX_APPEND_SH, INBOX_RESET_SH, INBOX_TAKE_DELIVERED_SH, inboxLine, ty
 import { isStalled } from "./stall.js";
 import { EXIT_DISK_FULL } from "./run-health.js";
 import { parseBakedManifest, type LastProvision } from "./package-watch.js";
+import { MOLI_BIN, MOLI_PROMPT_HINT, moliInstallSh } from "./browser.js";
 import { orphanSandboxDirs, parseDfPk, parseDirListing, type DiskReading } from "./host-disk.js";
 
 // The driver pieces used to live here; re-exported so every existing importer keeps working.
@@ -678,6 +679,8 @@ export function agentImageDockerfile(cfg: Config, base: string, npx: string[], a
     "set -e",
     claudeInstallSh(cfg.claudeCodeVersion),
     "apt-get update -qq && apt-get install -y -qq --no-install-recommends gh >/dev/null",
+    // The browser (src/browser.ts): one pinned, checksummed binary, for the agent and the pane.
+    moliInstallSh(),
     ...(omp
       ? [ompInstallSh(cfg.ompVersion), "{ pip3 install --break-system-packages debugpy || apt-get install -y -qq --no-install-recommends python3-debugpy; } >/dev/null 2>&1 || true"]
       : []),
@@ -690,6 +693,7 @@ export function agentImageDockerfile(cfg: Config, base: string, npx: string[], a
     bakedManifestSh(),
     "rm -rf /usr/local/install/cache /root/.bun/install/cache /root/.cache /root/.npm /root/.npm-tmp /root/.hdb /tmp/* /var/lib/apt/lists/* /var/cache/apt/*",
     "claude --version",
+    `${MOLI_BIN} --version`,
     ...(omp ? ["omp --version"] : []),
   ];
   const env = omp ? "ENV BUN_INSTALL=/usr/local OMP_SKIP_SETUP=1\n" : "";
@@ -784,7 +788,7 @@ export function agentEnvFlags(
   // The standing policy plus (when known) the goal-neutral repo-layout hint, so the agent knows
   // where each repo lives (/workspace/<name>). The TASK decides the goal. Passed as env, never argv.
   const driver = driverFor(agent);
-  const basePrompt = driver.systemPrompt;
+  const basePrompt = `${driver.systemPrompt} ${MOLI_PROMPT_HINT}`;
   const sysPrompt = repos?.length
     ? `${basePrompt} ${reposPromptHint(repos)}`
     : basePrompt;

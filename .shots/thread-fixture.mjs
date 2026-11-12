@@ -417,6 +417,18 @@ await page.route("**/*", async (route) => {
   switch (p) {
     case "/auth/config.json":
       return json(route, { mode: "saas", providers: ["github"], tokenLogin: true, password: true, signup: true, passwordMin: 10, trialDays: 14, beta: true });
+    case "/browser.json": {
+      // The real helper (C:/Users/ak/moli-test/dev/daemon.cjs on 9334) behind the mocked controller.
+      const body = JSON.parse(route.request().postData() || "{}");
+      if (flag("browser", "") === "down") return json(route, { ok: false, code: "no-start", error: "the browser did not start" });
+      if (flag("browser", "") === "slow") await new Promise((r) => setTimeout(r, 60000));
+      if (body.op === "goto" && !/^https?:/.test(body.url)) body.url = (/^(localhost|[\d.]+)(:|$)/.test(body.url) ? "http://" : "https://") + body.url;
+      const r = await fetch("http://127.0.0.1:9334/", { method: "POST", body: JSON.stringify(body) }).then((x) => x.json()).catch((e) => ({ ok: false, code: "failed", error: String(e.message) }));
+      if (r.blank && flag("ports", "")) r.ports = flag("ports", "").split(",").map(Number);
+      return json(route, r);
+    }
+    case "/browser/install.json":
+      return json(route, { ok: true });
     case "/workflows.json":
       return json(route, { limits: {}, dir: ".agent-sandbox/workflows", workflows: [] });
     case "/triggers/for-box.json":
@@ -645,6 +657,42 @@ if (stream) {
   await hunk.getByRole("button", { name: /^reject$/i }).click();
   await page.waitForTimeout(700);
   await shot("-review-rejected");
+} else if (interact === "browser" || interact === "browser-blank" || interact === "browser-phone") {
+  await fetch("http://127.0.0.1:9334/", { method: "POST", body: JSON.stringify({ op: "goto", url: "about:blank", w: 800, h: 600 }) }).catch(() => {});
+  if (W < 768) { await page.getByRole("button", { name: "More actions" }).click(); await page.getByRole("menuitem", { name: /browser/i }).click(); }
+  else await page.getByRole("button", { name: "Browser", exact: true }).click();
+  await page.locator('aside[aria-label="Browser"]').waitFor({ timeout: 8000 });
+  await page.waitForTimeout(1800);
+  await shot("-browser-blank");
+  if (interact !== "browser-blank") {
+    const addr = page.getByLabel("Address");
+    await addr.fill(flag("url", "react.dev/learn"));
+    await addr.press("Enter");
+    await page.waitForTimeout(400);
+    await shot("-browser-loading");
+    await page.waitForTimeout(4500);
+    await shot("-browser-page");
+    if (interact === "browser-phone") { await page.getByLabel("Phone width").click(); await page.waitForTimeout(2500); await shot("-browser-phonewidth"); }
+    const stage = page.locator(".browser-stage");
+    const bb = await stage.boundingBox();
+    await page.mouse.move(bb.x + bb.width / 2, bb.y + 300);
+    await page.mouse.wheel(0, 500);
+    await page.waitForTimeout(120);
+    await shot("-browser-scrolling");
+    await page.waitForTimeout(2500);
+    await page.getByRole("button", { name: /select/i }).click();
+    await page.waitForTimeout(2000);
+    await page.mouse.move(bb.x + Number(flag("hx", "260")), bb.y + Number(flag("hy", "210")));
+    await page.waitForTimeout(300);
+    await shot("-browser-hover");
+    await page.mouse.down(); await page.mouse.up();
+    await page.waitForTimeout(1800);
+    await page.mouse.move(bb.x + 300, bb.y + 420);
+    await page.mouse.down(); await page.mouse.up();
+    await page.waitForTimeout(1800);
+    await shot("-browser-tagged");
+    console.log("composer:", JSON.stringify(await input().inputValue()));
+  }
 } else if (interact === "workspace") {
   await page.getByRole("button", { name: /files|workspace/i }).first().click();
   await page.waitForTimeout(1500);
