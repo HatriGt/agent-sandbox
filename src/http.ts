@@ -25,7 +25,7 @@ import { addManualNote, deleteNote, exportMemoryMarkdown, getNote, importMemoryM
 import { MemoryHarvester } from "./memory-harvest.js";
 import { deleteSetup, getSetup, listSetups, recordLearned, repoKey, repoSlugFromUrl, saveSetup } from "./setup-store.js";
 import { kickRefill, refillPool, startPoolMaintainer } from "./pool.js";
-import { noteOwnerActive } from "./warm-owners.js";
+import { forgetOwnerAgent, noteOwnerActive } from "./warm-owners.js";
 import { checkBearer } from "./http-auth.js";
 import { clientOf, makeAuthThrottle, makeRateLimiter } from "./auth-throttle.js";
 import { auditFields, formatAudit, listAuditEvents, MUTATING, pruneAuditEvents } from "./audit.js";
@@ -2390,6 +2390,7 @@ app.post("/agent-prefs.json", (req: Request, res: Response) => {
     const prefs = normalizeAgentPrefs(req.body ?? {});
     assertSelectable(prefs.defaultAgent, (req.body as { allowPartialSupervision?: unknown } | undefined)?.allowPartialSupervision === true);
     saveAgentPrefs(prefs, p.kind === "user" ? p.userId : OPERATOR_OWNER);
+    forgetOwnerAgent(ownerKey(p));
     // The pool follows this setting (only the picked agent's flavor stays warm) — reconcile now
     // instead of waiting for the maintainer tick, so the first task after switching is warm too.
     void refillPool(cfg);

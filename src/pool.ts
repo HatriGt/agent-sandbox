@@ -10,7 +10,7 @@
  * The pool state lives on the VPS (the running `pool-*` boxes), so it survives MCP respawns.
  */
 import { createBox, bootWarmBox, adoptWarmBox, listPoolBoxes, listWarmBoxes, hostFreeMb, claimWarmBox, reapDeadPoolBoxes, forceRemoveBox, OMP_MIN_MEMORY, OMP_MIN_DISK, OMP_CPUS, ompRootSource, claudeRootSource, type WarmBox } from "./msb.js";
-import { BLANK_OWNER, activeWarmOwners, ownerTag } from "./warm-owners.js";
+import { BLANK_OWNER, activeWarmOwners, lastOwnerAgent, ownerTag } from "./warm-owners.js";
 import { loadAgentPrefs } from "./agent-kind.js";
 import { stagingPathFor } from "./sync.js";
 import { parseDurationSec } from "./monitor.js";
@@ -187,9 +187,12 @@ export interface RefillIO {
 }
 const realRefillIO: RefillIO = { listPoolBoxes, listWarmBoxes, bootWarmBox, adoptWarmBox, removeBox: forceRemoveBox, hostFreeMb };
 
-/** The pool flavor an owner's box is warmed for: their default agent, omp or claude. */
-export function ownerFlavor(owner: string): AgentKind {
-  return loadAgentPrefs(owner).defaultAgent === "omp" ? "omp" : "claude";
+/**
+ * The pool flavor an owner's box is warmed for: the agent they last started a task with, and
+ * until they start one, their default agent.
+ */
+export function ownerFlavor(owner: string, last: AgentKind | undefined = lastOwnerAgent(owner)): AgentKind {
+  return last ?? (loadAgentPrefs(owner).defaultAgent === "omp" ? "omp" : "claude");
 }
 
 /** "1G" / "1536M" as MiB; an unreadable size counts as 1 GiB. Pure. */

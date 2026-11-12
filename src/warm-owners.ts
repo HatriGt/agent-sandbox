@@ -87,6 +87,31 @@ export function noteOwnerActive(cfg: Config, owner: string, nowMs = Date.now()):
   return !before.includes(owner) && pickWarmOwners(seen, nowMs, cfg.poolOwnerWindowMs, cfg.poolOwners).includes(owner);
 }
 
+/**
+ * The agent each owner last started a task with, in this process. A person who picks omp for a
+ * task in the composer while their default is Claude Code used to get a cold box every time,
+ * because the warm one was only ever kept in the default's flavor. Not persisted: after a restart
+ * the default decides again until the next task.
+ */
+const lastAgent = new Map<string, "claude" | "omp">();
+
+/** Record the agent an owner just started. True when it differs from what was recorded before. */
+export function noteOwnerAgent(owner: string, agent: "claude" | "omp"): boolean {
+  const before = lastAgent.get(owner);
+  lastAgent.set(owner, agent);
+  return before !== agent;
+}
+
+/** The agent an owner last started here, if any. */
+export function lastOwnerAgent(owner: string): "claude" | "omp" | undefined {
+  return lastAgent.get(owner);
+}
+
+/** A saved default is the newer word: it replaces what the last task said. */
+export function forgetOwnerAgent(owner: string): void {
+  lastAgent.delete(owner);
+}
+
 /** The owners the pool should hold a box for right now. */
 export function activeWarmOwners(cfg: Config, nowMs = Date.now()): string[] {
   load(cfg);
@@ -96,6 +121,7 @@ export function activeWarmOwners(cfg: Config, nowMs = Date.now()): string[] {
 /** Test seam: forget everything. */
 export function resetWarmOwners(): void {
   seen.clear();
+  lastAgent.clear();
   loadedFrom = null;
   lastWrite = 0;
 }

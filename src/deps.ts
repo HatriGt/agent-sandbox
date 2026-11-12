@@ -13,7 +13,7 @@ import type { RepoLayout } from "./agent-prompt.js";
 import { syncTreeToVps, cleanupStaging, stagingPathFor, repoStagingPath } from "./sync.js";
 import { cloneRepoInStaging, applyPatchInStaging } from "./git-source.js";
 import { acquireBox, refillPool, poolEligible, ompPoolEligible, poolStatus } from "./pool.js";
-import { noteOwnerActive } from "./warm-owners.js";
+import { noteOwnerActive, noteOwnerAgent } from "./warm-owners.js";
 import { ownerKey } from "./user-store.js";
 import { isCanaryTask } from "./canary.js";
 import {
@@ -537,7 +537,10 @@ export const deps: HandlerDeps = {
     // another person's. Starting a task also marks the owner as around, so the reseed below
     // prepares their next box. The controller's own canary is nobody's presence.
     const boxOwner = ownerKey();
-    if (!isCanaryTask(plan.task)) noteOwnerActive(cfg, boxOwner);
+    if (!isCanaryTask(plan.task)) {
+      noteOwnerActive(cfg, boxOwner);
+      noteOwnerAgent(boxOwner, poolAgent);
+    }
     const { box, warm } = await acquireBox(runCfg, id, sessionRoot, eligible, poolAgent, boxOwner);
     mark("acquire");
 

@@ -115,3 +115,22 @@ test("a host short of memory boots no warm box", async () => {
   await refillPool(cfg, io, new Set(["claude"]), ["alice"]);
   assert.deepEqual(calls, []);
 });
+
+test("the warm box follows the agent an owner last started, and a saved default takes over again", async () => {
+  const { ownerFlavor } = await import("../src/pool.js");
+  const { noteOwnerAgent, lastOwnerAgent, forgetOwnerAgent } = await import("../src/warm-owners.js");
+  assert.equal(ownerFlavor("carol", "omp"), "omp");
+  assert.equal(ownerFlavor("carol", "claude"), "claude");
+  assert.equal(noteOwnerAgent("carol", "omp"), true);
+  assert.equal(noteOwnerAgent("carol", "omp"), false);
+  assert.equal(lastOwnerAgent("carol"), "omp");
+  forgetOwnerAgent("carol");
+  assert.equal(lastOwnerAgent("carol"), undefined);
+});
+
+test("an owner who switched to omp gets an omp box and their Claude Code box is given up", async () => {
+  const both = { ...cfg, ompPoolSize: 1, ompImage: "agent-omp" } as unknown as Config;
+  const { io, calls } = rig([{ name: "pool-300-alice", owner: ownerTag("alice") }]);
+  await refillPool(both, { ...io, ownerFlavor: () => "omp" as const }, new Set(["claude", "omp"]), ["alice"]);
+  assert.deepEqual(calls, ["rm:pool-300-alice", "boot:omp:alice"]);
+});
