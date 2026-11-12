@@ -198,6 +198,9 @@ export function browserStubScript(action: BrowserAction): string {
     fs.mkdirSync(dir, { recursive: true });
     const file = path.join(dir, "browser-daemon.cjs");
     fs.writeFileSync(file, SRC);
+    // The agent's browser command is this same file. Each turn refreshes it, but a turn already
+    // running would keep the older command, which a newer helper refuses.
+    try { const tool = ${JSON.stringify(BROWSER_TOOL_LIB)}; if (fs.existsSync(tool)) { fs.writeFileSync(tool + ".new", SRC); fs.renameSync(tool + ".new", tool); } } catch (e) {}
     cp.spawn(process.execPath, [file], { detached: true, stdio: "ignore" }).unref();
     for (let i = 0; i < 50 && v === null; i++) { await sleep(100); v = await ping(); }
     if (v === null) return say({ ok: false, code: "no-start", error: "the browser helper did not start" });
