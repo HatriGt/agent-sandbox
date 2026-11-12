@@ -4076,7 +4076,11 @@ app.get("/history/outcome.json", (req: Request, res: Response) => {
     const row = getDigest(db, owner, id !== undefined ? { id } : { box: box! });
     const outcome = row ? outcomeWithFollow(owner, row.box, outcomeOf(row.digest)) : null;
     if (!row || !outcome) {
-      res.status(404).json({ error: "no outcome for that run" });
+      // "Not archived yet" is the ordinary answer while a run is open, and the console asks on
+      // every thread it shows: with `soft` it gets a plain null instead of a 404 the browser logs
+      // in red. Without it (the phone app, older tabs) the answer is the 404 it always was.
+      if (req.query.soft === "1") res.json({ outcome: null });
+      else res.status(404).json({ error: "no outcome for that run" });
       return;
     }
     res.json({ id: row.id, box: row.box, outcome });

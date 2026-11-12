@@ -1161,9 +1161,13 @@ export const api = {
     fetch(url("/history.json", { id: String(id) }), { method: "DELETE", headers: authHeaders }).then(parse<{ ok: true }>),
   /** The outcome card of an archived run: by archive id, or the latest record for a box. */
   outcome: (q: { id: number } | { box: string }, signal?: AbortSignal) =>
-    fetch(url("/history/outcome.json", "id" in q ? { id: String(q.id) } : { box: q.box }), { headers: authHeaders, signal }).then(
-      parse<{ id: number; box: string; outcome: RunOutcome }>
-    ),
+    fetch(url("/history/outcome.json", { ...("id" in q ? { id: String(q.id) } : { box: q.box }), soft: "1" }), { headers: authHeaders, signal })
+      .then(parse<{ id?: number; box?: string; outcome: RunOutcome | null }>)
+      .then((r) => {
+        // Not archived (yet): the same rejection a 404 gave, without the failed request.
+        if (!r.outcome) throw new Error("no outcome for that run");
+        return r as { id: number; box: string; outcome: RunOutcome };
+      }),
   /** The History ledger: totals + filtered rows over the archive. */
   ledger: (f: LedgerQuery = {}, signal?: AbortSignal) =>
     fetch(url("/history/ledger.json", Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)]))), { headers: authHeaders, signal }).then(
