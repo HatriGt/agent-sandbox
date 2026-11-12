@@ -664,3 +664,15 @@ version and sha256 pinned in `src/browser.ts`).
 - **The agent.** Its system prompt says the browser exists and how to start it (`MOLI_PROMPT_HINT`).
 - **When it misbehaves.** In the box: `curl -s -X POST -d '{"op":"quit"}' http://127.0.0.1:9334/` stops
   the helper and Moli; the next action starts them again. `moli --version` says whether it is installed.
+
+### The agent's `browser` command
+
+`installBrowserTool` (src/msb.ts) writes `/usr/local/bin/browser` on every turn: the helper file itself
+(`/usr/local/lib/asb/browser.cjs`), run with arguments. `browser help` lists the commands. It talks to
+the same helper and the same page as the pane, installs Moli on first use through
+`/usr/local/bin/asb-moli-install`, and looks at the page at its own size (1280 x 800; `browser size`).
+
+Moli lays a page out when it paints, not when a script asks for a size. The helper paints a few pixels
+(`layout()`) before it measures anything and after every change of size. Two bugs came from leaving
+that out: a wait that never saw an element a click had just added, and a pane that showed the agent's
+phone layout stretched wide.

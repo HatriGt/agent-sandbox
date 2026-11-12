@@ -1386,3 +1386,21 @@ A Globe button in the thread header opens a browser that runs inside the sandbox
 Left out: a live video stream (the box has 1 GB and the picture view costs nothing between actions);
 drawing on the page; more than one tab. Proof: `.shots/thread-fixture.mjs running <out>
 --interact=browser` (add `--dark`, `--w=390 --h=844`, `--browser=down|slow`).
+
+### The same page for the agent (2026-11-12)
+
+Tested as a person would use it, on the live server with a real run, and changed by what that showed.
+
+- **The agent has the browser too.** A `browser` command in every sandbox drives the page the pane
+  shows: open, click or fill by selector or by the visible words, wait, read the text, list what can be
+  clicked, read the console, save a picture and look at it. A failed step exits non-zero, so a list of
+  steps is an end to end test. It looks at 1280 x 800 unless it asks for a phone; the pane keeps its own size.
+- **A localhost address in the conversation opens in the pane.** In the reader's own browser that
+  address is their machine. A click on such a link, or on the address written as inline code, opens the
+  pane there.
+- **The pane follows the work.** It re-reads the page while the agent runs and reloads it (keeping the
+  scroll position) when the turn ends, so the change asked for is on screen without a click.
+- **Sending clears the marks.** The numbered pins and Select mode end when the message goes.
+
+Proof: `.shots/live-browser.mjs` against a real run (`.shots/br/live-*`): link, pick, comment, send,
+and the button changed in the pane 45 s later.
