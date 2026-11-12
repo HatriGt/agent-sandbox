@@ -22,6 +22,7 @@ import { OutcomeCard, fmtTokens, fmtUsd, outcomeFacts } from "@/components/threa
 import { ReviewView } from "@/components/thread/review/ReviewView";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
+import { titleOf, runDuration, tokensOf } from "@/lib/history-format";
 
 /**
  * History: the record of what your agents did. Boxes still mid-run lead the table (from the fleet
@@ -46,14 +47,7 @@ function dayLabel(ms: number): string {
   return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", ...(d.getFullYear() !== today.getFullYear() ? { year: "numeric" } : {}) });
 }
 
-export function titleOf(r: HistoryRun): string {
-  const t = (r.task ?? "").trim();
-  if (t) {
-    const firstLine = t.split("\n")[0];
-    return firstLine.length > 90 ? `${firstLine.slice(0, 89)}…` : firstLine;
-  }
-  return (r.headline ?? "").trim() || "Untitled run";
-}
+export { titleOf, runDuration, tokensOf };
 
 /** Server-side ledger filters. State stays client-side so its chips can count from the totals. */
 interface LedgerFilters {
@@ -344,15 +338,6 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
       </div>
     </div>
   );
-}
-
-export function runDuration(run: HistoryRun): number | null {
-  // Archive stamps are epoch ms (see HistoryRun); fmtDuration and fmtAgo both speak seconds.
-  return run.startedAt && run.endedAt && run.endedAt > run.startedAt ? Math.round((run.endedAt - run.startedAt) / 1000) : null;
-}
-
-export function tokensOf(r: HistoryRun): number | null {
-  return r.inputTokens != null || r.outputTokens != null ? (r.inputTokens ?? 0) + (r.outputTokens ?? 0) : null;
 }
 
 /** A row is an archived record, or a box still running — the live rows lead so History reads as "every run". */

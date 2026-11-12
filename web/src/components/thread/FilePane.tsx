@@ -7,6 +7,7 @@ import { hunkId, hunkToPatch, inlineChanges, pairChangedLines, type DiffHunk, ty
 import { useReducedMotion } from "@/lib/motion-pref";
 import { tokenizeLines, type CodeToken } from "@/components/CodeEditor";
 import { cn } from "@/lib/utils";
+import { CHANGES_DISCARDED_EVENT } from "@/lib/changes-events";
 import "@/styles/review.css";
 
 /**
@@ -115,7 +116,7 @@ function loadAccepted(session: string, path: string): Set<string> {
 }
 
 /** Fired after a discard so the ChangesDock (which owns the refresh) can roll its counts. */
-export const CHANGES_DISCARDED_EVENT = "asb:changes-discarded";
+export { CHANGES_DISCARDED_EVENT };
 
 export function useHunkReview(
   session: string | undefined,

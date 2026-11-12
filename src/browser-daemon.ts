@@ -37,6 +37,7 @@ let pageErrs = [];
 // What the agent last did here, so the person's pane can say it.
 let lastAgent = null;
 let spawned = false, lastSaved = "";
+let hist = null, histUrl = "";
 function note(level, text) {
   // Moli wraps an uncaught error in words about its own plumbing; the error is what follows 'threw: '.
   let t = String(text); const k = t.indexOf(' threw: ');
@@ -324,6 +325,61 @@ const ELEMS = function () {
   return JSON.stringify(out);
 };
 
+// Moli lays out position: sticky as if it were static: a sticky header or sidebar scrolls away
+// with the page and is missing from every picture taken further down. Before a picture, each one
+// is moved to where a browser would hold it (against the top or bottom edge, never past its
+// parent) with the translate property, which Moli does paint and which leaves the page's own
+// transform alone. The list is found once per page and looked for again every few seconds.
+const STICK = function () {
+  var now = Date.now(), list = window.__asbSticky;
+  if (!list || window.__asbStickyUrl !== location.href || now - (window.__asbStickyAt || 0) > 4000) {
+    list = [];
+    var all = document.body ? document.body.querySelectorAll("*") : [];
+    for (var i = 0; i < all.length && i < 4000 && list.length < 60; i++) {
+      var e = all[i], cs;
+      try { cs = getComputedStyle(e); } catch (x) { continue; }
+      if (cs.position !== "sticky") continue;
+      // Sticky inside its own scrolling box holds against that box, which this does not model.
+      var inner = false;
+      for (var p = e.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
+        var o = ""; try { o = getComputedStyle(p).overflowY; } catch (x) {}
+        if (o === "auto" || o === "scroll" || o === "hidden") { inner = true; break; }
+      }
+      if (!inner) list.push(e);
+    }
+    (window.__asbSticky || []).forEach(function (e) { if (list.indexOf(e) < 0 && e.__asbShift) { e.style.translate = e.__asbTranslate || ""; e.__asbShift = 0; } });
+    window.__asbSticky = list; window.__asbStickyUrl = location.href; window.__asbStickyAt = now;
+  }
+  var vh = innerHeight, moved = 0;
+  for (var j = 0; j < list.length; j++) {
+    var el = list[j];
+    if (!el.isConnected || !el.parentElement) continue;
+    var st = getComputedStyle(el), top = parseFloat(st.top), bottom = parseFloat(st.bottom);
+    var prev = el.__asbShift || 0, r = el.getBoundingClientRect(), par = el.parentElement.getBoundingClientRect();
+    var nt = r.top - prev, nb = r.bottom - prev, shift = 0;
+    if (!isNaN(top) && nt < top) shift = Math.max(0, Math.min(top - nt, par.bottom - nb));
+    else if (!isNaN(bottom) && nb > vh - bottom) shift = Math.min(0, Math.max(vh - bottom - nb, par.top - nt));
+    shift = Math.round(shift);
+    if (shift !== prev) {
+      if (el.__asbTranslate === undefined) el.__asbTranslate = el.style.translate || "";
+      el.style.translate = shift ? "0px " + shift + "px" : el.__asbTranslate;
+      el.__asbShift = shift; moved++;
+    }
+  }
+  return list.length + ":" + moved;
+};
+let hasSticky = true, stickAt = 0;
+// Hold the sticky elements where they belong before a picture. A page without any pays one small
+// script every few seconds and nothing else.
+async function stick() {
+  if (!hasSticky && Date.now() - stickAt < 4000) return;
+  await layout();
+  let r = "0:0";
+  try { r = String(await ev("(" + STICK + ")()")); } catch (e) { return; }
+  stickAt = Date.now();
+  hasSticky = r.split(":")[0] !== "0";
+}
+
 // Ports something in the sandbox listens on (the dev server the agent started), from /proc/net/tcp*.
 function ports() {
   const out = new Set();
@@ -403,7 +459,7 @@ async function history() {
 }
 
 async function nav(url, again) {
-  loading = true; pageErrs = [];
+  loading = true; pageErrs = []; hasSticky = true;
   const r = await send("Page.navigate", { url });
   if (r.error) { loading = false; throw fail("failed", r.error.message); }
   await settle(20000, 120);
@@ -415,6 +471,13 @@ async function nav(url, again) {
 async function act(a) {
   touch();
   if (a.op === "quit") { setTimeout(quit, 30); return { ok: true }; }
+  // The person closed their pane. If the agent has not used the page lately, give its memory
+  // back now instead of after the idle wait; where it was is written down for the next open.
+  if (a.op === "release") {
+    const busy = !!lastAgent && Date.now() - lastAgent.at < 120000;
+    if (!busy) setTimeout(quit, 30);
+    return { ok: true, released: !busy };
+  }
   await ensure();
   const agent = a.agent === true;
   if (agent && a.op === "size") agentVp = { w: clamp(a.w, 320, 1920, 1280), h: clamp(a.h, 240, 1600, 800) };
@@ -471,9 +534,21 @@ async function act(a) {
     x = clamp(at.x, 0, w, 0); y = clamp(at.y, 0, h, 0);
     extra.hit = hit;
   }
-  if (a.op === "pick") {
-    const d = await ev("(" + PICK + ")(" + clamp(a.i, 0, 5000, 0) + ")");
-    return { ok: true, pick: JSON.parse(d || "null") };
+  if (a.op === "pick" || a.op === "crop") {
+    const out = { ok: true };
+    if (a.op === "pick") out.pick = JSON.parse((await ev("(" + PICK + ")(" + clamp(a.i, 0, 5000, 0) + ")")) || "null");
+    // A cut of the page for the message, drawn again at two device pixels per page pixel: cut out
+    // of the pane's picture it had the pane's resolution, which is under 1 when a desktop page is
+    // shown small, and the agent got a blur.
+    if (Array.isArray(a.box) && a.box.length === 4) {
+      const bx = clamp(a.box[0], 0, w, 0), by = clamp(a.box[1], 0, h, 0);
+      const bw = clamp(a.box[2], 2, Math.max(2, w - bx), 2), bh = clamp(a.box[3], 2, Math.max(2, h - by), 2);
+      const sc = await ev("JSON.stringify([Math.round(scrollX),Math.round(scrollY)])").then(JSON.parse).catch(() => [0, 0]);
+      const k = Math.round(Math.min(2, 1800 / bw, 1800 / bh) * 100) / 100;
+      const pic = await send("Page.captureScreenshot", { format: "png", clip: { x: bx + sc[0], y: by + sc[1], width: bw, height: bh, scale: k / dpr } });
+      if (!pic.error) { out.crop = pic.result.data; out.cropScale = k; out.cropBox = [bx, by, bw, bh]; }
+    }
+    return out;
   }
   if (a.op === "goto" || (a.op === "open" && a.url)) netError = await nav(String(a.url));
   else if (a.op === "reload") {
@@ -510,7 +585,7 @@ async function act(a) {
     loading = true; await send("Page.reload"); await settle(20000, 120);
   } else if (a.op === "scroll") {
     await send("Input.dispatchMouseEvent", { type: "mouseWheel", x, y, deltaX: clamp(a.dx, -20000, 20000, 0), deltaY: clamp(a.dy, -20000, 20000, 0) });
-    await sleep(50);
+    await sleep(20);
   } else if (a.op === "type") {
     await send("Input.insertText", { text: String(a.text || "").slice(0, 2000) });
     await sleep(60);
@@ -538,6 +613,7 @@ async function act(a) {
     if (a.op === "text") { const t = String(await ev("document.body ? document.body.innerText : ''")); out.text = t.length > 20000 ? t.slice(0, 20000) + "\n… (cut)" : t; }
     if (a.op === "elements") out.elements = JSON.parse(await ev("(function(){" + selectorOf + "; return (" + ELEMS + ")(); })()"));
     if (a.op === "shot") {
+      await stick();
       const full = a.full === true, fh = Math.min(Math.max(st.dh, st.vh), 8000);
       let clip = full ? { x: 0, y: 0, width: st.vw, height: fh, scale: 1 } : null, size = st.vw + "x" + (full ? fh : st.vh);
       if (a.q !== undefined) {
@@ -552,10 +628,15 @@ async function act(a) {
     }
     return out;
   }
-  const hs = await history();
+  // Back and Forward only change when the page does: a scroll or a look does not ask again.
+  if (!hist || (a.op !== "scroll" && a.op !== "shot") || st.url !== histUrl) { hist = await history(); histUrl = st.url; }
+  const hs = hist;
+  await stick();
   // Extra page above and below what is shown, so a scroll moves at once and the next picture
-  // catches up. More below than above: that is the way people read.
-  const top = Math.max(0, Math.min(st.sy, Math.min(500, Math.round(st.vh * 0.5)))), bottom = Math.max(0, Math.min(st.dh - st.vh - st.sy, Math.min(1100, st.vh)));
+  // catches up. More in the direction of travel (down, when nobody is scrolling: that is the way
+  // people read), so a long scroll does not run into blank page.
+  const up = a.op === "scroll" && +a.dy < 0, big = Math.min(1400, Math.round(st.vh * 1.4)), small = Math.min(450, Math.round(st.vh * 0.45));
+  const top = Math.max(0, Math.min(st.sy, up ? big : small)), bottom = Math.max(0, Math.min(st.dh - st.vh - st.sy, up ? small : big));
   // Text needs a high quality to keep clean edges; at two device pixels per CSS pixel a lower one reads the same.
   const q = dpr >= 1.75 ? 74 : 86;
   let shot = await send("Page.captureScreenshot", { format: "jpeg", quality: q, clip: { x: st.sx, y: st.sy - top, width: st.vw, height: st.vh + top + bottom, scale: 1 } });
@@ -581,8 +662,7 @@ function serve() {
 // a check, any site could post "go to this address" here. So a request must not come from a page
 // (no Origin, the right Host) and must carry the token only a process in the box can read.
 TOKEN = crypto.randomBytes(24).toString("hex");
-try { fs.mkdirSync(HOME_DIR, { recursive: true }); fs.writeFileSync(TOKEN_FILE, TOKEN, { mode: 0o600 }); fs.chmodSync(TOKEN_FILE, 0o600); } catch (e) {}
-http.createServer((req, res) => {
+const server = http.createServer((req, res) => {
   const host = String(req.headers.host || "");
   const refuse = (status, code) => { res.statusCode = status; res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ ok: false, code: code, error: code })); };
   if (req.headers.origin || req.headers["sec-fetch-site"] || (host !== "127.0.0.1:" + PORT && host !== "localhost:" + PORT)) return refuse(403, "forbidden");
@@ -600,7 +680,14 @@ http.createServer((req, res) => {
       res.end(JSON.stringify(out));
     });
   });
-}).listen(PORT, "127.0.0.1");
+});
+// The token is written once this helper really owns the port. Two starts can race (the pane and
+// the agent's command, a moment apart): the loser used to overwrite the token and then fail to
+// listen, which left the winner refusing every caller as "forbidden" until it idled out.
+server.on("error", () => process.exit(0));
+server.listen(PORT, "127.0.0.1", () => {
+  try { fs.mkdirSync(HOME_DIR, { recursive: true }); fs.writeFileSync(TOKEN_FILE, TOKEN, { mode: 0o600 }); fs.chmodSync(TOKEN_FILE, 0o600); } catch (e) {}
+});
 touch();
 }
 

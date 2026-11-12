@@ -61,7 +61,7 @@ import type { SessionRun } from "@/hooks/useSessionRuns";
 import { useGo } from "@/lib/route";
 import { DataTable, MetaLine, StatusDot, type Column } from "@/components/ui/data-table";
 import { describeEvent } from "@/lib/activity";
-import { titleOf, runDuration, tokensOf } from "@/components/History";
+import { titleOf, runDuration, tokensOf } from "@/lib/history-format";
 import { fmtTokens } from "@/components/thread/OutcomeCard";
 
 /**

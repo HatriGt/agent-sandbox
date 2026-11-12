@@ -28,6 +28,7 @@ import { setPrefill } from "@/lib/draft";
 import { ProducedFiles } from "./ProducedFiles";
 import { useRunDigest } from "./DigestCard";
 import { useOutcome } from "./OutcomeCard";
+import { nextSteps } from "@/lib/next-steps";
 import { RunPill, WatchPill } from "./RunPill";
 import { ThreadHeader } from "./ThreadHeader";
 import { RunInspector } from "./RunInspector";
@@ -473,6 +474,8 @@ export function Thread({
   const finished = !sleeping && !loadingTrace && (runState === "done" || (runState === "idle" && exitCode != null));
   const digest = useRunDigest(box.name, finished, `${exitCode ?? ""}-${events.length}`);
   const outcome = useOutcome(finished ? { box: box.name } : null, `${exitCode ?? ""}-${events.length}`);
+  // What to ask for next, read off how the run ended; a follow-up already running needs no nudge.
+  const steps = React.useMemo(() => (outcome?.result.followups?.some((f) => f.state === "running") ? [] : nextSteps(outcome, exitCode ?? null)), [outcome, exitCode]);
   const durationSec = digest?.startedAt && digest?.endedAt && digest.endedAt > digest.startedAt ? Math.round((digest.endedAt - digest.startedAt) / 1000) : undefined;
 
   const deadline = React.useMemo(() => deadlineOf(box, lifecycle), [box, lifecycle]);
@@ -1039,10 +1042,6 @@ export function Thread({
       <div className="@container relative min-h-0 min-w-0 flex-1">
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
         <SchedulePill box={box.name} runState={String(runState ?? "")} />
-        {/* Soft fades at the top and bottom edges so messages dissolve under the header and into the
-            composer rather than being sliced by them. Pure decoration; pointer-events off. */}
-        <div aria-hidden className="from-background pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b to-transparent" />
-        <div aria-hidden className="to-background pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-b from-transparent" />
         <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick} aria-label="Conversation" aria-busy={runState === "running"}>
           <ChatContainerContent className="mx-auto w-full max-w-3xl gap-5 px-4 pt-7 pb-12 md:px-6">
             {planBoard && !sleeping && !loadingTrace && planPlacement === "card" && <PlanBoard board={planBoard} live={runState === "running"} variant="card" />}
@@ -1241,6 +1240,21 @@ export function Thread({
                 context={ctxHealth}
                 onAgain={newFromThis}
               />
+            )}
+            {finished && !sleeping && !loadingTrace && pendingReplies.length === 0 && steps.length > 0 && (
+              <div className="enter -mt-2 flex flex-wrap items-center gap-1.5" role="group" aria-label="Suggested next steps">
+                {steps.map((st) => (
+                  <button
+                    key={st.id}
+                    type="button"
+                    title={st.text}
+                    onClick={() => setSeed({ text: st.text, n: Date.now() })}
+                    className="text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-ring text-meta h-7 cursor-pointer rounded-full border px-3 transition-colors duration-150 outline-none focus-visible:ring-2 active:scale-[0.97]"
+                  >
+                    {st.label}
+                  </button>
+                ))}
+              </div>
             )}
             <ChatContainerScrollAnchor />
           </ChatContainerContent>

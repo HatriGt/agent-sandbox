@@ -53,7 +53,7 @@ test("the in-box scripts are valid JavaScript and carry the action as data", () 
   assert.ok(!stub.includes("@@V@@"), "the helper's version placeholder is filled in");
   assert.doesNotMatch(BROWSER_DAEMON_SRC, /`|\$\{/, "the helper must stay free of template syntax (it lives in one raw literal)");
   // The helper and Moli's protocol port answer on the box's loopback only.
-  assert.match(BROWSER_DAEMON_SRC, /listen\(PORT, "127\.0\.0\.1"\)/);
+  assert.match(BROWSER_DAEMON_SRC, /listen\(PORT, "127\.0\.0\.1"[,)]/);
   assert.match(BROWSER_DAEMON_SRC, /"--host", "127\.0\.0\.1"/);
 });
 
@@ -141,4 +141,27 @@ test("logs is an action, and any action may say which picture the pane already h
   const bad = parseBrowserAction({ op: "shot", w: 800, h: 600, dpr: 1, have: "$(id)" });
   assert.ok(bad.ok);
   assert.equal(bad.action.have, undefined);
+});
+
+test("a cut of the page is clamped to the viewport, and release never starts a browser", () => {
+  const crop = parseBrowserAction({ op: "crop", box: [-5, 10.4, 99999, 50], w: 1024, h: 700 });
+  assert.ok(crop.ok);
+  if (crop.ok) assert.deepEqual(crop.action.box, [0, 10, 1920, 50]);
+  assert.equal(parseBrowserAction({ op: "crop" }).ok, false);
+  assert.equal(parseBrowserAction({ op: "crop", box: [1, 2, 3] }).ok, false);
+  const pick = parseBrowserAction({ op: "pick", i: 3, box: [10, 20, 300, 200] });
+  assert.ok(pick.ok && pick.action.box && pick.action.i === 3);
+  const release = parseBrowserAction({ op: "release" });
+  assert.ok(release.ok);
+  // With no helper running, release answers at once instead of starting one to tell it to stop.
+  assert.match(browserStubScript({ op: "release", w: 1024, h: 720, dpr: 1 }), /A\.op === "quit" \|\| A\.op === "release"\) && v === null/);
+  assert.match(BROWSER_DAEMON_SRC, /a\.op === "release"/);
+});
+
+test("the helper holds sticky elements in place before a picture", () => {
+  assert.match(BROWSER_DAEMON_SRC, /cs\.position !== "sticky"/);
+  assert.match(BROWSER_DAEMON_SRC, /await stick\(\);/);
+  // The page's own transform is left alone: the shift uses the separate translate property.
+  assert.match(BROWSER_DAEMON_SRC, /el\.style\.translate = /);
+  assert.doesNotMatch(BROWSER_DAEMON_SRC, /el\.style\.transform/);
 });

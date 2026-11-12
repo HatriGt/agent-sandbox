@@ -1391,13 +1391,6 @@
   background: color-mix(in oklch, var(--muted) 45%, transparent);
 }
 
-/* A scrolling list inside the rail: the bottom edge dissolves so a clipped row reads as "more below"
-   instead of a cut. Only the last 14px are affected; the fade rides with the scroller. */
-.scroll-fade-y {
-  mask-image: linear-gradient(to bottom, black calc(100% - 14px), transparent);
-  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 14px), transparent);
-}
-
 /* Output visualizers, motion when data changes (components/viz/motion.tsx). Rows that arrive
    while a block streams fade + lift in (30 ms stagger, capped in JS at 8); bars tween their
    width; a state mark pops in when it flips; the active step's soft pulse is the ONLY loop and
@@ -1433,9 +1426,6 @@
 
 /* Live log view (components/viz/LiveLog.tsx): rows dissolve under the counter strip instead of
    being sliced by it, and a failure that lands while you watch gets one red wash that settles. */
-.live-fade-top {
-  mask-image: linear-gradient(to bottom, transparent, #000 20px);
-}
 @keyframes live-row-alert {
   from {
     background-color: color-mix(in oklch, var(--destructive) 14%, transparent);

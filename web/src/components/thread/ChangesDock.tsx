@@ -5,7 +5,7 @@ import { useReducedMotion } from "@/lib/motion-pref";
 import type { ChangedFile } from "@/lib/api";
 import { FileMark } from "@/lib/fileIcon";
 import { cn } from "@/lib/utils";
-import { CHANGES_DISCARDED_EVENT } from "./FilePane";
+import { CHANGES_DISCARDED_EVENT } from "@/lib/changes-events";
 
 /**
  * The changed-files shortcut, the first row inside the composer's surface (SendBar's `top` slot)

@@ -133,7 +133,7 @@ export function MachineList({
 
   return (
     <nav aria-label="Machines" className="flex min-h-0 flex-1 flex-col">
-      <div className="scroll-fade-y min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
         <Swap state={loading ? "loading" : empty ? (offline ? "offline" : "empty") : "list"}>
           {empty && offline ? (
             // The connection notice above already says what happened; a "Nothing running" here would

@@ -29,6 +29,23 @@ export type BrowserTag = { text?: string; image?: { name: string; dataUrl: strin
 type Frame = { src: string; nav: number; top: number; bottom: number };
 type Pin = { n: number; url: string; x: number; y: number; w: number; h: number };
 type Phase = "starting" | "installing" | "ready" | "error";
+type Box = [number, number, number, number];
+
+// A closed pane gives the browser's memory back to the sandbox (about 200 MB of a 1 GB machine),
+// but not at once: closing and reopening it should not cost a browser start. The sandbox itself
+// declines when the agent is using the page.
+const releases = new Map<string, number>();
+function releaseSoon(session: string) {
+  window.clearTimeout(releases.get(session));
+  releases.set(session, window.setTimeout(() => {
+    releases.delete(session);
+    void api.browser(session, { op: "release", w: 1024, h: 720, dpr: 1 }).catch(() => {});
+  }, 45_000));
+}
+function keep(session: string) {
+  window.clearTimeout(releases.get(session));
+  releases.delete(session);
+}
 
 /**
  * A browser beside the conversation. It runs inside the sandbox (Moli, src/browser.ts), so
@@ -155,8 +172,12 @@ export function BrowserPane({
   const alive = React.useRef(true);
   React.useEffect(() => {
     alive.current = true;
-    return () => void (alive.current = false);
-  }, []);
+    keep(session);
+    return () => {
+      alive.current = false;
+      releaseSoon(session);
+    };
+  }, [session]);
   const chain = React.useRef<Promise<unknown>>(Promise.resolve());
   const target = React.useRef(0); // where the person has scrolled to, ahead of the page
   const wheelSeq = React.useRef(0);
@@ -359,27 +380,44 @@ export function BrowserPane({
     const n = pins.length + 1;
     setPins((prev) => [...prev, { n, url: p.url, x: el[0] + p.sx, y: el[1] + p.sy, w: el[2], h: el[3] }]);
     // A small element alone is a few pixels of nothing: cut it out with its surroundings and mark it.
-    const cw = Math.max(el[2] + 24, 280), ch = Math.max(el[3] + 24, 160);
-    const image = await cropFrame(frame, [el[0] - (cw - el[2]) / 2, el[1] - (ch - el[3]) / 2, cw, ch], p.dpr ?? dpr, "image/png", [el[0], el[1], el[2], el[3]]).catch(() => null);
+    // The sandbox draws the cut again at twice life size; the pane's own picture is the fallback.
+    const cw = Math.min(view.w, Math.max(el[2] + 24, 280)), ch = Math.min(view.h, Math.max(el[3] + 24, 160));
+    const box: Box = [Math.round(Math.max(0, Math.min(view.w - cw, el[0] - (cw - el[2]) / 2))), Math.round(Math.max(0, Math.min(view.h - ch, el[1] - (ch - el[3]) / 2))), cw, ch];
+    const mark: Box = [el[0], el[1], el[2], el[3]];
     let detail = null;
+    let image: string | null = null;
     try {
-      detail = (await api.browser(session, { op: "pick", i, w: viewRef.current.w, h: viewRef.current.h, dpr })).pick ?? null;
+      const r = await api.browser(session, { op: "pick", i, box, w: viewRef.current.w, h: viewRef.current.h, dpr });
+      detail = r.pick ?? null;
+      if (r.crop) image = await markCrop(r.crop, r.cropScale ?? 1, box, mark).catch(() => null);
     } catch {
       /* the reference still carries the selector and text */
     }
+    image ??= await cropFrame(frame, box, p.dpr ?? dpr, "image/png", mark).catch(() => null);
     const note = elementNote(n, p.url, el, detail);
     // No picture (the crop failed): the words alone still say which element.
     onTag(image ? { image: { name: `element-${n}-${el[4]}.png`, dataUrl: image, label: `Element ${n}`, note } } : { text: note });
   };
 
-  const tagArea = async (box: [number, number, number, number]) => {
+  const tagArea = async (box: Box) => {
     const p = pageRef.current;
     if (!p || !frame) return;
     const n = pins.length + 1;
     setPins((prev) => [...prev, { n, url: p.url, x: box[0] + p.sx, y: box[1] + p.sy, w: box[2], h: box[3] }]);
-    const image = await cropFrame(frame, box, p.dpr ?? dpr, "image/png").catch(() => null);
+    const image = (await sharp(box)) ?? (await cropFrame(frame, box, p.dpr ?? dpr, "image/png").catch(() => null));
     const note = areaNote(n, p.url, box, map);
     onTag(image ? { image: { name: `area-${n}.png`, dataUrl: image, label: `Area ${n}`, note } } : { text: note });
+  };
+
+  /** A box of the page drawn sharp by the sandbox, or null when it could not be. */
+  const sharp = async (box: Box, type: "image/png" | "image/jpeg" = "image/png"): Promise<string | null> => {
+    try {
+      const r = await api.browser(session, { op: "crop", box: box.map(Math.round), w: viewRef.current.w, h: viewRef.current.h, dpr });
+      if (!r.crop) return null;
+      return type === "image/png" ? `data:image/png;base64,${r.crop}` : await markCrop(r.crop, 1, box, undefined, type);
+    } catch {
+      return null;
+    }
   };
 
   // What went wrong on this page, into the message: the fastest way to say "fix this".
@@ -397,7 +435,8 @@ export function BrowserPane({
   const snapshot = async () => {
     const p = pageRef.current;
     if (!frame || !p) return;
-    const image = await cropFrame(frame, [0, 0, p.vw, p.vh], p.dpr ?? dpr, "image/jpeg").catch(() => null);
+    // A page shown smaller than life is asked for again at full size: the agent reads small text.
+    const image = ((p.dpr ?? dpr) < 1 && offset === 0 ? await sharp([0, 0, p.vw, p.vh], "image/jpeg") : null) ?? (await cropFrame(frame, [0, 0, p.vw, p.vh], p.dpr ?? dpr, "image/jpeg").catch(() => null));
     if (image) onTag({ image: { name: "page.jpg", dataUrl: image, label: "Page", note: `Screenshot of ${p.url} in the browser, ${p.vw} x ${p.vh} px, scrolled to ${p.sy}.` } });
   };
 
@@ -703,7 +742,13 @@ export function BrowserPane({
             {offset === 0 &&
               pagePins.map((p) => (
                 <div key={p.n} className="border-live pointer-events-none absolute rounded-[3px] border-[1.5px]" style={{ left: p.x - page.sx, top: p.y - page.sy, width: p.w, height: p.h }}>
-                  <span className="bg-live absolute -top-2.5 -left-2.5 grid size-5 place-items-center rounded-full text-micro font-semibold text-white tabular-nums shadow-e1" style={zoom < 1 ? { transform: `scale(${1 / zoom})` } : undefined}>{p.n}</span>
+                  {/* The number sits on the corner, or just inside it when the corner is at the pane's edge. */}
+                  <span
+                    className="bg-live absolute grid size-5 place-items-center rounded-full text-micro font-semibold text-white tabular-nums shadow-e1"
+                    style={{ left: p.x - page.sx < 12 / zoom ? 2 : -10, top: p.y - page.sy < 12 / zoom ? 2 : -10, transform: zoom < 1 ? `scale(${1 / zoom})` : undefined, transformOrigin: "top left" }}
+                  >
+                    {p.n}
+                  </span>
                 </div>
               ))}
             {select && area && <div className="border-live bg-live/10 pointer-events-none absolute rounded-[3px] border-[1.5px] border-dashed" style={{ left: area[0], top: area[1], width: area[2], height: area[3] }} />}
@@ -814,8 +859,28 @@ function Blank({ ports, onGo }: { ports: number[]; onGo: (url: string) => void }
   );
 }
 
+/** A sharp cut from the sandbox with the picked element outlined (or re-encoded as a JPEG). */
+async function markCrop(b64: string, k: number, box: Box, mark?: Box, type: "image/png" | "image/jpeg" = "image/png"): Promise<string> {
+  const src = `data:image/png;base64,${b64}`;
+  if (!mark && type === "image/png") return src;
+  const img = new Image();
+  img.src = src;
+  await img.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  const g = canvas.getContext("2d")!;
+  g.drawImage(img, 0, 0);
+  if (mark) {
+    g.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--live").trim() || "#2f5bea";
+    g.lineWidth = Math.max(2, 1.5 * k);
+    g.strokeRect((mark[0] - box[0]) * k, (mark[1] - box[1]) * k, mark[2] * k, mark[3] * k);
+  }
+  return canvas.toDataURL(type, 0.88);
+}
+
 /** A box of the viewport (x, y, width, height in page pixels) cut out of the current picture, as a data URL. */
-async function cropFrame(frame: Frame, box: [number, number, number, number], scale: number, type: "image/png" | "image/jpeg", mark?: [number, number, number, number]): Promise<string> {
+async function cropFrame(frame: Frame, box: Box, scale: number, type: "image/png" | "image/jpeg", mark?: Box): Promise<string> {
   const img = new Image();
   img.src = frame.src;
   await img.decode();

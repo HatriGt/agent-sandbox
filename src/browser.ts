@@ -61,7 +61,7 @@ export const BROWSER_TOOL_PATH = "/usr/local/bin/browser";
 const BROWSER_TOOL_LIB = "/usr/local/lib/asb/browser.cjs";
 const MOLI_INSTALLER = "/usr/local/bin/asb-moli-install";
 
-export const BROWSER_OPS = ["open", "goto", "reload", "back", "forward", "click", "scroll", "type", "key", "shot", "pick", "logs", "quit"] as const;
+export const BROWSER_OPS = ["open", "goto", "reload", "back", "forward", "click", "scroll", "type", "key", "shot", "pick", "crop", "logs", "release", "quit"] as const;
 export type BrowserOp = (typeof BROWSER_OPS)[number];
 
 export interface BrowserAction {
@@ -79,6 +79,8 @@ export interface BrowserAction {
   i?: number;
   have?: string;
   map?: boolean;
+  /** A box of the viewport (x, y, width, height in page pixels) to cut out sharp, for pick and crop. */
+  box?: [number, number, number, number];
 }
 
 const num = (v: unknown, lo: number, hi: number, fallback: number): number => {
@@ -144,6 +146,9 @@ export function parseBrowserAction(body: unknown): { ok: true; action: BrowserAc
     action.key = b.key;
   }
   if (op === "pick") action.i = num(b.i, 0, 5000, 0);
+  if ((op === "pick" || op === "crop") && Array.isArray(b.box) && b.box.length === 4) {
+    action.box = [num(b.box[0], 0, 1920, 0), num(b.box[1], 0, 2400, 0), num(b.box[2], 2, 1920, 2), num(b.box[3], 2, 2400, 2)];
+  } else if (op === "crop") return { ok: false, message: "nothing to cut out" };
   // The picture the pane already shows: the helper answers "same" instead of sending it again.
   if (typeof b.have === "string" && /^[0-9a-f]{1,32}$/.test(b.have)) action.have = b.have;
   if (b.map === true) action.map = true;
@@ -191,7 +196,7 @@ export function browserStubScript(action: BrowserAction): string {
   const token = () => { try { return fs.readFileSync(path.join(os.homedir(), ".asb", "browser.token"), "utf8").trim(); } catch (e) { return ""; } };
   const post = async (a, ms) => (await fetch(U, { method: "POST", headers: { "x-asb-browser": token() }, body: JSON.stringify(a), signal: AbortSignal.timeout(ms) })).json();
   let v = await ping();
-  if (A.op === "quit" && v === null) return say({ ok: true });
+  if ((A.op === "quit" || A.op === "release") && v === null) return say({ ok: true });
   if (v !== null && v !== V) { try { await post({ op: "quit" }, 3000); } catch (e) {} await sleep(400); v = null; }
   if (v === null) {
     const dir = path.join(os.homedir(), ".asb");

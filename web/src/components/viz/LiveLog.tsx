@@ -206,7 +206,7 @@ export function LiveLogView({ state, live, className }: { state: LiveLogState; l
           aria-label={kind === "access" ? "Incoming requests" : "Log lines"}
           className={cn(
             "focus-visible:ring-ring max-h-80 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset",
-            scrolled && "live-fade-top"
+            scrolled && "shadow-[inset_0_1px_0_var(--border)]"
           )}
         >
           {hidden > 0 && <div className="text-faint px-3 py-1 text-micro">{hidden} earlier {hidden === 1 ? "line" : "lines"} counted above, not shown</div>}

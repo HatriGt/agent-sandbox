@@ -623,6 +623,10 @@ if (stream) {
   });
   await page.waitForTimeout(500);
   await shot("-scrolled");
+} else if (interact === "bottom") {
+  await page.evaluate(() => { for (const e of document.querySelectorAll("[data-thread] *")) if (e.scrollHeight > e.clientHeight + 40 && getComputedStyle(e).overflowY !== "visible") e.scrollTop = e.scrollHeight; });
+  await page.waitForTimeout(700);
+  await shot("-bottom");
 } else if (interact === "slash") {
   await input().click();
   await input().type("/rev");

@@ -20,6 +20,7 @@
  * Gated behind SNAP_ASK=1 until the cost is validated in daily use.
  */
 import type { Config } from "./config.js";
+import { hostGuardFlags } from "./host-guard.js";
 import { parseDurationSec } from "./monitor.js";
 
 /** The one rewind snapshot a box carries. Same charset as box names, so CLI/filesystem-safe. */
@@ -207,7 +208,7 @@ export async function dropAskSnapshot(io: SnapshotIo, box: string): Promise<void
  */
 export function rewindRunFlags(cfg: Config): string[] {
   const egress = cfg.egressAllowAll
-    ? ["--net", "public"]
-    : ["--net-default-egress", "deny", "--net-rule", "allow@dns", ...cfg.egressDomains.flatMap((d) => ["--net-rule", `allow@${d}:tcp:443`])];
+    ? ["--net", "public", ...hostGuardFlags()]
+    : [...hostGuardFlags(), "--net-default-egress", "deny", "--net-rule", "allow@dns", ...cfg.egressDomains.flatMap((d) => ["--net-rule", `allow@${d}:tcp:443`])];
   return ["-m", cfg.memory, "--max-memory", cfg.memory, ...egress, "--idle-timeout", cfg.idleTimeout, "--max-duration", cfg.maxDuration, "--pull", "never"];
 }

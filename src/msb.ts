@@ -59,6 +59,7 @@ import { INBOX_APPEND_SH, INBOX_RESET_SH, INBOX_TAKE_DELIVERED_SH, inboxLine, ty
 import { isStalled } from "./stall.js";
 import { EXIT_DISK_FULL } from "./run-health.js";
 import { parseBakedManifest, type LastProvision } from "./package-watch.js";
+import { ensureHostGuard, hostGuardFlags } from "./host-guard.js";
 import { MOLI_BIN, MOLI_PROMPT_HINT, browserToolSetup, moliInstallSh } from "./browser.js";
 import { orphanSandboxDirs, parseDfPk, parseDirListing, type DiskReading } from "./host-disk.js";
 
@@ -126,14 +127,23 @@ async function ssh(cfg: Config, remoteCmd: string, check = true) {
  * open egress (`--net public`) instead — any domain, no allowlist.
  */
 function egressFlags(cfg: Config, allowAll = cfg.egressAllowAll): string[] {
+  // The host's own addresses are refused first, in both modes (src/host-guard.ts).
   if (allowAll) {
-    return ["--net", "public"];
+    return ["--net", "public", ...hostGuardFlags()];
   }
-  const flags = ["--net-default-egress", "deny", "--net-rule", "allow@dns"];
+  const flags = [...hostGuardFlags(), "--net-default-egress", "deny", "--net-rule", "allow@dns"];
   for (const domain of cfg.egressDomains) {
     flags.push("--net-rule", `allow@${domain}:tcp:443`);
   }
   return flags;
+}
+
+/** Which stopped boxes the reaper has already said it is keeping, and why. */
+const saidKeeping = new Map<string, string>();
+
+/** Learn which addresses are the host's own, once, so boxes can be kept off them. Never throws. */
+export function learnHostGuard(cfg: Config): Promise<void> {
+  return ensureHostGuard(async () => (await ssh(cfg, "hostname -I")).stdout);
 }
 
 /**
@@ -178,6 +188,7 @@ export interface CreateBoxOpts {
  *  - snapshot    -> boot warm (claude+gh pre-baked), then `msb cp` the staged tree into /workspace
  */
 export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void> {
+  await learnHostGuard(cfg);
   const common = [
     "run",
     "-d",
@@ -336,6 +347,7 @@ export const OMP_WARM_SCRUB_SH =
   "/root/.local/share/chrome-devtools-mcp /workspace/* /workspace/.[!.]* /tmp/* /root/.tmp/* 2>/dev/null; true";
 
 async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise<void> {
+  await learnHostGuard(cfg);
   await msb(cfg, [
     "run",
     "-d",
@@ -394,6 +406,8 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise
     // kills it mid-flight (the first version's 150s did, together with a cache-priming find) just
     // moves the cost back onto the user's first task.
     await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop", undefined, undefined, undefined, agent), "--", "bash", "-lc", warm], false, 360_000);
+  } else {
+    await preinstallOperatorMcpPackages(cfg, name);
   }
   // A box is handed out only if it can actually run a task: the disk has room for one and the
   // agent binary starts. Checked HERE, at warm-up time where nobody is waiting, rather than at
@@ -512,11 +526,17 @@ export async function reapDeadPoolBoxes(cfg: Config): Promise<string[]> {
     // is held to the much longer park TTL — an overnight question must survive to be answered.
     const ttl = parked.has(b.name) ? Math.max(sleepTtlSec, askParkTtlSec()) : sleepTtlSec;
     if (shouldKeepStopped(age, ttl, kept.has(b.name))) {
-      console.error(
-        kept.has(b.name)
-          ? `[pool] keeping pinned run ${b.name} (asleep; held until the operator destroys it)`
-          : `[pool] keeping sleeping run ${b.name} (asleep ${Math.round((age ?? 0) / 60)}m, ttl ${cfg.sleepTtl})`
-      );
+      // Said when it becomes true, not on every sweep: one pinned run wrote this line every few
+      // minutes for months and buried everything else in the log.
+      const why = kept.has(b.name) ? "pinned" : "asleep";
+      if (saidKeeping.get(b.name) !== why) {
+        saidKeeping.set(b.name, why);
+        console.error(
+          why === "pinned"
+            ? `[pool] keeping pinned run ${b.name} (asleep; held until the operator destroys it)`
+            : `[pool] keeping sleeping run ${b.name} (asleep ${Math.round((age ?? 0) / 60)}m, ttl ${cfg.sleepTtl})`
+        );
+      }
       continue;
     }
     console.error(
@@ -1333,6 +1353,28 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<string
   } catch (e) {
     console.error(`[mcp] could not install MCP config into ${box}:`, (e as Error).message);
     return [];
+  }
+}
+
+/**
+ * Put the npm packages behind the operator's MCP servers into a warm box while nobody is waiting.
+ * A server added after the image was baked is not in the image, so the first task in every box
+ * installed it at claim time: measured live, a warm box that should start in under a second took
+ * 59, all of it this install. Only the public packages are fetched here; no config and no secret
+ * is written until an owner claims the box, and the claim's own install then finds the directories
+ * and does nothing. The same disk guard applies, and a failure costs nothing but the old wait.
+ */
+export async function preinstallOperatorMcpPackages(cfg: Config, box: string): Promise<void> {
+  try {
+    const conf = toClaudeMcpConfig(await loadMcpStore(cfg), boxSecretPolicy(cfg));
+    const specs = conf ? npxPackagesOf(conf) : [];
+    if (!specs.length) return;
+    const s = Date.now();
+    const r = await exec(cfg, box, preinstallSh(specs), { timeoutMs: 300_000 });
+    const notes = mcpInstallNotes(r.stdout ?? "");
+    console.error(`[pool] ${box}: MCP packages ready in ${Date.now() - s}ms${notes.length ? ` (${notes.join("; ")})` : ""}`);
+  } catch (e) {
+    console.error(`[pool] ${box}: could not pre-install MCP packages: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
   }
 }
 
@@ -2461,6 +2503,7 @@ export async function createBareBox(cfg: Config, name: string): Promise<void> {
     cfg.rootDisk,
     "--net",
     "public",
+    ...hostGuardFlags(),
     "--pull",
     "if-missing",
     cfg.image,

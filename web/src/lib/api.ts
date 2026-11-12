@@ -811,6 +811,9 @@ export type BrowserReply = BrowserPage & {
   same?: boolean;
   map?: import("./browser-model").MappedElement[];
   pick?: import("./browser-model").PickDetail;
+  /** A cut of the page drawn sharp (base64 PNG), `cropScale` picture pixels per page pixel. */
+  crop?: string;
+  cropScale?: number;
   logs?: BrowserLog[];
 };
 
