@@ -345,6 +345,9 @@ if (cut) {
   const i = fullLog.indexOf(cut);
   if (i >= 0) fullLog = fullLog.slice(0, i).replace(/[^\n]*$/, "");
 }
+// --log-file=<path>: a real .agent.log (e.g. pulled from a long run) instead of the built-in one.
+const logFile = flag("log-file", null);
+if (logFile) fullLog = fsx.readFileSync(logFile, "utf8").trim();
 const meta = (() => {
   const { role: _r, ...m } = box;
   return m;
@@ -382,6 +385,30 @@ if (stream) {
   streamPort = streamer.address().port;
 }
 
+// --replay=<0..1>: snapshot that share of the log, then append the rest the way the controller does
+// (one chunk per 800 ms tick, whatever the agent wrote in between) — for jitter/scroll checks.
+const replay = flag("replay", null);
+if (replay && !streamer) {
+  const headLen = Math.floor(fullLog.length * Number(replay));
+  streamer = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", "access-control-allow-origin": "*" });
+    res.write("retry: 3000\n\n");
+    res.write(frame("snapshot", { meta, log: fullLog.slice(0, headLen), from: 0 }, headLen));
+    let sent = headLen;
+    const tick = () => {
+      if (sent >= fullLog.length) return;
+      const n = Number(flag("chunk", 2500));
+      const chunk = fullLog.slice(sent, sent + n);
+      sent += chunk.length;
+      res.write(frame("append", { chunk }, sent));
+      setTimeout(tick, 800);
+    };
+    setTimeout(tick, 1500);
+  });
+  await new Promise((r) => streamer.listen(0, "127.0.0.1", r));
+  streamPort = streamer.address().port;
+}
+
 // --interact=send: a finished run's stream held open, so a message sent from the composer can land
 // in the log a beat later (the echo → durable line swap) and the agent can answer it.
 let appendLog = null;
@@ -403,7 +430,7 @@ if (interact === "send" || interact === "send-probe" || interact === "send-rich"
 /* ───────────────────────────── browser ───────────────────────────── */
 const helperHeaders = () => { try { return { "x-asb-browser": fsx.readFileSync(pathx.join(osx.homedir(), ".asb", "browser.token"), "utf8").trim() }; } catch { return {}; } };
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: W, height: H }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: Number(flag("dsf", "1")), hasTouch: W < 500, isMobile: W < 500 });
+const ctx = await browser.newContext({ bypassCSP: true, viewport: { width: W, height: H }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: Number(flag("dsf", "1")), hasTouch: W < 500, isMobile: W < 500 });
 await ctx.addInitScript(
   ([t, d]) => {
     localStorage.setItem("asb-token", t);
@@ -950,9 +977,28 @@ row: inner ${Math.round(h?.clientWidth ?? 0)} = ${row}; scrollWidth ${h?.scrollW
   await shot();
 }
 
+if (flags.includes("--profile")) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Profiler.enable");
+  await cdp.send("Profiler.setSamplingInterval", { interval: 200 });
+  await cdp.send("Profiler.start");
+  await page.waitForTimeout(Number(flag("profile-ms", 6000)));
+  const { profile } = await cdp.send("Profiler.stop");
+  const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+  const self = new Map();
+  const dt = profile.timeDeltas;
+  profile.samples.forEach((id, i) => {
+    const n = byId.get(id);
+    const f = n.callFrame;
+    const k = `${f.functionName || "(anon)"} ${f.url.split("/").slice(-2).join("/").split("?")[0]}:${f.lineNumber}`;
+    self.set(k, (self.get(k) ?? 0) + (dt[i] ?? 0) / 1000);
+  });
+  const top = [...self.entries()].sort((a, b) => b[1] - a[1]).slice(0, 40);
+  for (const [k, v] of top) console.log(v.toFixed(0).padStart(6), "ms", k);
+}
 const evalFile = flag("eval-file", null);
 const evalJs = evalFile ? (await import("node:fs")).readFileSync(evalFile, "utf8") : flag("eval", null);
-if (evalJs) console.log("eval:", JSON.stringify(await page.evaluate(evalJs)));
+if (evalJs) { console.log("eval:", JSON.stringify(await page.evaluate(evalJs))); if (flags.includes("--shot-after")) await shot("-after"); }
 console.log("saved", shots.join(", "));
 if (errors.length) console.log("console errors:\n" + errors.slice(0, 12).join("\n"));
 await browser.close();
