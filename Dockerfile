@@ -2,7 +2,7 @@
 # Runs the Streamable HTTP entry (dist/http.js). It does NOT run msb itself — msb lives on the
 # VPS host (needs KVM/microVMs), so this container SSHes to the host to drive msb. Hence it only
 # needs node + an ssh client (git is used host-side for clones, but kept here for parity/tests).
-FROM node:20-slim
+FROM node:26-slim
 
 # python3/make/g++: better-sqlite3 (the controller's own state) compiles its native addon when no
 # prebuilt binary matches the image; the toolchain is small and keeps the build deterministic.
