@@ -12,6 +12,7 @@ import {
   AGENT_LOG,
   AT_MARK,
   COMPACT_MARK,
+  CTX_MARK,
   DIFF_CLOSE,
   DIFF_MAX_BYTES,
   DIFF_MAX_LINES,
@@ -191,6 +192,8 @@ export function streamFmtScript(): string {
     // message) — the number that says how full the window is; the result frame's input counters
     // are CUMULATIVE across the turn and answer "what did this turn cost" instead.
     `let ctx=0;` +
+    // The input size of the last request a ⟦ctx⟧ line was written for (one per request, not per block).
+    `let lastIn=-1;` +
     // A compact_boundary was just written: the next synthetic user message is its summary.
     `let compacted=false;` +
     // The model's context window, from the result frame's modelUsage (absent on older CLIs).
@@ -246,7 +249,7 @@ export function streamFmtScript(): string {
     `t=t.replace(/^This session is being continued[^\\n]*\\n+/,"").replace(/^Summary:\\s*\\n/,"").trim();if(!t)return;` +
     `let cut="";if(Buffer.byteLength(t,"utf8")>${SUMMARY_MAX_BYTES}){t=Buffer.from(t,"utf8").subarray(0,${SUMMARY_MAX_BYTES}).toString("utf8").replace(/\\ufffd+$/,"");cut="\\n… summary cut"}` +
     `w("${SUMMARY_OPEN}\\n"+df(t)+cut+"\\n${SUMMARY_CLOSE}");return}` +
-    `if(e.type==="assistant"&&e.message){if(e.message.usage)ctx=usum(e.message.usage)+(e.message.usage.output_tokens||0);for(const b of e.message.content||[]){` +
+    `if(e.type==="assistant"&&e.message){const u=e.message.usage;if(u&&!e.parent_tool_use_id){const i=usum(u);ctx=i+(u.output_tokens||0);if(i>0&&i!==lastIn){lastIn=i;w("${CTX_MARK} "+i+" cr="+(u.cache_read_input_tokens||0)+" cw="+(u.cache_creation_input_tokens||0))}}for(const b of e.message.content||[]){` +
     // Trailing "\n" => a BLANK line after each text block. Consecutive assistant text blocks are
     // separate markdown documents (a table, then a fenced block); glued with a single newline the
     // renderer reads "| 1 | 2 |```bash" as one paragraph and the fence never opens.
@@ -296,7 +299,7 @@ export function streamFmtScript(): string {
     // defanged) — this is FORMATTER structure, like ⟦plan⟧, so it must parse at column 0.
     // A compaction-only turn (`/compact`) has no model request of its own (num_turns 0, zero usage):
     // its usage line would read as "0 tokens", so only the compact line speaks for it.
-    `if(e.usage&&!(e.num_turns===0&&usum(e.usage)===0&&!e.usage.output_tokens)){const win=winOf(e);w("${USAGE_OPEN} in="+usum(e.usage)+" out="+(e.usage.output_tokens||0)+" ctx="+ctx+(win?" win="+win:""))}return}` +
+    `if(e.usage&&!(e.num_turns===0&&usum(e.usage)===0&&!e.usage.output_tokens)){const win=winOf(e);w("${USAGE_OPEN} in="+usum(e.usage)+" out="+(e.usage.output_tokens||0)+" ctx="+ctx+(win?" win="+win:"")+" cr="+(e.usage.cache_read_input_tokens||0)+" cw="+(e.usage.cache_creation_input_tokens||0))}return}` +
     `}catch(_){}}`;
   // base64 the whole script and decode in the box: shipping a large JS blob through
   // shell/SSH/msb-exec quoting was corrupting it (trailing garbage → SyntaxError at load).

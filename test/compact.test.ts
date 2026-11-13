@@ -72,7 +72,7 @@ test("auto-compaction mid-turn resets the context footprint and the usage line c
     { type: "result", num_turns: 3, result: "working", usage: { input_tokens: 10, cache_read_input_tokens: 300000, output_tokens: 50 }, modelUsage: { m: { contextWindow: 200000 } } },
   ]);
   assert.match(log, /^⟦compact⟧ \d{13} done trigger=auto pre=170015 post=9000 dur=20000$/m);
-  assert.match(log, /^⟦usage⟧ in=300010 out=50 ctx=9000 win=200000$/m);
+  assert.match(log, /^⟦usage⟧ in=300010 out=50 ctx=9000 win=200000 cr=300000 cw=0$/m);
   const c = parseTrace(log).find((e) => e.kind === "compact");
   assert.ok(c?.kind === "compact" && c.trigger === "auto" && c.state === "done" && c.postTokens === 9000);
 });
@@ -166,4 +166,52 @@ test("auto-compact setting: validated, default not stored, and mapped to Claude 
   assert.deepEqual(autoCompactEnv("standard"), []);
   assert.deepEqual(autoCompactEnv("off"), ["-e", "DISABLE_AUTO_COMPACT=1"]);
   assert.deepEqual(autoCompactEnv("early"), ["-e", "CLAUDE_CODE_AUTO_COMPACT_WINDOW=133000"]);
+});
+
+test("the formatter writes one ⟦ctx⟧ per API request (not per content block, not for subagents) and the cache split on usage", () => {
+  const u = (input: number, read: number, write: number) => ({ input_tokens: input, cache_read_input_tokens: read, cache_creation_input_tokens: write, output_tokens: 5 });
+  const log = runFormatter([
+    { type: "system", subtype: "init", model: "m" },
+    { type: "assistant", message: { content: [{ type: "text", text: "a" }], usage: u(10, 0, 1000) } },
+    { type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }], usage: u(10, 0, 1000) } },
+    { type: "assistant", parent_tool_use_id: "t9", message: { content: [{ type: "text", text: "sub" }], usage: u(1, 50, 0) } },
+    { type: "assistant", message: { content: [{ type: "text", text: "b" }], usage: u(20, 1000, 300) } },
+    { type: "result", num_turns: 2, result: "b", usage: u(30, 1000, 1300), modelUsage: { m: { contextWindow: 200000 } } },
+  ]);
+  assert.deepEqual(log.match(/^⟦ctx⟧ .*$/gm), ["⟦ctx⟧ 1010 cr=0 cw=1000", "⟦ctx⟧ 1320 cr=1000 cw=300"]);
+  assert.match(log, /^⟦usage⟧ in=2330 out=5 ctx=1325 win=200000 cr=1000 cw=1300$/m);
+  const ev = parseTrace(log);
+  assert.deepEqual(ev.filter((e) => e.kind === "ctx").map((e) => e.kind === "ctx" && e.tokens), [1010, 1320]);
+  const usage = ev.find((e) => e.kind === "usage");
+  assert.ok(usage?.kind === "usage" && usage.cacheRead === 1000 && usage.cacheWrite === 1300);
+});
+
+test("contextBreakdown: setup is the first request, each step's growth goes to what happened in it, and it starts over after a compaction", async () => {
+  const { contextBreakdown } = await import("../web/src/lib/context-health.ts");
+  const log = [
+    "⟦ctx⟧ 10000 cr=0 cw=10000",
+    "→ Read: a.ts ⟦#r1⟧",
+    "  ⟦#r1⟧ " + "x".repeat(300),
+    "⟦ctx⟧ 14000 cr=10000 cw=4000",
+    "→ Bash: npm test ⟦#b1⟧",
+    "  ⟦#b1⟧ ok",
+    "⟦ctx⟧ 20000 cr=14000 cw=6000",
+    "All done.",
+    "⟦usage⟧ in=44000 out=50 ctx=20500 win=200000",
+  ].join("\n");
+  const b = contextBreakdown(parseTrace(log))!;
+  const by = Object.fromEntries(b.parts.map((p) => [p.part, p.tokens]));
+  assert.equal(by.setup, 10000);
+  assert.equal(by.reads, 4000);
+  assert.equal(by.commands, 6000);
+  assert.equal(by.replies, 500);
+  assert.equal(b.total, 20500);
+  assert.deepEqual(b.heaviest.map((h) => `${h.name}:${h.tokens}`), ["Bash:6000", "Read:4000"]);
+  assert.deepEqual(b.cache, { read: 14000, write: 6000, fresh: 0 });
+  assert.equal(b.afterCompaction, false);
+
+  const after = contextBreakdown(parseTrace(log + "\n⟦compact⟧ 1700000000000 done trigger=manual pre=20500 post=3000 dur=9\n⟦ctx⟧ 3200 cr=0 cw=3200"))!;
+  assert.equal(after.afterCompaction, true);
+  assert.deepEqual(after.parts, [{ part: "setup", tokens: 3200 }]);
+  assert.equal(contextBreakdown(parseTrace("⟦usage⟧ in=1 out=2 ctx=3")), null, "an older log has no breakdown");
 });

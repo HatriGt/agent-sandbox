@@ -81,6 +81,13 @@ export const USAGE_OPEN = "⟦usage⟧";
  * followed, on success, by the summary the agent continues from inside ⟦summary⟧…⟦/summary⟧. The
  * trace parser folds them into one `compact` event the thread draws as a divider.
  */
+/**
+ * `⟦ctx⟧ <tokens> cr=<cache read> cw=<cache write>` — the context one API request was sent with
+ * (fresh input + cache read + cache write), written once per request before its content. The
+ * growth from one to the next is what the content between them (the previous reply, the tool
+ * results) added to the window, which is how the context meter says what took the space.
+ */
+export const CTX_MARK = "⟦ctx⟧";
 export const COMPACT_MARK = "⟦compact⟧";
 export const SUMMARY_OPEN = "⟦summary⟧";
 export const SUMMARY_CLOSE = "⟦/summary⟧";

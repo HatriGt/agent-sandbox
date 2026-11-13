@@ -21,7 +21,7 @@ import { currentDiskTier, currentMemoryTier, deadlineLabel, deadlineOf, displayS
 import { MemoryBumpCard } from "./MemoryCard";
 import { useMemoryToasts } from "./MemoryToast";
 import { runStats, toMarkdown } from "@/lib/transcript";
-import { contextHealthOf } from "@/lib/context-health";
+import { contextBreakdown, contextHealthOf } from "@/lib/context-health";
 import type { ContextStatus } from "./ContextRing";
 import { useAutoCompactMode } from "@/hooks/useAutoCompactMode";
 import { compactInstructions, isCompactCommand } from "@/lib/compact";
@@ -765,9 +765,10 @@ export function Thread({
     () => events.filter((e): e is Extract<TraceEvent, { kind: "compact" }> => e.kind === "compact" && e.state === "done"),
     [events]
   );
+  const ctxBreakdown = React.useMemo(() => contextBreakdown(events), [events]);
   const contextStatus: ContextStatus | null =
     ctxHealth && !loadingTrace
-      ? { health: ctxHealth, compactions, canCompact, pending: compactPending, running: runState === "running", onCompact: () => void compactNow() }
+      ? { health: ctxHealth, breakdown: ctxBreakdown, compactions, canCompact, pending: compactPending, running: runState === "running", onCompact: () => void compactNow() }
       : null;
   const cancelQueued = (id: string) => {
     api
@@ -1672,7 +1673,7 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
       const row = { note: e.note, text: e.text, ...(e.area ? { area: e.area } : {}), ...(e.updated ? { updated: true } : {}) };
       if (last?.kind === "memory") last.notes.push(row);
       else out.push({ kind: "memory", notes: [row] });
-    } else if (e.kind === "usage") {
+    } else if (e.kind === "usage" || e.kind === "ctx") {
       // Bookkeeping, not conversation: the context meter reads it; the thread never renders it.
     } else {
       out.push({ kind: "say", text: e.text, at: e.at });

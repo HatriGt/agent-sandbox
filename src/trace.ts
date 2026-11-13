@@ -44,7 +44,22 @@ export type TraceEvent =
    * Cumulative token usage stamped by the formatter at the end of a turn (⟦usage⟧ sentinel).
    * `contextWindow`: the model's window as the CLI reported it; absent on older logs.
    */
-  | { kind: "usage"; inputTokens: number; outputTokens: number; contextTokens: number; contextWindow?: number }
+  | {
+      kind: "usage";
+      inputTokens: number;
+      outputTokens: number;
+      contextTokens: number;
+      contextWindow?: number;
+      /** Of `inputTokens`, how much was read from / written to the prompt cache (newer logs). */
+      cacheRead?: number;
+      cacheWrite?: number;
+    }
+  /**
+   * The context one API request was sent with (⟦ctx⟧, newer Claude Code logs), and how much of it
+   * came from the prompt cache. Bookkeeping: the context meter attributes the growth between two of
+   * these to the events between them. Never rendered.
+   */
+  | { kind: "ctx"; tokens: number; cacheRead: number; cacheWrite: number }
   /**
    * A context compaction (⟦compact⟧): `running` from its start line until the done/failed line folds
    * into the same event. `trigger` is "manual" (/compact) or "auto" (the window filled); the token
@@ -146,7 +161,9 @@ const ASK_CLOSE = "⟦/ask⟧";
 // One line per turn, stamped by the formatter from the stream-json usage fields it used to drop:
 // `⟦usage⟧ in=<total input> out=<total output> ctx=<last request's context footprint>`. Column-0
 // only, like every sentinel; model text is defanged with a ZWSP so it can never forge one.
-const USAGE_RE = /^⟦usage⟧ in=(\d+) out=(\d+) ctx=(\d+)(?: win=(\d+))?$/;
+const USAGE_RE = /^⟦usage⟧ in=(\d+) out=(\d+) ctx=(\d+)(?: win=(\d+))?(?: cr=(\d+) cw=(\d+))?$/;
+// `⟦ctx⟧ <tokens> cr=<cache read> cw=<cache write>` (src/drivers/sentinels.ts CTX_MARK).
+const CTX_RE = /^⟦ctx⟧ (\d+) cr=(\d+) cw=(\d+)$/;
 // `⟦compact⟧ <ms> start|done …|failed <reason>` (src/drivers/sentinels.ts COMPACT_MARK).
 const COMPACT_RE = /^⟦compact⟧ (\d{10,}) (start|done|failed)(?: (.*))?$/;
 const SUMMARY_OPEN = "⟦summary⟧";
@@ -360,7 +377,15 @@ export function parseTrace(rawLog: string): TraceEvent[] {
         outputTokens: Number(usage[2]),
         contextTokens: Number(usage[3]),
         ...(usage[4] ? { contextWindow: Number(usage[4]) } : {}),
+        ...(usage[5] ? { cacheRead: Number(usage[5]), cacheWrite: Number(usage[6]) } : {}),
       });
+      target = null;
+      continue;
+    }
+    const ctxLine = line.match(CTX_RE);
+    if (ctxLine) {
+      flushProse();
+      events.push({ kind: "ctx", tokens: Number(ctxLine[1]), cacheRead: Number(ctxLine[2]), cacheWrite: Number(ctxLine[3]) });
       target = null;
       continue;
     }

@@ -35,6 +35,6 @@ test("contextHealth fraction is clamped to [0,1] and the label reads as a percen
 
 test("critical health carries advice the UI can show verbatim", () => {
   const h = contextHealth(CONTEXT_WINDOW_TOKENS);
-  assert.ok(h.advice && /fresh|new task|context/i.test(h.advice));
+  assert.ok(h.advice && /compact/i.test(h.advice));
   assert.equal(contextHealth(0).advice, undefined, "no advice when healthy");
 });

@@ -39,8 +39,8 @@ function run(kind: DriverKind, events: unknown[]): string {
 function norm(log: string): string {
   return log
     .split("\n")
-    .filter((l) => !l.startsWith("⟦at⟧"))
-    .map((l) => l.replace(/^→ (\w+)/, (_, n: string) => `→ ${n.toLowerCase()}`).replace(/ ctx=\d+/, ""))
+    .filter((l) => !l.startsWith("⟦at⟧") && !l.startsWith("⟦ctx⟧"))
+    .map((l) => l.replace(/^→ (\w+)/, (_, n: string) => `→ ${n.toLowerCase()}`).replace(/ ctx=\d+/, "").replace(/ cr=\d+ cw=\d+/, ""))
     .map((l) => l.replace(/^(⟦plan⟧) \d+$/, "$1"))
     .filter((l) => l.trim() !== "")
     .join("\n");

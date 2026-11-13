@@ -111,3 +111,116 @@ export function fmtK(n: number): string {
   if (n >= 1000) return `${+(n / 1000).toFixed(1)}K`;
   return String(n);
 }
+
+/** What a slice of the context window holds; the order is the legend's and the colour slot's. */
+export type ContextPart = "setup" | "you" | "replies" | "reasoning" | "reads" | "commands" | "edits" | "search" | "tools";
+
+export const CONTEXT_PARTS: Record<ContextPart, { label: string; color: string }> = {
+  setup: { label: "System prompt, tools & memory", color: "var(--viz-7)" },
+  you: { label: "Your messages", color: "var(--viz-1)" },
+  replies: { label: "Agent replies", color: "var(--viz-3)" },
+  reasoning: { label: "Reasoning", color: "var(--viz-5)" },
+  reads: { label: "File reads", color: "var(--viz-2)" },
+  commands: { label: "Commands", color: "var(--viz-4)" },
+  edits: { label: "Edits", color: "var(--viz-6)" },
+  search: { label: "Search & web", color: "var(--viz-8)" },
+  tools: { label: "Other tools", color: "color-mix(in oklab, var(--muted-foreground) 55%, transparent)" },
+};
+
+export interface ContextBreakdown {
+  /** Tokens per part, largest first; together they make `total`. */
+  parts: { part: ContextPart; tokens: number }[];
+  /** The single tool calls that added the most, largest first. */
+  heaviest: { name: string; arg?: string; tokens: number }[];
+  total: number;
+  /** The newest request's input, split by the prompt cache: reused, newly written, and uncached. */
+  cache?: { read: number; write: number; fresh: number };
+  /** The first slice is the compaction summary (plus system prompt), not the original setup. */
+  afterCompaction: boolean;
+}
+
+function partOfTool(name: string): ContextPart {
+  if (/^(Read|NotebookRead)$/.test(name)) return "reads";
+  if (/^(Bash|BashOutput|KillShell|KillBash)$/.test(name)) return "commands";
+  if (/^(Edit|MultiEdit|Write|NotebookEdit)$/.test(name)) return "edits";
+  if (/^(Grep|Glob|LS|WebFetch|WebSearch)$/.test(name)) return "search";
+  return "tools";
+}
+
+/**
+ * Where the context window went, from the ⟦ctx⟧ lines (one per API request, newer Claude Code logs).
+ * The first request's context is the setup (system prompt, tool definitions, memory files and the
+ * task; after a compaction, the summary). Each later request's growth is exact, and is charged to
+ * what happened since the previous request (its reply, reasoning, tool results), split by size when
+ * several things share one step. Null when the log has no ⟦ctx⟧ lines.
+ */
+export function contextBreakdown(events: TraceEvent[]): ContextBreakdown | null {
+  let from = 0;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.kind === "compact" && e.state === "done") {
+      from = i + 1;
+      break;
+    }
+  }
+  const marks: number[] = [];
+  for (let i = from; i < events.length; i++) if (events[i].kind === "ctx") marks.push(i);
+  if (!marks.length) return null;
+
+  const tokens = new Map<ContextPart, number>();
+  const add = (p: ContextPart, n: number) => n > 0 && tokens.set(p, (tokens.get(p) ?? 0) + n);
+  const heavy: ContextBreakdown["heaviest"] = [];
+  const at = (i: number) => (events[i] as Extract<TraceEvent, { kind: "ctx" }>).tokens;
+
+  // Charge `delta` tokens to the events in (lo, hi), split by their size in the log.
+  const charge = (lo: number, hi: number, delta: number) => {
+    if (delta <= 0) return;
+    const items: { part: ContextPart; weight: number; tool?: Extract<TraceEvent, { kind: "tool" }> }[] = [];
+    for (let i = lo + 1; i < hi; i++) {
+      const e = events[i];
+      if (e.kind === "tool") items.push({ part: partOfTool(e.name), weight: 40 + (e.arg?.length ?? 0) + (e.result?.length ?? 0), tool: e });
+      else if (e.kind === "say") items.push({ part: "replies", weight: e.text.length });
+      else if (e.kind === "think") items.push({ part: "reasoning", weight: e.text.length });
+      else if (e.kind === "you") items.push({ part: "you", weight: e.text.length });
+      else if (e.kind === "plan") items.push({ part: "tools", weight: 200 });
+    }
+    const sum = items.reduce((s, x) => s + x.weight, 0);
+    if (!sum) return add("replies", delta);
+    for (const x of items) {
+      const n = Math.round((delta * x.weight) / sum);
+      add(x.part, n);
+      if (x.tool && n > 0) heavy.push({ name: x.tool.name, ...(x.tool.arg ? { arg: x.tool.arg } : {}), tokens: n });
+    }
+  };
+
+  add("setup", at(marks[0]));
+  for (let k = 1; k < marks.length; k++) charge(marks[k - 1], marks[k], at(marks[k]) - at(marks[k - 1]));
+  // After the last request: its reply is in the turn's final usage line (context incl. output).
+  const last = marks[marks.length - 1];
+  let tail: number | undefined;
+  for (let i = events.length - 1; i > last; i--) {
+    const e = events[i];
+    if (e.kind === "usage") {
+      tail = e.contextTokens;
+      break;
+    }
+  }
+  if (tail !== undefined) charge(last, events.length, tail - at(last));
+
+  // A new turn can start smaller than the last one ended (Claude Code drops old reasoning between
+  // turns), so the charged growth can overshoot what is in the window now: scale back to it.
+  const now = tail ?? at(last);
+  const charged = [...tokens.values()].reduce((s, n) => s + n, 0);
+  const scale = charged > now && charged > 0 ? now / charged : 1;
+  if (scale < 1) for (const [p, n] of tokens) tokens.set(p, Math.round(n * scale));
+  for (const h of heavy) h.tokens = Math.round(h.tokens * scale);
+  const parts = [...tokens].map(([part, n]) => ({ part, tokens: n })).sort((a, b) => b.tokens - a.tokens);
+  const lastCtx = events[last] as Extract<TraceEvent, { kind: "ctx" }>;
+  return {
+    parts,
+    heaviest: heavy.sort((a, b) => b.tokens - a.tokens).slice(0, 3),
+    total: parts.reduce((s, p) => s + p.tokens, 0),
+    cache: { read: lastCtx.cacheRead, write: lastCtx.cacheWrite, fresh: Math.max(0, lastCtx.tokens - lastCtx.cacheRead - lastCtx.cacheWrite) },
+    afterCompaction: from > 0,
+  };
+}
