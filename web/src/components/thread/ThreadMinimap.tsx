@@ -7,8 +7,9 @@ import { cn } from "@/lib/utils";
  * A minimap for the conversation: a small stack of bars sitting in the vertical middle of the
  * thread, one 2px bar per turn you sent (task, follow-ups, answers). The bar for the turn currently
  * in view is the live colour; hover any bar for a card with your message and how the agent began
- * its reply; click to jump there. Desktop only, and only from three turns — on a phone or in a short
- * thread the thread is the map.
+ * its reply; click to jump there. Shown whenever the conversation column has a gutter for it (a
+ * container query, so a collapsed sidebar or a closed pane brings it back, not the window size), from
+ * two turns — the task and one message is already a conversation to jump around.
  */
 export interface Turn {
   id: string;
@@ -51,18 +52,19 @@ export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerR
     };
   }, [measure, scrollerRef]);
 
-  // Two turns is the task and one reply: the thread is the map. A rail earns its place from three.
-  if (turns.length < 3) return null;
+  if (turns.length < 2) return null;
+  // A long run packs its ticks closer so the rail stays on screen instead of running off both ends.
+  const gap = turns.length <= 24 ? 12 : Math.max(3, Math.floor(300 / turns.length));
 
   const jump = (id: string) => {
     scrollerRef.current?.querySelector<HTMLElement>(`[data-turn="${id}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
-    <nav aria-label="Conversation map" className="group/map absolute top-1/2 left-0 z-10 hidden w-12 -translate-y-1/2 min-[1120px]:block" onMouseLeave={() => setHover(null)}>
+    <nav aria-label="Conversation map" className="group/map absolute top-1/2 left-0 z-10 hidden w-12 -translate-y-1/2 @3xl:block" onMouseLeave={() => setHover(null)}>
       {/* A faint rail appears when the pointer is near, so the ticks read as one control. */}
       <span className="bg-border/80 absolute top-0 bottom-0 left-[13px] w-px opacity-0 transition-opacity duration-200 group-hover/map:opacity-100" aria-hidden />
-      <ol className="flex flex-col gap-3 py-2 pl-2">
+      <ol className="flex flex-col py-2 pl-2" style={{ gap }}>
         {turns.map((t, i) => {
           const on = i === active;
           return (

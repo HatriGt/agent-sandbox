@@ -26,3 +26,19 @@
 :root[data-motion="reduced"] .plan-row-new {
   animation: none;
 }
+
+/* The docked plan's own scroll area: a hairline thumb that shows on hover, so it never sits beside
+   the conversation's scrollbar as a second, competing one. */
+.plan-scroll {
+  scrollbar-width: none;
+}
+.plan-scroll:hover,
+.plan-scroll:focus-within {
+  scrollbar-width: thin;
+}
+.plan-scroll::-webkit-scrollbar {
+  width: 0;
+}
+.plan-scroll:hover::-webkit-scrollbar {
+  width: 6px;
+}

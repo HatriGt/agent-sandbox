@@ -39,6 +39,7 @@ import { SelectionToolbar } from "./SelectionToolbar";
 import { SchedulePill } from "./SchedulePill";
 import { ScheduledCard } from "./ScheduledCard";
 import { parseTrace, producedFiles } from "@/lib/trace";
+import { reuseEvents, reuseGroups } from "@/lib/stable-trace";
 import { deriveTaskBoard, type TaskBoard } from "@/lib/planTasks";
 import { usePoll } from "@/hooks/usePoll";
 import { peekWatchCache, seedWatchCache, useWatchStream } from "@/hooks/useWatchStream";
@@ -203,10 +204,22 @@ export function Thread({
   // Memory proposals (lesson/playbook) and auto-saved preferences this box just produced → toasts.
   useMemoryToasts(snap?.memoryNew);
 
-  const events = React.useMemo(() => parseTrace(snap?.log ?? ""), [snap?.log]);
-  const groups = React.useMemo(() => groupTrace(events), [events]);
+  // Re-parsed on every streamed chunk; unchanged events and groups keep their previous objects
+  // (lib/stable-trace.ts) so only the row that grew re-renders.
+  const prevEvents = React.useRef<TraceEvent[]>([]);
+  const events = React.useMemo(() => (prevEvents.current = reuseEvents(prevEvents.current, parseTrace(snap?.log ?? ""))), [snap?.log]);
+  const prevGroups = React.useRef<TraceGroup[]>([]);
+  const groups = React.useMemo(() => (prevGroups.current = reuseGroups(prevGroups.current, groupTrace(events))), [events]);
   const keys = React.useMemo(() => groupKeys(groups), [groups]);
-  const repeats = React.useMemo(() => repeatedPolls(events), [events]);
+  // The same set while membership is unchanged: a new set every tick re-rendered every tool row.
+  const prevRepeats = React.useRef<{ set: WeakSet<object>; sig: string } | null>(null);
+  const repeats = React.useMemo(() => {
+    const set = repeatedPolls(events);
+    const sig = events.flatMap((e, i) => (set.has(e) ? [i] : [])).join(",");
+    if (prevRepeats.current?.sig === sig) return prevRepeats.current.set;
+    prevRepeats.current = { set, sig };
+    return set;
+  }, [events]);
   // Visual fences the agent re-emits under one name within a run render as ONE block that updates
   // in place at its first position (lib/viz-identity.ts); later copies collapse to a row.
   const liveRegistry = React.useMemo(
@@ -637,15 +650,25 @@ export function Thread({
   React.useEffect(() => {
     if (runState !== "waiting") setAnswered(null);
   }, [runState, box.name]);
+  // The answer just picked, drawn at once as the recorded decision ("asked — answered") where the
+  // question sat, instead of a plain echo bubble that the real card replaced seconds later when the
+  // resumed run wrote the answer into the log.
+  // Tied to the recorded question it answers, so a later question never borrows it.
+  const [sent, setSent] = React.useState<{ ask: string; text: string } | null>(null);
+  const openAskTextRef = React.useRef<string | null>(null);
+  React.useEffect(() => setSent(null), [box.name]);
+  const sentAnswer = sent?.text ?? null;
   const answer = React.useCallback(
     (text: string) => {
       echo(text);
       setAnswering(true);
       setAnswered(question ?? "");
+      setSent(openAskTextRef.current !== null ? { ask: openAskTextRef.current, text } : null);
       api
         .resume(box.name, text, { force: true })
         .catch((e: unknown) => {
           setAnswered(null);
+          setSent(null);
           onReplyFailed?.(text);
           toast.error("The agent did not get your answer", { description: e instanceof Error ? e.message : String(e) });
         })
@@ -655,6 +678,20 @@ export function Thread({
   );
   const showQuestion = !!question && runState === "waiting" && answered !== question;
   const resuming = !!question && runState === "waiting" && answered === question;
+  // The newest recorded question still without an answer in the log: where an answer just sent is drawn.
+  const openAsk = React.useMemo(() => {
+    for (let i = groups.length - 1; i >= 0; i--) {
+      const g = groups[i];
+      if (g.kind === "asked") return g.answer === "" ? i : -1;
+    }
+    return -1;
+  }, [groups]);
+  const openAskGroup = openAsk >= 0 ? groups[openAsk] : null;
+  openAskTextRef.current = openAskGroup?.kind === "asked" ? openAskGroup.question : null;
+  const optimisticAsk = React.useMemo(
+    () => (openAskGroup?.kind === "asked" && sent && sent.ask === openAskGroup.question && !showQuestion ? { ...openAskGroup, answer: sent.text } : null),
+    [openAskGroup, sent, showQuestion]
+  );
 
   // Pull requests the agent opened, from its prose and tool output.
   const pulls = React.useMemo(() => findPullRequests(events.map((e) => (e.kind === "say" ? e.text : e.kind === "tool" ? e.result ?? "" : "")).join("\n")), [events]);
@@ -978,6 +1015,7 @@ export function Thread({
   }, [groups]);
   const messageCount = messageIndex[messageIndex.length - 1] ?? 1;
   const editMessage = React.useCallback((text: string) => setSeed({ text, n: Date.now() }), []);
+  const askRevert = React.useCallback((message: number) => setRevertAsk({ message, discarded: messageCount - (message - 1) }), [messageCount]);
   const still = useReducedMotion();
 
   return (
@@ -1064,58 +1102,28 @@ export function Thread({
             <Swap state={loadingTrace} mode="popLayout" className="flex flex-col gap-5">
             {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
             {!loadingTrace && groups.map((g, i) => {
-              const isLast = i === groups.length - 1;
               const key = keys[i];
+              // The ⟦ask⟧ block lands in the log the moment the agent asks. While that question is
+              // still the one waiting (or its answer is in flight), the live card below IS the
+              // question — rendering the transcript copy too showed it twice. Once answered (or
+              // superseded) it stays as the recorded decision.
+              if (g.kind === "asked" && i === openAsk && !optimisticAsk && (showQuestion || resuming)) return null;
+              // think folds into a work trail; the plan renders once at the head (or in the dock).
+              if (g.kind === "think" || g.kind === "plan") return null;
               const msgIndex = messageIndex[i];
-              // The agent's byline opens each of its runs, whatever it starts with (prose, tools, thinking).
-              const opensAgent = agentKinds.includes(g.kind) && (i === 0 || !agentKinds.includes(groups[i - 1].kind));
-              const liveHere = runState === "running" && isLast;
-              return g.kind === "lifecycle" ? (
-                <LifecycleItem key={key} label={g.label} detail={g.detail} />
-              ) : g.kind === "tools" ? (
-                <div key={key} className="min-w-0">
-                  <ToolGroup events={g.events} live={liveHere} />
-                </div>
-              ) : g.kind === "mcp-connect" ? (
-                <McpConnectItem key={key} server={g.server} />
-              ) : g.kind === "you" ? (
-                <div key={key} data-turn={key} className="mt-5">
-                  <YouItem
-                    text={g.text}
-                    at={g.at}
-                    noEnter={g.at !== undefined && swappedIn.current.has(g.at)}
-                    onEdit={editMessage}
-                    onRevert={canRevertNow && revertable.has(msgIndex) ? () => setRevertAsk({ message: msgIndex, discarded: messageCount - (msgIndex - 1) }) : undefined}
-                  />
-                </div>
-              ) : g.kind === "asked" ? (
-                // The ⟦ask⟧ block lands in the log the moment the agent asks. While that question
-                // is still the one waiting (or its answer is in flight), the live card below IS the
-                // question — rendering the transcript copy too showed it twice, once with an empty
-                // "Your answer". Once answered (or superseded) it stays as the recorded decision.
-                g.answer === "" && (showQuestion || resuming) && !groups.slice(i + 1).some((x) => x.kind === "asked") ? null : (
-                <div key={key} data-turn={key} className="mt-5">
-                  <AnsweredQuestionItem question={g.question} answer={g.answer} />
-                </div>
-                )
-              ) : g.kind === "work" ? (
-                <div key={key} className="min-w-0">
-                  <ReasoningTrail items={g.items} live={liveHere} />
-                </div>
-              ) : g.kind === "think" ? (
-                // Folded into a "work" trail by foldWork; never reaches the renderer on its own.
-                null
-              ) : g.kind === "memory" ? (
-                <MemoryItem key={key} notes={g.notes} />
-              ) : g.kind === "plan" ? (
-                // The plan renders once, at the head of the conversation (or in the dock on wide screens).
-                null
-              ) : (
-                <div key={key} data-say className="min-w-0">
-                  <SayKeyContext.Provider value={key}>
-                    <SayItem text={g.text} live={liveHere} label={opensAgent} at={g.at} />
-                  </SayKeyContext.Provider>
-                </div>
+              return (
+                <GroupRow
+                  key={key}
+                  g={i === openAsk && optimisticAsk ? optimisticAsk : g}
+                  rowKey={key}
+                  live={runState === "running" && i === groups.length - 1}
+                  // The agent's byline opens each of its runs, whatever it starts with (prose, tools, thinking).
+                  opensAgent={agentKinds.includes(g.kind) && (i === 0 || !agentKinds.includes(groups[i - 1].kind))}
+                  noEnter={g.kind === "you" && g.at !== undefined && swappedIn.current.has(g.at)}
+                  revertIndex={g.kind === "you" && canRevertNow && revertable.has(msgIndex) ? msgIndex : 0}
+                  onRevert={askRevert}
+                  onEdit={editMessage}
+                />
               );
             })}
             </Swap>
@@ -1150,13 +1158,16 @@ export function Thread({
                   <MemoryBumpCard kind={oomKilled ? "oom" : "pressure"} nextTier={nextMemoryTier!} memUsage={box.memUsage} phase={bumpPhase} onBump={() => void bumpAndContinue()} />
                 </Rise>
               )}
-              {showQuestion && <QuestionCard key="question" question={question!} onAnswer={answer} onDiscuss={discuss} busy={answering} />}
             </AnimatePresence>
+            {/* Outside the presence on purpose: once answered it leaves at once, because the answered
+                card has already taken its place just above — a fading copy below it was a second,
+                stale question and a layout jump when it finally collapsed. */}
+            {showQuestion && <QuestionCard key="question" question={question!} onAnswer={answer} onDiscuss={discuss} busy={answering} />}
 
             {/* An echo whose log line just landed leaves at once (`custom`): the line is already drawn
                 in its place. One that is withdrawn (delivery failed) folds away as before. */}
             <AnimatePresence initial={false} custom={{ still, instant: echoesLanded }}>
-              {pendingReplies.map((r) => (
+              {pendingReplies.filter((r) => !(optimisticAsk && r.text === sentAnswer)).map((r) => (
                 <Rise key={r.id} still={still} className="mt-5">
                   <YouItem text={r.text} noEnter />
                 </Rise>
@@ -1459,6 +1470,73 @@ function IdleEmpty({ box, onNew, onPick }: { box: BoxView; onNew: () => void; on
 }
 
 type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
+
+/**
+ * One row of the conversation. Memoized: with the groups structurally shared, a streamed chunk
+ * re-renders the row that grew, not the whole run.
+ */
+const GroupRow = React.memo(function GroupRow({
+  g,
+  rowKey,
+  live,
+  opensAgent,
+  noEnter,
+  revertIndex,
+  onRevert,
+  onEdit,
+}: {
+  g: TraceGroup;
+  rowKey: string;
+  live: boolean;
+  opensAgent: boolean;
+  noEnter: boolean;
+  revertIndex: number;
+  onRevert: (message: number) => void;
+  onEdit: (text: string) => void;
+}) {
+  switch (g.kind) {
+    case "lifecycle":
+      return <LifecycleItem label={g.label} detail={g.detail} />;
+    case "tools":
+      return (
+        <div className="min-w-0">
+          <ToolGroup events={g.events} live={live} />
+        </div>
+      );
+    case "mcp-connect":
+      return <McpConnectItem server={g.server} />;
+    case "you":
+      return (
+        <div data-turn={rowKey} className="mt-5">
+          <YouItem text={g.text} at={g.at} noEnter={noEnter} onEdit={onEdit} onRevert={revertIndex ? () => onRevert(revertIndex) : undefined} />
+        </div>
+      );
+    case "asked":
+      return (
+        <div data-turn={rowKey} className="mt-5">
+          <AnsweredQuestionItem question={g.question} answer={g.answer} />
+        </div>
+      );
+    case "work":
+      return (
+        <div className="min-w-0">
+          <ReasoningTrail items={g.items} live={live} />
+        </div>
+      );
+    case "memory":
+      return <MemoryItem notes={g.notes} />;
+    case "say":
+      return (
+        <div data-say className="min-w-0">
+          <SayKeyContext.Provider value={rowKey}>
+            <SayItem text={g.text} live={live} label={opensAgent} at={g.at} />
+          </SayKeyContext.Provider>
+        </div>
+      );
+    default:
+      return null;
+  }
+});
 
 type TraceGroup =
   | { kind: "say"; text: string; at?: number }

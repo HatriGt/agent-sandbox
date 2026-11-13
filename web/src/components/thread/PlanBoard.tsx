@@ -2,7 +2,7 @@ import * as React from "react";
 import { AlertTriangle, Check, ChevronRight, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
-import { describeChanges, shortDuration, shortPath, type DerivedTask, type PlanChanges, type TaskBoard, type TaskEvidence } from "@/lib/planTasks";
+import { describeChanges, shortDuration, shortPath, type DerivedTask, type PastPlan, type PlanChanges, type TaskBoard, type TaskEvidence } from "@/lib/planTasks";
 import { FileMark } from "@/lib/fileIcon";
 import { Collapse } from "@/components/ui/collapse";
 import { cn } from "@/lib/utils";
@@ -196,6 +196,61 @@ function StepList({ board, live, compact, className }: { board: TaskBoard; live?
     <ol className={className}>
       <AnimatePresence initial={false}>{rows}</AnimatePresence>
     </ol>
+  );
+}
+
+/**
+ * The plans this run had before the current one, oldest first, behind one quiet disclosure. When the
+ * agent finishes a checklist and writes a new one, the old one used to vanish; now each stays readable
+ * with what got done.
+ */
+function EarlierPlans({ earlier, className }: { earlier?: PastPlan[]; className?: string }) {
+  const [open, setOpen] = React.useState(false);
+  if (!earlier?.length) return null;
+  const n = earlier.length;
+  return (
+    <div className={cn("min-w-0", className)}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="text-muted-foreground hover:text-foreground hover:bg-muted/60 flex h-7 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-micro transition-colors"
+      >
+        <ChevronRight className={cn("text-faint size-3 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+        <span className="font-medium">Earlier plan{n === 1 ? "" : "s"}</span>
+        <span className="text-faint stamp tabular-nums">{n}</span>
+      </button>
+      <Collapse open={open}>
+        <ol className="flex flex-col gap-3 px-2 pt-1 pb-1.5">
+          {earlier.map((p, i) => {
+            const ms = p.at !== undefined && p.endedAt !== undefined && p.endedAt > p.at ? p.endedAt - p.at : undefined;
+            return (
+              <li key={i} className="min-w-0">
+                <p className="text-faint mb-1 flex items-baseline gap-1.5 text-micro">
+                  <span className="label font-semibold tracking-wider uppercase">Plan {i + 1}</span>
+                  <span className="stamp tabular-nums">
+                    {p.done} of {p.tasks.length} done{ms !== undefined ? ` · ${shortDuration(ms)}` : ""}
+                  </span>
+                </p>
+                <ul className="flex flex-col gap-0.5">
+                  {p.tasks.map((t) => (
+                    <li key={t.text} className="flex min-w-0 items-start gap-2 py-0.5">
+                      <span className="mt-px">
+                        <StepMark state={t.state === "active" ? "todo" : t.state} failed={t.evidence.failed} />
+                      </span>
+                      <span className={cn("min-w-0 flex-1 text-micro leading-snug", t.state === "done" ? "text-muted-foreground" : "text-faint")}>
+                        {t.text}
+                        {t.state !== "done" && <span className="text-faint"> · not finished</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            );
+          })}
+        </ol>
+      </Collapse>
+    </div>
   );
 }
 
@@ -553,6 +608,7 @@ export function PlanBoard({ board, live, variant = "card", className }: { board:
         <ChangeNote board={board} className="mt-1.5" />
         <Collapse open={open}>
           <StepList board={board} live={live} className="mt-1.5 flex flex-col" />
+          <EarlierPlans earlier={board.earlier} className="mt-1.5" />
         </Collapse>
       </section>
     );
@@ -598,7 +654,12 @@ export function PlanBoard({ board, live, variant = "card", className }: { board:
               <ProgressRail tasks={tasks} live={live} layoutId="plan-rail" />
             </div>
             <ChangeNote board={board} className="px-3 pt-1" />
-            <StepList board={board} live={live} compact className="flex min-h-0 flex-1 flex-col overflow-y-auto p-1.5" />
+            {/* One scroll area for the steps and the earlier plans, with a hairline scrollbar so it
+                never reads as a second page scrollbar beside the conversation's. */}
+            <div className="plan-scroll flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain p-1.5">
+              <StepList board={board} live={live} compact className="flex flex-col" />
+              <EarlierPlans earlier={board.earlier} className="mt-1 border-t pt-1" />
+            </div>
             {(board.ms !== undefined || failed > 0) && (
               <div className="shrink-0 border-t px-3 py-2 text-micro tabular-nums">
                 {board.ms !== undefined && <span className="text-faint stamp">{shortDuration(board.ms)} total</span>}

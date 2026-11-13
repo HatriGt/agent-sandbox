@@ -2627,6 +2627,7 @@ export async function gatherWatch(
         `echo "---T---"; cat ${TASK_MARK} 2>/dev/null || true; ` +
         `echo "---A---"; cat ${KIND_MARK} 2>/dev/null || true; ` +
         `echo "---N---"; cat ${MCP_NOTES_PATH} 2>/dev/null || true; ` +
+        `echo "---SZ---"; stat -c %s ${AGENT_LOG} 2>/dev/null || wc -c < ${AGENT_LOG} 2>/dev/null || echo 0; ` +
         `echo "---LOG---"; ${logTailCmd(logLines)}`,
       // Same bound as gatherMonitor's probe: an exec into a box caught mid-shutdown can park in
       // poll() indefinitely, and this read sits behind every WatchHub tick — unbounded, one wedged
@@ -2648,15 +2649,23 @@ export async function gatherWatch(
     // ---A--- (agent kind) is absent on boxes probed by an older controller — tolerate both shapes.
     const aStartRaw = out.indexOf("---A---");
     const nStartRaw = out.indexOf("---N---");
-    const tEnd = aStartRaw >= 0 ? aStartRaw : nStartRaw >= 0 ? nStartRaw : logStart;
+    const szStart = out.indexOf("---SZ---");
+    const metaEnd = szStart >= 0 && szStart < logStart ? szStart : logStart;
+    const tEnd = aStartRaw >= 0 ? aStartRaw : nStartRaw >= 0 ? nStartRaw : metaEnd;
     base.task = out.slice(tStart + "---T---".length, tEnd).trim() || undefined;
-    if (aStartRaw >= 0) base.agent = boxAgentKindFrom(out.slice(aStartRaw + "---A---".length, nStartRaw >= 0 ? nStartRaw : logStart));
+    if (aStartRaw >= 0) base.agent = boxAgentKindFrom(out.slice(aStartRaw + "---A---".length, nStartRaw >= 0 ? nStartRaw : metaEnd));
     // ---N---: what the MCP install left out of this box (mcp-skip/fail/drop lines), for the thread.
     if (nStartRaw >= 0) {
-      const notes = mcpInstallNotes(out.slice(nStartRaw + "---N---".length, logStart));
+      const notes = mcpInstallNotes(out.slice(nStartRaw + "---N---".length, metaEnd));
       if (notes.length) base.mcpNotes = notes;
     }
     base.log = out.slice(logStart + "---LOG---".length).trim();
+    // The tail is a window: say when the file holds more than it, so the hub can stitch the whole
+    // conversation together (WatchHub.readFull) instead of losing its start once the log is long.
+    if (szStart >= 0 && szStart < logStart) {
+      const size = Number(out.slice(szStart + "---SZ---".length, logStart).trim());
+      if (Number.isFinite(size) && size - Buffer.byteLength(base.log) > 64) base.logTruncated = true;
+    }
     base.boxStatus = "running"; // execable => running
   } catch {
     return base; // stays "missing"
@@ -2674,6 +2683,18 @@ export async function gatherWatch(
     // metrics is best-effort
   }
   return base;
+}
+
+/** Upper bound on a whole-log read for the live thread (the start of a very long run is kept). */
+export const LOG_FULL_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The whole `.agent.log` (up to LOG_FULL_BYTES, from the end), for the thread's first frame when the
+ * tail window no longer reaches the start. Read once per box by WatchHub; later ticks are stitched.
+ */
+export async function readAgentLogFull(cfg: Config, box: string): Promise<string> {
+  const r = await exec(cfg, box, `tail -c ${LOG_FULL_BYTES} ${AGENT_LOG} 2>/dev/null || true`, { timeoutMs: PROBE_TIMEOUT_MS * 3 });
+  return r.stdout.trim();
 }
 
 /** Run the credential/tool bootstrap step only (separated so benchmarks can time it). */

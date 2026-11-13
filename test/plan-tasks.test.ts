@@ -228,3 +228,29 @@ test("a failed call is remembered on the step as the reason", () => {
   assert.deepEqual(board.tasks[0].evidence.failedCall, { name: "Bash", arg: "./deploy.sh" });
   assert.deepEqual(board.tasks[0].evidence.latest, { name: "Bash", arg: "echo done" });
 });
+
+test("deriveTaskBoard: a plan the agent replaced with a new one stays readable as an earlier plan", () => {
+  const step = (text: string, state: "done" | "active" | "todo") => ({ text, state });
+  const events = [
+    { kind: "plan" as const, items: [step("Read the view", "done"), step("Write the fix", "active")], at: T0 },
+    { kind: "plan" as const, items: [step("Read the view", "done"), step("Write the fix", "done")], at: T0 + 60_000 },
+    { kind: "plan" as const, items: [step("Test on QA", "active"), step("Report", "todo")], at: T0 + 120_000 },
+    // A status move on the new plan is a revision, not another replacement.
+    { kind: "plan" as const, items: [step("Test on QA", "done"), step("Report", "active")], at: T0 + 180_000 },
+  ];
+  const board = deriveTaskBoard(events)!;
+  assert.deepEqual(board.tasks.map((t) => t.text), ["Test on QA", "Report"]);
+  assert.equal(board.earlier?.length, 1);
+  assert.deepEqual(board.earlier![0].tasks.map((t) => [t.text, t.state]), [["Read the view", "done"], ["Write the fix", "done"]]);
+  assert.equal(board.earlier![0].done, 2);
+  assert.equal(board.earlier![0].endedAt! - board.earlier![0].at!, 120_000);
+  assert.equal(board.changes, undefined, "the replacement is not shown as an edit of the old plan");
+});
+
+test("deriveTaskBoard: adding and rewording steps is still one plan", () => {
+  const events = [
+    { kind: "plan" as const, items: [{ text: "Read the view", state: "active" as const }, { text: "Write the fix", state: "todo" as const }] },
+    { kind: "plan" as const, items: [{ text: "Read the view", state: "done" as const }, { text: "Write the fix", state: "active" as const }, { text: "Open a PR", state: "todo" as const }] },
+  ];
+  assert.equal(deriveTaskBoard(events)!.earlier, undefined);
+});

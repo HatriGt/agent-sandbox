@@ -18,9 +18,37 @@
 import type { WatchSnapshot } from "./monitor.js";
 import { isTerminal } from "./watch-sse.js";
 
+/**
+ * Join a tail window onto the full log seen so far. The reader serves only the last ~128 KB, so once
+ * a run outgrows it every tick's window starts later; the new text is whatever follows the point
+ * where the previous full log's end sits inside the window. Returns null when the window no longer
+ * overlaps (the log was replaced, or it grew past a whole window between reads) — the caller then
+ * re-reads the whole file. A window that is the whole file (`truncated` false) IS the full log.
+ */
+export function stitchLog(prev: string, win: string, truncated: boolean): string | null {
+  if (!truncated) return win;
+  if (!prev) return null;
+  if (win.length === 0 || prev.endsWith(win)) return prev;
+  // The window's first line may start mid-character or mid-line (tail -c): never compare it.
+  const firstNl = win.indexOf("\n");
+  // A long anchor finds the seam in one pass; a short one covers a window that moved by most of itself.
+  for (const size of [512, 48]) {
+    const anchorLen = Math.min(prev.length, size);
+    const anchor = prev.slice(prev.length - anchorLen);
+    for (let i = win.indexOf(anchor); i >= 0; i = win.indexOf(anchor, i + 1)) {
+      const end = i + anchorLen;
+      const from = firstNl >= 0 && firstNl < i ? firstNl + 1 : i;
+      if (prev.endsWith(win.slice(from, end))) return prev + win.slice(end);
+    }
+  }
+  return null;
+}
+
 export interface WatchHubOpts {
   /** Reads one fresh snapshot (the SSH-backed gatherWatch in production). */
   read: (session: string) => Promise<WatchSnapshot>;
+  /** Reads the whole log (redacted) for readFull when the snapshot's tail window is truncated. */
+  readLog?: (session: string) => Promise<string>;
   /** Tail cadence while the run is live. */
   tickMs?: number;
   /** Tail cadence once the run is terminal (done/idle). */
@@ -41,6 +69,9 @@ interface Entry {
   inFlight: Promise<WatchSnapshot> | null;
   waiters: Array<{ resolve: (s: WatchSnapshot) => void; reject: (e: Error) => void }>;
   failures: number;
+  /** The whole log stitched from the tail windows, once a readFull asked for it. */
+  full?: string;
+  fullLoading?: Promise<void> | null;
 }
 
 export class WatchHub {
@@ -51,9 +82,11 @@ export class WatchHub {
   private readonly freshMs: number;
   private readonly now: () => number;
   private readonly readFn: (session: string) => Promise<WatchSnapshot>;
+  private readonly readLogFn?: (session: string) => Promise<string>;
 
   constructor(opts: WatchHubOpts) {
     this.readFn = opts.read;
+    this.readLogFn = opts.readLog;
     this.tickMs = opts.tickMs ?? 800;
     this.idleTickMs = opts.idleTickMs ?? 3000;
     this.graceMs = opts.graceMs ?? 60_000;
@@ -94,6 +127,41 @@ export class WatchHub {
       void this.tick(session, e);
     }
     return p;
+  }
+
+  /**
+   * Like read(), but `log` is the WHOLE conversation rather than the tail window: the live thread
+   * reads through here so a long run never loses its beginning, and its stream only ever grows by
+   * appends (the window sliding used to reset the whole transcript every tick). The full text is
+   * read once per box and then extended from each tick's window.
+   */
+  async readFull(session: string): Promise<WatchSnapshot> {
+    const snap = await this.read(session);
+    const e = this.entries.get(session);
+    if (!e) return snap;
+    if (e.full === undefined) {
+      if (!snap.logTruncated || !this.readLogFn) {
+        e.full = snap.log;
+      } else {
+        if (!e.fullLoading) {
+          const readLog = this.readLogFn;
+          e.fullLoading = readLog(session)
+            .then((whole) => {
+              const cur = e.snap ?? snap;
+              e.full = stitchLog(whole, cur.log, true) ?? (whole.length >= cur.log.length ? whole : cur.log);
+            })
+            .catch(() => {
+              // Fall back to the window; the next readFull tries the whole file again.
+            })
+            .finally(() => {
+              e.fullLoading = null;
+            });
+        }
+        await e.fullLoading;
+        if (e.full === undefined) return snap;
+      }
+    }
+    return { ...(e.snap ?? snap), log: e.full };
   }
 
   /** Forget a box (after teardown) so a destroyed machine's last log is not served as live. */
@@ -156,6 +224,12 @@ export class WatchHub {
     if (snap) {
       e.snap = snap;
       e.at = this.now();
+      if (e.full !== undefined && !e.fullLoading) {
+        const next = stitchLog(e.full, snap.log, !!snap.logTruncated);
+        // No overlap: drop the stitched copy; the next readFull re-reads the whole file.
+        if (next === null) e.full = undefined;
+        else e.full = next;
+      }
       const waiters = e.waiters;
       e.waiters = [];
       for (const w of waiters) w.resolve(snap);

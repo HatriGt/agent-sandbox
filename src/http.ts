@@ -75,7 +75,7 @@ import { seedStarterSkills } from "./starter-skills.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { currentPrincipal, guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { allowShellScripts, securityHeaders } from "./security-headers.js";
-import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, mirrorInboxMessage, takeDeliveredInbox, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo } from "./msb.js";
+import { gatherMonitor, gatherWatch, readAgentLogFull, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, mirrorInboxMessage, takeDeliveredInbox, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo } from "./msb.js";
 import { isBoxName } from "./sync.js";
 import { shellQuote } from "./exec.js";
 import { touchClaimed, markParked } from "./claims.js";
@@ -429,7 +429,11 @@ const withMemoryNew = (snap: WatchSnapshot, box: string): WatchSnapshot => {
   const memoryNew = memoryHarvester.memoryNew(box);
   return memoryNew ? { ...snap, memoryNew } : snap;
 };
-const watchHub = new WatchHub({ read: async (s) => withMemoryNew(redactSnap(await gatherWatch(cfg, s, undefined, { metrics: false })), s) });
+const watchHub = new WatchHub({
+  read: async (s) => withMemoryNew(redactSnap(await gatherWatch(cfg, s, undefined, { metrics: false })), s),
+  // The live thread's first frame of a long run: the whole log, not the tail window (readFull).
+  readLog: async (s) => redactor.redact(await readAgentLogFull(cfg, s)),
+});
 // The dashboard's fleet read: gatherMonitor behind a short shared cache, plus lifecycle config and
 // sleeping (Stopped-but-resumable) boxes merged from memory.
 // Follow-ups typed while the agent is mid-turn wait here and are delivered when the run finishes.
@@ -1905,9 +1909,11 @@ app.get("/watch.sse", (req: Request, res: Response) => {
     session,
     from,
     // The client's last bytes at `from` — proves its offset still points where it thinks in the
-    // sliding tail window; on mismatch streamWatch sends the full log instead of a corrupting slice.
+    // log; on mismatch streamWatch sends the full log instead of a corrupting slice.
     expectTail: typeof req.query.tail === "string" ? req.query.tail.slice(0, 256) : undefined,
-    read: (s) => watchHub.read(s),
+    // The whole conversation, grown by appends — never the sliding tail window, which lost the
+    // start of a long run and reset the transcript on every tick once it filled.
+    read: (s) => watchHub.readFull(s),
   });
   // Stop the server-side tail the instant the browser goes away (tab closed, navigated, network drop)
   // so a disconnected viewer never keeps hitting SSH for a box no one is watching.

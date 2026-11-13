@@ -281,6 +281,8 @@ export interface WatchSnapshot {
    * src/msb.ts preinstallSh), so the thread can say which servers the agent is running without.
    */
   mcpNotes?: string[];
+  /** True when `log` is only the tail of a longer .agent.log (set by gatherWatch). */
+  logTruncated?: boolean;
   /** The log tail (already limited to N lines by the caller). */
   log: string;
 }

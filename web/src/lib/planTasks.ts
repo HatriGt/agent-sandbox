@@ -59,8 +59,28 @@ export interface PlanChanges {
   at?: number;
 }
 
+/** A plan the agent finished or set aside for a different one — kept so the whole run's plans stay readable. */
+export interface PastPlan {
+  tasks: DerivedTask[];
+  done: number;
+  /** Stamp of the snapshot that started this plan, and of the one that replaced it. */
+  at?: number;
+  endedAt?: number;
+}
+
+/**
+ * A snapshot REPLACES the plan (rather than revising it) when most of the old steps are gone: the
+ * agent moved on to new work. Rewordings, additions and status changes stay revisions of one plan.
+ */
+export function replacesPlan(prev: PlanItem[], changes: PlanChanges | null): boolean {
+  if (!changes || prev.length === 0) return false;
+  return changes.removed.length * 2 >= prev.length && changes.added.length > 0;
+}
+
 export interface TaskBoard {
   tasks: DerivedTask[];
+  /** Earlier plans in this run, oldest first; absent when the agent has only had one. */
+  earlier?: PastPlan[];
   done: number;
   /** True once every step is done. */
   complete: boolean;
@@ -173,6 +193,8 @@ export function deriveTaskBoard(events: TraceEvent[]): TaskBoard | null {
   };
 
   let latest: PlanItem[] | null = null;
+  let latestAt: number | undefined;
+  const earlier: PastPlan[] = [];
   let revisions = 0;
   let changes: PlanChanges | null = null;
   // The step currently collecting work, and when its window opened.
@@ -189,6 +211,17 @@ export function deriveTaskBoard(events: TraceEvent[]): TaskBoard | null {
       // Only the LAST revision's diff is reported, but a rewording at any revision carries its evidence
       // forward: both texts share one bucket, so nothing collected under the old wording is lost.
       changes = latest ? diffPlan(latest, ev.items, ev.at) : null;
+      if (latest && replacesPlan(latest, changes)) {
+        // Frozen copies: a later plan may reuse a step's wording and keep collecting into its bucket.
+        const tasks = latest.map((i) => {
+          const e = acc.get(i.text) ?? blank();
+          return { ...i, evidence: { ...e, files: [...e.files], commands: [...e.commands], others: e.others.map((o) => ({ ...o })) } };
+        });
+        earlier.push({ tasks, done: tasks.filter((t) => t.state === "done").length, ...(latestAt !== undefined ? { at: latestAt } : {}), ...(ev.at !== undefined ? { endedAt: ev.at } : {}) });
+        latestAt = ev.at;
+        // A fresh plan is not "changed": the note would read as an edit of the one before.
+        changes = null;
+      } else if (!latest) latestAt = ev.at;
       for (const r of changes?.reworded ?? []) {
         const old = acc.get(r.from);
         if (old && !acc.has(r.to)) acc.set(r.to, old);
@@ -233,6 +266,7 @@ export function deriveTaskBoard(events: TraceEvent[]): TaskBoard | null {
     done,
     complete: tasks.length > 0 && done === tasks.length,
     revisions,
+    ...(earlier.length ? { earlier } : {}),
     ...(changes ? { changes } : {}),
     ms: total > 0 ? total : undefined,
     ...(openKey !== null && openAt !== undefined ? { activeSince: openAt } : {}),
