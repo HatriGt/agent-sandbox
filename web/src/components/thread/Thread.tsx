@@ -1645,7 +1645,7 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
         ...(e.error ? { error: e.error } : {}),
         ...(e.summary ? { summary: e.summary } : {}),
       };
-      if (prev?.kind === "compact" && prev.state === "pending") out[j] = { ...prev, ...view };
+      if (prev?.kind === "compact" && (prev.state === "pending" || prev.state === "running")) out[j] = { ...prev, ...view };
       else out.push({ kind: "compact", ...view, at: e.at });
     } else if (e.kind === "you") {
       // An answer to a question the transcript recorded (⟦ask⟧ … ⟦/ask⟧ right before) folds into one

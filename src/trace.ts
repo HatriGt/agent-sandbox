@@ -313,12 +313,16 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       target = null;
       const at = Number(compact[1]);
       const rest = compact[3] ?? "";
-      // The done/failed line completes the compaction its start line opened (nothing else is written
-      // between them); without a start in view it stands alone.
-      const last = events[events.length - 1];
+      // The done/failed line completes the compaction its start line opened (only the CLI's re-init
+      // "session started" is written between them); without a start in view it stands alone.
+      let k = events.length - 1;
+      while (k >= 0 && events[k].kind === "lifecycle") k--;
+      const last = events[k];
       const open = last?.kind === "compact" && last.state === "running" ? last : null;
       if (compact[2] === "start") {
-        events.push({ kind: "compact", state: "running", at });
+        // Claude Code can report `compacting` twice for one compaction (seen live on 2.1.322): a
+        // start while one is still open is the same compaction.
+        if (!open) events.push({ kind: "compact", state: "running", at });
       } else if (compact[2] === "done") {
         const num = (k: string) => {
           const m = rest.match(new RegExp(`(?:^| )${k}=(\\d+)`));

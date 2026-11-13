@@ -100,15 +100,26 @@ test("the parser folds start + done + summary into one compact event", () => {
 });
 
 test("the parser: an unfinished compaction stays running, a failed one keeps its reason, old usage lines still parse", () => {
-  const ev = parseTrace(["⟦compact⟧ 1700000000000 start", "⟦compact⟧ 1700000000001 start", "⟦compact⟧ 1700000000002 failed too short", "⟦usage⟧ in=1 out=2 ctx=3"].join("\n"));
+  const ev = parseTrace(
+    ["⟦compact⟧ 1700000000000 start", "⟦compact⟧ 1700000000001 failed too short", "x", "⟦compact⟧ 1700000000003 start", "⟦usage⟧ in=1 out=2 ctx=3"].join("\n")
+  );
   assert.deepEqual(
     ev.map((e) => (e.kind === "compact" ? `${e.state}:${e.error ?? ""}` : e.kind)),
-    ["running:", "failed:too short", "usage"]
+    ["failed:too short", "say", "running:", "usage"]
   );
-  const u = ev[2];
+  const u = ev[3];
   assert.ok(u.kind === "usage" && u.contextWindow === undefined);
   const w = parseTrace("⟦usage⟧ in=1 out=2 ctx=3 win=1000000")[0];
   assert.ok(w.kind === "usage" && w.contextWindow === 1_000_000);
+});
+
+test("a doubled start (Claude Code 2.1.322 reports `compacting` twice) is still one compaction", () => {
+  const ev = parseTrace(
+    ["⟦compact⟧ 1700000000000 start", "⟦compact⟧ 1700000030000 start", "● session started (model m)", "⟦compact⟧ 1700000043000 done trigger=manual pre=33350 post=5238 dur=43422"].join("\n")
+  );
+  const c = ev.filter((e) => e.kind === "compact");
+  assert.equal(c.length, 1);
+  assert.ok(c[0].kind === "compact" && c[0].state === "done" && c[0].at === 1700000000000);
 });
 
 test("isCompactCommand: only /compact as the whole command, with or without instructions", () => {
