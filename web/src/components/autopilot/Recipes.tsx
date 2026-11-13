@@ -21,8 +21,8 @@ export interface Recipe {
 export function RecipeGallery({ recipes, onPick, className, heading = "Start from a recipe" }: { recipes: readonly Recipe[]; onPick: (id: string) => void; className?: string; heading?: string }) {
   return (
     <section aria-labelledby="recipes-title" className={cn("enter", className)}>
-      <div className="mb-2.5 flex items-baseline gap-3">
-        <h2 id="recipes-title" className="text-foreground text-meta font-medium">
+      <div className="mb-2.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+        <h2 id="recipes-title" className="text-foreground text-meta font-medium whitespace-nowrap">
           {heading}
         </h2>
         <p className="text-muted-foreground text-micro">Opens the editor filled in — nothing runs until you save</p>
