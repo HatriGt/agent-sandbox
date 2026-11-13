@@ -59,7 +59,9 @@ export function currentContext(events: TraceEvent[]): { tokens: number; window: 
       tokens = e.postTokens;
     }
   }
-  return tokens === undefined ? null : { tokens, window: window ?? CONTEXT_WINDOW_TOKENS };
+  if (tokens === undefined) return null;
+  // Older logs carry no window; a context larger than the 200K default means a 1M-window model.
+  return { tokens, window: window ?? (tokens > CONTEXT_WINDOW_TOKENS ? 1_000_000 : CONTEXT_WINDOW_TOKENS) };
 }
 
 /** Where Claude Code compacts on its own for this window and setting; undefined when it does not. */
@@ -80,10 +82,10 @@ export function contextHealth(contextTokens: number, window = CONTEXT_WINDOW_TOK
   const advice =
     level === "critical" || pastAuto
       ? compactAt === undefined
-        ? "The agent's context is nearly full and auto-compact is off — send /compact to summarize the conversation, or start a fresh task."
-        : "The agent's context is nearly full — it compacts on its own, or send /compact now to summarize the conversation and keep going."
+        ? "Almost full, and auto-compact is off. Compact now to keep going."
+        : "Almost full. It compacts on its own soon, or you can compact now."
       : level === "high" && compactAt === undefined
-        ? "Auto-compact is off — send /compact before the window fills, or the run stops with “prompt is too long”."
+        ? "Auto-compact is off. Compact before the window fills."
         : undefined;
   return {
     level,

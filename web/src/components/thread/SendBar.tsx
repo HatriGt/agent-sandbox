@@ -15,6 +15,7 @@ import { MentionMenu, expandMentions, mentionAt, type MentionState } from "./Men
 import { useModelChoice } from "./ModelPicker";
 import { ComposerToolbar, ModelMenu, PlusMenu, SkillsMenu, ToolButton, useComposerMenus } from "@/components/composer/Toolbar";
 import { SkillMenu } from "./SkillMenu";
+import { ContextRing, type ContextStatus } from "./ContextRing";
 import { COMPACT_COMMAND, isCompactCommand } from "@/lib/compact";
 import { slashAt, type SlashState } from "@/lib/slash";
 import { useInlineTags } from "@/hooks/useInlineTags";
@@ -47,6 +48,7 @@ export function SendBar({
   seed,
   onReplyFailed,
   canCompact,
+  context,
   phase,
   top,
 }: {
@@ -68,6 +70,8 @@ export function SendBar({
   onReplyFailed?: (text: string) => void;
   /** This thread's agent takes `/compact` (Claude Code): the slash menu offers it. */
   canCompact?: boolean;
+  /** The context window ring beside the send button (once a turn reported usage). */
+  context?: ContextStatus | null;
   /** Text to drop into the composer (e.g. a starter prompt); `n` changes to re-apply the same text.
    *  `append` adds it after a non-empty draft instead of replacing it (a quoted selection). */
   seed?: { text: string; n: number; append?: boolean; /** Joins the current line (a tag) instead of starting a paragraph. */ inline?: boolean; /** A picture that arrives with the text (a browser element, a screenshot). */ image?: { name: string; dataUrl: string; label?: string; note?: string } } | null;
@@ -527,6 +531,7 @@ export function SendBar({
               }
               right={
                 <>
+                  {context && !sleeping && <ContextRing status={context} />}
                   {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />}
             <Button
               variant="primary"

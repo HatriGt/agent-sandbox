@@ -1,6 +1,6 @@
 import * as React from "react";
 import { lazyRetry } from "@/lib/lazy-retry";
-import { ArrowUpRight, Bug, Compass, GitPullRequest, Loader2, Plus, Shrink, Sparkles, Undo2 } from "lucide-react";
+import { ArrowUpRight, Bug, Compass, GitPullRequest, Loader2, Plus, Sparkles, Undo2 } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
@@ -22,6 +22,7 @@ import { MemoryBumpCard } from "./MemoryCard";
 import { useMemoryToasts } from "./MemoryToast";
 import { runStats, toMarkdown } from "@/lib/transcript";
 import { contextHealthOf } from "@/lib/context-health";
+import type { ContextStatus } from "./ContextRing";
 import { useAutoCompactMode } from "@/hooks/useAutoCompactMode";
 import { compactInstructions, isCompactCommand } from "@/lib/compact";
 import { matchReplies, stampReply, type PendingReply } from "@/lib/replies";
@@ -760,6 +761,14 @@ export function Thread({
       toast.error("Could not compact", { description: e instanceof Error ? e.message : String(e) });
     }
   };
+  const compactions = React.useMemo(
+    () => events.filter((e): e is Extract<TraceEvent, { kind: "compact" }> => e.kind === "compact" && e.state === "done"),
+    [events]
+  );
+  const contextStatus: ContextStatus | null =
+    ctxHealth && !loadingTrace
+      ? { health: ctxHealth, compactions, canCompact, pending: compactPending, running: runState === "running", onCompact: () => void compactNow() }
+      : null;
   const cancelQueued = (id: string) => {
     api
       .dequeue(box.name, id.startsWith("fleet-") ? undefined : id)
@@ -1234,23 +1243,6 @@ export function Thread({
               </p>
             )}
 
-            {/* Context nearly full: warn before quality degrades — the advice is the point, and on a
-                Claude Code thread the fix is one click away. */}
-            {!sleeping && !loadingTrace && ctxHealth?.advice && !compactPending && (
-              <div className="enter flex flex-wrap items-center gap-x-3 gap-y-1.5" role="status">
-                <p className="text-attention-text text-micro">
-                  {ctxHealth.label} — {ctxHealth.advice}
-                </p>
-                {canCompact && (
-                  <Button size="xs" variant="outline" onClick={() => void compactNow()}>
-                    <Shrink className="size-3.5" />
-                    {runState === "running" ? "Compact after this turn" : "Compact now"}
-                  </Button>
-                )}
-              </div>
-            )}
-
-
             {((!sleeping && !loadingTrace && runState === "done") || (finished && (outcome || digest))) && pendingReplies.length === 0 && (
               <RunPill
                 events={events}
@@ -1381,6 +1373,7 @@ export function Thread({
         onFocusRequest={onFocusRequest}
         onReplyFailed={onReplyFailed}
         canCompact={canCompact}
+        context={contextStatus}
         seed={seed}
         phase={starting ? "starting" : showQuestion ? "asked" : idle ? "fresh" : undefined}
       />
