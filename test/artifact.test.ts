@@ -6,7 +6,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { safeWorkspacePath, classifyContentType } from "../src/artifact.ts";
+import { safeWorkspacePath, classifyContentType, contentDisposition } from "../src/artifact.ts";
 
 test("safeWorkspacePath accepts a bare relative file", () => {
   const r = safeWorkspacePath("report.md");
@@ -80,4 +80,14 @@ test("classifyContentType forces download for unknown/binary types", () => {
     inlineSafe: false,
   });
   assert.equal(classifyContentType("image.png").inlineSafe, false);
+});
+
+test("contentDisposition keeps an ASCII name as is and encodes any other name", () => {
+  assert.equal(contentDisposition("attachment", "report.md"), 'attachment; filename="report.md"');
+  assert.equal(contentDisposition("inline", 'a"b.txt'), "inline; filename=\"a_b.txt\"; filename*=UTF-8''a%22b.txt");
+  const v = contentDisposition("attachment", "отчёт 📊.txt");
+  assert.match(v, /^attachment; filename="[\x20-\x7e]+"; filename\*=UTF-8''/);
+  assert.equal(decodeURIComponent(v.split("UTF-8''")[1]), "отчёт 📊.txt");
+  // Node refuses a header value outside Latin-1; the result must always be a legal header.
+  assert.ok(/^[\t\x20-\x7e]*$/.test(v));
 });

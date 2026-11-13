@@ -117,6 +117,17 @@ export function classifyContentType(relPath: string): { contentType: string; inl
 }
 
 /**
+ * The Content-Disposition value for a file name (RFC 6266). Node refuses a header carrying any
+ * character outside Latin-1, so a raw `filename="отчёт.txt"` (or an emoji) failed the download with
+ * a 500; the ASCII `filename` is the fallback and `filename*` carries the real name, percent-encoded.
+ */
+export function contentDisposition(kind: "inline" | "attachment", name: string): string {
+  const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "file";
+  const encoded = encodeURIComponent(name).replace(/['()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
+  return ascii === name ? `${kind}; filename="${ascii}"` : `${kind}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+/**
  * Read a produced file out of a box, with the on-box realpath/regular-file/size checks.
  *
  * The remote script prints one of a few sentinel lines on rejection (so we never emit partial or

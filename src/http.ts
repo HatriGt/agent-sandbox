@@ -107,7 +107,7 @@ import { isSecretKey, probeMcpServer, boxSecretPolicy, boxExclusion } from "./mc
 import type { BoxView, WatchSnapshot } from "./monitor.js";
 import { listChanges, readDiff, readFullDiff, discardChange, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
-import { readArtifact } from "./artifact.js";
+import { contentDisposition, readArtifact } from "./artifact.js";
 import { existsSync, readFileSync } from "node:fs";
 import { withStartedBy, currentStartedBy, recordStartedBy, startedByOf, type StartedBy } from "./started-by.js";
 import { makeDispatcher, type StartRunInput } from "./trigger-dispatch.js";
@@ -1954,7 +1954,7 @@ app.get("/artifact", async (req: Request, res: Response) => {
     res.setHeader("Content-Type", result.contentType);
     res.setHeader("X-Content-Type-Options", "nosniff");
     const disposition = result.inlineSafe ? "inline" : "attachment";
-    res.setHeader("Content-Disposition", `${disposition}; filename="${name.replace(/["\\]/g, "_")}"`);
+    res.setHeader("Content-Disposition", contentDisposition(disposition, name));
     res.setHeader("Cache-Control", "no-store");
     // Text artifacts (source, logs, JSON, .env dumps) are redacted like the transcript; binaries pass.
     const buf = Buffer.isBuffer(result.data) ? result.data : Buffer.from(String(result.data));
