@@ -37,6 +37,8 @@ export interface DriverCapabilities {
   planEvents: boolean;
   /** A run can be continued in the same session with an answer / follow-up. */
   resume: boolean;
+  /** `/compact` summarizes the session in place (and the CLI auto-compacts on its own). */
+  compact?: boolean;
   modelSources: ModelSource[];
   /** One honest sentence shown under the badges when something is weaker than Claude Code's. */
   caveat?: string;

@@ -11,6 +11,7 @@ import { redactShapesSource } from "../redact.js";
 import {
   AGENT_LOG,
   AT_MARK,
+  COMPACT_MARK,
   DIFF_CLOSE,
   DIFF_MAX_BYTES,
   DIFF_MAX_LINES,
@@ -25,12 +26,16 @@ import {
   RESULT_MAX_BYTES,
   RESULT_MAX_LINES,
   RESULT_MAX_LINE_CHARS,
+  SUMMARY_CLOSE,
+  SUMMARY_MAX_BYTES,
+  SUMMARY_OPEN,
   THINK_CLOSE,
   THINK_OPEN,
   USAGE_OPEN,
 } from "./sentinels.js";
 import { AGENT_SYS_PROMPT } from "./prompts.js";
 import type { Driver } from "./types.js";
+import type { AutoCompactMode } from "../agent-kind.js";
 
 /**
  * Version-aware Claude Code install: (re)install iff the installed version differs from the pin.
@@ -186,6 +191,10 @@ export function streamFmtScript(): string {
     // message) — the number that says how full the window is; the result frame's input counters
     // are CUMULATIVE across the turn and answer "what did this turn cost" instead.
     `let ctx=0;` +
+    // A compact_boundary was just written: the next synthetic user message is its summary.
+    `let compacted=false;` +
+    // The model's context window, from the result frame's modelUsage (absent on older CLIs).
+    `function winOf(e){let m=0;for(const k in (e.modelUsage||{})){const v=Number((e.modelUsage[k]||{}).contextWindow)||0;if(v>m)m=v}return m}` +
     `function usum(u){return (u.input_tokens||0)+(u.cache_read_input_tokens||0)+(u.cache_creation_input_tokens||0)}` +
     // tool_use ids of TodoWrite calls: their result ("Todos have been modified successfully") is
     // noise once the plan block itself is in the log, so it is not written.
@@ -222,6 +231,21 @@ export function streamFmtScript(): string {
     // rendered as two "session started" lines back to back and read like the turn had restarted and
     // lost its context. It had not: same session, same conversation.
     `if(e.type==="system"&&e.subtype==="init"){if(!inited){inited=true;w("● session started (model "+(e.model||"?")+")")}return}` +
+    // Compaction (/compact, or Claude Code's own auto-compact when the window fills). Claude reports
+    // it as a `status: compacting` frame, then either `compact_result: failed` or a compact_boundary
+    // carrying the before/after token counts, then the summary the session continues from as a
+    // synthetic user message. Each phase becomes one ⟦compact⟧ line; the summary is kept (capped) so
+    // the reader can see what the agent still knows. After a boundary the window holds only the
+    // summary, so the context footprint drops to post_tokens until the next request reports again.
+    `if(e.type==="system"&&e.subtype==="status"){if(e.status==="compacting")w("${COMPACT_MARK} "+Date.now()+" start");` +
+    `else if(e.compact_result==="failed")w("${COMPACT_MARK} "+Date.now()+" failed "+oneLine(e.compact_error||"compaction failed"));return}` +
+    `if(e.type==="system"&&e.subtype==="compact_boundary"){const m=e.compact_metadata||{};const n=v=>Math.max(0,Math.round(Number(v)||0));` +
+    `if(m.post_tokens!=null)ctx=n(m.post_tokens);compacted=true;` +
+    `w("${COMPACT_MARK} "+Date.now()+" done trigger="+(m.trigger==="auto"?"auto":"manual")+" pre="+n(m.pre_tokens)+" post="+n(m.post_tokens)+" dur="+n(m.duration_ms));return}` +
+    `if(e.type==="user"&&e.message&&compacted&&e.isSynthetic){compacted=false;let t=txt(e.message.content).trim();` +
+    `t=t.replace(/^This session is being continued[^\\n]*\\n+/,"").replace(/^Summary:\\s*\\n/,"").trim();if(!t)return;` +
+    `let cut="";if(Buffer.byteLength(t,"utf8")>${SUMMARY_MAX_BYTES}){t=Buffer.from(t,"utf8").subarray(0,${SUMMARY_MAX_BYTES}).toString("utf8").replace(/\\ufffd+$/,"");cut="\\n… summary cut"}` +
+    `w("${SUMMARY_OPEN}\\n"+df(t)+cut+"\\n${SUMMARY_CLOSE}");return}` +
     `if(e.type==="assistant"&&e.message){if(e.message.usage)ctx=usum(e.message.usage)+(e.message.usage.output_tokens||0);for(const b of e.message.content||[]){` +
     // Trailing "\n" => a BLANK line after each text block. Consecutive assistant text blocks are
     // separate markdown documents (a table, then a fenced block); glued with a single newline the
@@ -270,7 +294,9 @@ export function streamFmtScript(): string {
     // Turn-end usage sentinel: cumulative in/out from the result frame, context footprint from the
     // last assistant message. Written raw (not via w's redaction path it still goes through, but not
     // defanged) — this is FORMATTER structure, like ⟦plan⟧, so it must parse at column 0.
-    `if(e.usage){w("${USAGE_OPEN} in="+usum(e.usage)+" out="+(e.usage.output_tokens||0)+" ctx="+ctx)}return}` +
+    // A compaction-only turn (`/compact`) has no model request of its own (num_turns 0, zero usage):
+    // its usage line would read as "0 tokens", so only the compact line speaks for it.
+    `if(e.usage&&!(e.num_turns===0&&usum(e.usage)===0&&!e.usage.output_tokens)){const win=winOf(e);w("${USAGE_OPEN} in="+usum(e.usage)+" out="+(e.usage.output_tokens||0)+" ctx="+ctx+(win?" win="+win:""))}return}` +
     `}catch(_){}}`;
   // base64 the whole script and decode in the box: shipping a large JS blob through
   // shell/SSH/msb-exec quoting was corrupting it (trailing garbage → SyntaxError at load).
@@ -326,6 +352,18 @@ export function claudeLaunchSh(resume: boolean): string {
   return `${claude} 2>> ${AGENT_LOG} | node "$HOME/.claude/stream-fmt.js" ${AGENT_LOG}; `;
 }
 
+/**
+ * Claude Code auto-compacts once the context reaches its window minus a ~33K reserve. "early" shrinks
+ * the window it compacts against so that happens at about 100K; "off" disables it (the thread warns
+ * and /compact still works). "standard" sets nothing: Claude Code's own default.
+ */
+export const EARLY_COMPACT_WINDOW = 133_000;
+export function autoCompactEnv(mode: AutoCompactMode | undefined): string[] {
+  if (mode === "off") return ["-e", "DISABLE_AUTO_COMPACT=1"];
+  if (mode === "early") return ["-e", `CLAUDE_CODE_AUTO_COMPACT_WINDOW=${EARLY_COMPACT_WINDOW}`];
+  return [];
+}
+
 export const claudeDriver: Driver = {
   kind: "claude",
   label: "Claude Code",
@@ -336,6 +374,7 @@ export const claudeDriver: Driver = {
     sideQuestion: true,
     planEvents: true,
     resume: true,
+    compact: true,
     modelSources: ["anthropic"],
   },
   install: (cfg) => claudeInstallSh(cfg.claudeCodeVersion),

@@ -74,6 +74,26 @@ export const DIFF_CLOSE = "⟦/diff⟧";
 export const USAGE_OPEN = "⟦usage⟧";
 
 /**
+ * Context compaction (Claude Code's /compact, manual or automatic): one column-0 line per phase,
+ *   `⟦compact⟧ <ms> start`
+ *   `⟦compact⟧ <ms> done trigger=manual|auto pre=N post=N dur=MS`
+ *   `⟦compact⟧ <ms> failed <reason>`
+ * followed, on success, by the summary the agent continues from inside ⟦summary⟧…⟦/summary⟧. The
+ * trace parser folds them into one `compact` event the thread draws as a divider.
+ */
+export const COMPACT_MARK = "⟦compact⟧";
+export const SUMMARY_OPEN = "⟦summary⟧";
+export const SUMMARY_CLOSE = "⟦/summary⟧";
+/** The summary is for the reader to skim what the agent kept; past this it is cut, and says so. */
+export const SUMMARY_MAX_BYTES = 24576;
+
+/** `/compact` or `/compact <instructions>`: a request to compact, never a message to the agent. */
+export const COMPACT_COMMAND_RE = /^\/compact(?:\s|$)/;
+export function isCompactCommand(text: string): boolean {
+  return COMPACT_COMMAND_RE.test(text.trim());
+}
+
+/**
  * Wall-clock stamp: a column-0 `⟦at⟧ <epoch ms>` line written just before an assistant text block, a
  * tool call row, a tool result block and a ⟦you⟧ follow-up. The log had no clock of its own, so the
  * transcript could not say WHEN something was said or how long a command took; the parser carries

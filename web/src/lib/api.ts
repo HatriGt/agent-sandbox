@@ -81,6 +81,8 @@ export interface DriverCapabilities {
   sideQuestion: boolean;
   planEvents: boolean;
   resume: boolean;
+  /** `/compact` works (Claude Code). */
+  compact?: boolean;
   modelSources: string[];
   caveat?: string;
 }
@@ -98,6 +100,8 @@ export interface AgentPrefs {
   defaultAgent: AgentId;
   /** The model the composer preselects for this owner; absent = the agent's own default. */
   defaultModel?: string;
+  /** When Claude Code compacts the conversation on its own; absent = "standard". */
+  autoCompact?: "standard" | "early" | "off";
   agents: AgentChoice[];
 }
 
@@ -1139,7 +1143,7 @@ export const api = {
   agentPrefs: (signal?: AbortSignal) =>
     fetch(url("/agent-prefs.json"), { headers: authHeaders, signal }).then(parse<AgentPrefs>),
   /** `defaultModel: ""` clears the preference (the agent's own default applies). */
-  saveAgentPrefs: (body: { defaultAgent: AgentId; allowPartialSupervision?: boolean; defaultModel?: string }) => post<AgentPrefs>("/agent-prefs.json", body),
+  saveAgentPrefs: (body: { defaultAgent: AgentId; allowPartialSupervision?: boolean; defaultModel?: string; autoCompact?: "standard" | "early" | "off" }) => post<AgentPrefs>("/agent-prefs.json", body),
 
   /** Model providers: the caller's own keys/endpoints. Keys come back masked only. */
   providers: (signal?: AbortSignal) => fetch(url("/providers.json"), { headers: authHeaders, signal }).then(parse<ProvidersResponse>),

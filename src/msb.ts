@@ -20,7 +20,7 @@ import { MEMORY_ALL_MD, MEMORY_MD, memorySetup } from "./drivers/memory-tool.js"
 import { repoSlugFromUrl } from "./setup-store.js";
 import { harnessPromptHint, reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
-import type { AgentKind } from "./agent-kind.js";
+import { loadAgentPrefs, type AgentKind } from "./agent-kind.js";
 import {
   ASK_ALLOWED_TOOLS,
   ASK_DIR,
@@ -51,10 +51,10 @@ import type { Config } from "./config.js";
 import { redactShapes, redactShapesSource } from "./redact.js";
 import { askSnapName } from "./snapshot.js";
 import { driverFor } from "./drivers/index.js";
-import { askHookScript, claudeDriver, claudeInstallSh, streamFmtScript } from "./drivers/claude.js";
+import { askHookScript, autoCompactEnv, claudeDriver, claudeInstallSh, streamFmtScript } from "./drivers/claude.js";
 import { ompInstallSh, ompSeedSh } from "./drivers/omp.js";
 import { NEED_HOOK, needSetup } from "./drivers/need.js";
-import { AGENT_LOG, AT_MARK, MCP_CONFIG_PATH, PROVIDER_ENV_PATH, QUESTION_MARK, USAGE_OPEN, YOU_MARK_CLOSE, YOU_MARK_OPEN } from "./drivers/sentinels.js";
+import { AGENT_LOG, AT_MARK, MCP_CONFIG_PATH, isCompactCommand, PROVIDER_ENV_PATH, QUESTION_MARK, USAGE_OPEN, YOU_MARK_CLOSE, YOU_MARK_OPEN } from "./drivers/sentinels.js";
 import { INBOX_APPEND_SH, INBOX_RESET_SH, INBOX_TAKE_DELIVERED_SH, inboxLine, type InboxLine } from "./drivers/inbox-gate.js";
 import { isStalled } from "./stall.js";
 import { EXIT_DISK_FULL } from "./run-health.js";
@@ -1057,6 +1057,9 @@ export function agentEnvFlags(
   if (rulesHint) flags.push("-e", `AGENT_RULES=${rulesHint}`);
   // Driver-specific env (e.g. omp's "smol" model role) — see each driver's envFlags.
   flags.push(...driver.envFlags(cfg));
+  // When Claude Code compacts on its own: the box OWNER's setting (the ambient owner — every run and
+  // resume lane executes under withOwner), read per turn so a change reaches running threads too.
+  if (agent === "claude") flags.push(...autoCompactEnv(loadAgentPrefs().autoCompact));
   // Non-Anthropic-native drivers (codex, opencode) read their model from $AGENT_MODEL (the launch
   // passes it as -m only when set, so an unset model means the CLI's own default).
   if (agent !== "claude" && agent !== "omp" && modelOverride) flags.push("-e", `AGENT_MODEL=${modelOverride}`);
@@ -2244,11 +2247,13 @@ export async function resumeAgentTask(
     // driver install for boxes bootstrapped before this thread's first turn — a no-op when present.
     ...extraDriverSetup(cfg, agent).map((sh) => exec(cfg, box, sh)),
   ]);
+  // `/compact` must reach Claude Code as the whole prompt — a skill hint prefixed to it would turn the
+  // command into an ordinary message.
   // The cwd is read from the box, not taken from `repos`: every resume path (dashboard follow-up,
   // inbox delivery, send-now, the credential broker, an elicited answer) only has a box id and used
   // to pass undefined here, which resumed a single-repo box in /workspace and lost the session.
   const workdir = repos?.length ? agentWorkdir(repos) : await boxAgentWorkdir(cfg, box);
-  const r = await msb(cfg, ["exec", box, ...env, ...skillHintFlags(box, message, skills, false), "--", "sh", "-lc", guardedAgentSh(workdir, true, agent)]);
+  const r = await msb(cfg, ["exec", box, ...env, ...(isCompactCommand(message) ? [] : skillHintFlags(box, message, skills, false)), "--", "sh", "-lc", guardedAgentSh(workdir, true, agent)]);
   const full = diskFullFromLaunch(r.stdout);
   if (full) throw new DiskFullError(box, full.freeKb, full.totalKb);
   return r;

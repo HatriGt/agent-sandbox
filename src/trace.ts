@@ -40,8 +40,27 @@ export type TraceEvent =
   | { kind: "memory"; note: string; text: string; area?: string; updated?: boolean; at?: number }
   /** A question the operator answered; the answer follows as the next `you` event. */
   | { kind: "ask"; text: string }
-  /** Cumulative token usage stamped by the formatter at the end of a turn (⟦usage⟧ sentinel). */
-  | { kind: "usage"; inputTokens: number; outputTokens: number; contextTokens: number };
+  /**
+   * Cumulative token usage stamped by the formatter at the end of a turn (⟦usage⟧ sentinel).
+   * `contextWindow`: the model's window as the CLI reported it; absent on older logs.
+   */
+  | { kind: "usage"; inputTokens: number; outputTokens: number; contextTokens: number; contextWindow?: number }
+  /**
+   * A context compaction (⟦compact⟧): `running` from its start line until the done/failed line folds
+   * into the same event. `trigger` is "manual" (/compact) or "auto" (the window filled); the token
+   * counts are the context before and after; `summary` is what the agent continues from.
+   */
+  | {
+      kind: "compact";
+      state: "running" | "done" | "failed";
+      trigger?: "manual" | "auto";
+      preTokens?: number;
+      postTokens?: number;
+      ms?: number;
+      error?: string;
+      summary?: string;
+      at?: number;
+    };
 
 export interface PlanItem {
   text: string;
@@ -127,7 +146,11 @@ const ASK_CLOSE = "⟦/ask⟧";
 // One line per turn, stamped by the formatter from the stream-json usage fields it used to drop:
 // `⟦usage⟧ in=<total input> out=<total output> ctx=<last request's context footprint>`. Column-0
 // only, like every sentinel; model text is defanged with a ZWSP so it can never forge one.
-const USAGE_RE = /^⟦usage⟧ in=(\d+) out=(\d+) ctx=(\d+)$/;
+const USAGE_RE = /^⟦usage⟧ in=(\d+) out=(\d+) ctx=(\d+)(?: win=(\d+))?$/;
+// `⟦compact⟧ <ms> start|done …|failed <reason>` (src/drivers/sentinels.ts COMPACT_MARK).
+const COMPACT_RE = /^⟦compact⟧ (\d{10,}) (start|done|failed)(?: (.*))?$/;
+const SUMMARY_OPEN = "⟦summary⟧";
+const SUMMARY_CLOSE = "⟦/summary⟧";
 const PLAN_LINE = /^\[( |x|>)\]\s*(.*)$/;
 // Wall-clock stamp (src/msb.ts AT_MARK): `⟦at⟧ <epoch ms>` on its own column-0 line, written just
 // before the text / tool call / result / follow-up it dates. Never an event itself.
@@ -174,6 +197,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   // Wall-clock of the plan block currently being collected, from the open sentinel's suffix.
   let planAt: number | undefined;
   let ask: string[] | null = null;
+  let summary: string[] | null = null;
   // A ⟦diff⟧ block collects into the most recent tool event's `diff`.
   let diff: string[] | null = null;
 
@@ -267,6 +291,55 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       target = null;
       continue;
     }
+    if (summary !== null) {
+      if (line === SUMMARY_CLOSE) {
+        const text = summary.join("\n").trim();
+        // The summary belongs to the compaction it follows; one with none above (tail cut) drops.
+        const last = events[events.length - 1];
+        if (last?.kind === "compact" && text) last.summary = text;
+        summary = null;
+      } else summary.push(line);
+      continue;
+    }
+    if (line === SUMMARY_OPEN) {
+      flushProse();
+      summary = [];
+      target = null;
+      continue;
+    }
+    const compact = line.match(COMPACT_RE);
+    if (compact) {
+      flushProse();
+      target = null;
+      const at = Number(compact[1]);
+      const rest = compact[3] ?? "";
+      // The done/failed line completes the compaction its start line opened (nothing else is written
+      // between them); without a start in view it stands alone.
+      const last = events[events.length - 1];
+      const open = last?.kind === "compact" && last.state === "running" ? last : null;
+      if (compact[2] === "start") {
+        events.push({ kind: "compact", state: "running", at });
+      } else if (compact[2] === "done") {
+        const num = (k: string) => {
+          const m = rest.match(new RegExp(`(?:^| )${k}=(\\d+)`));
+          return m ? Number(m[1]) : undefined;
+        };
+        const ev = open ?? (events[events.push({ kind: "compact", state: "done", at }) - 1] as Extract<TraceEvent, { kind: "compact" }>);
+        ev.state = "done";
+        ev.trigger = /(?:^| )trigger=auto\b/.test(rest) ? "auto" : "manual";
+        const pre = num("pre");
+        const post = num("post");
+        const dur = num("dur");
+        if (pre) ev.preTokens = pre;
+        if (post) ev.postTokens = post;
+        if (dur) ev.ms = dur;
+      } else {
+        const ev = open ?? (events[events.push({ kind: "compact", state: "failed", at }) - 1] as Extract<TraceEvent, { kind: "compact" }>);
+        ev.state = "failed";
+        if (rest.trim()) ev.error = rest.trim();
+      }
+      continue;
+    }
     // A stamp only moves the clock: it neither flushes prose nor ends a result block, so a stamp
     // between two text blocks or between a call and its result changes nothing about the grouping.
     const stamp = line.match(AT_RE);
@@ -277,7 +350,13 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     const usage = line.match(USAGE_RE);
     if (usage) {
       flushProse();
-      events.push({ kind: "usage", inputTokens: Number(usage[1]), outputTokens: Number(usage[2]), contextTokens: Number(usage[3]) });
+      events.push({
+        kind: "usage",
+        inputTokens: Number(usage[1]),
+        outputTokens: Number(usage[2]),
+        contextTokens: Number(usage[3]),
+        ...(usage[4] ? { contextWindow: Number(usage[4]) } : {}),
+      });
       target = null;
       continue;
     }

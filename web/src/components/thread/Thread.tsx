@@ -1,6 +1,6 @@
 import * as React from "react";
 import { lazyRetry } from "@/lib/lazy-retry";
-import { ArrowUpRight, Bug, Compass, GitPullRequest, Loader2, Plus, Sparkles, Undo2 } from "lucide-react";
+import { ArrowUpRight, Bug, Compass, GitPullRequest, Loader2, Plus, Shrink, Sparkles, Undo2 } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
@@ -21,7 +21,9 @@ import { currentDiskTier, currentMemoryTier, deadlineLabel, deadlineOf, displayS
 import { MemoryBumpCard } from "./MemoryCard";
 import { useMemoryToasts } from "./MemoryToast";
 import { runStats, toMarkdown } from "@/lib/transcript";
-import { contextHealth, lastUsage } from "@/lib/context-health";
+import { contextHealthOf } from "@/lib/context-health";
+import { useAutoCompactMode } from "@/hooks/useAutoCompactMode";
+import { compactInstructions, isCompactCommand } from "@/lib/compact";
 import { matchReplies, stampReply, type PendingReply } from "@/lib/replies";
 import { parseMcpName } from "@/lib/mcp";
 import { McpConnectItem } from "./McpItem";
@@ -50,7 +52,7 @@ import type { TraceEvent } from "@/lib/trace";
 import { LiveRegistryContext, SayKeyContext } from "@/components/viz/live-blocks";
 import { VizFullscreenGate } from "@/components/viz/viz-fullscreen";
 import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
-import { AnsweredQuestionItem, Density, ExpandAll, LifecycleItem, MemoryItem, QueuedItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
+import { type CompactView, AnsweredQuestionItem, CompactItem, Density, ExpandAll, LifecycleItem, MemoryItem, QueuedItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
 import { ReasoningTrail, type TrailItem } from "./ReasoningTrail";
 import { PlanBoard, type PlanVariant } from "./PlanBoard";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -602,10 +604,10 @@ export function Thread({
   };
   // Context-window health from the trace's ⟦usage⟧ events: shown on the run summary, and as a
   // warning while running when the window is nearly full (the "start a fresh task" moment).
-  const ctxHealth = React.useMemo(() => {
-    const u = lastUsage(events);
-    return u ? contextHealth(u.contextTokens) : null;
-  }, [events]);
+  const compactMode = useAutoCompactMode();
+  // `/compact` runs only on Claude Code; other drivers would get the words as a task.
+  const canCompact = (box.agent ?? "claude") === "claude";
+  const ctxHealth = React.useMemo(() => contextHealthOf(events, compactMode), [events, compactMode]);
   const memPressure = !sleeping && runState === "running" && usageLevel(box.memUsage) === "critical";
   const oomKilled = !sleeping && runState !== "running" && exitCode === 137;
   const showMemoryCard = !!nextMemoryTier && (oomKilled || memPressure) && bumpedRef.current !== `${box.name}:${nextMemoryTier}`;
@@ -735,6 +737,29 @@ export function Thread({
     if ((box.queued?.length ?? 0) > 0) refreshQueue();
   }, [box.name, box.queued?.length, refreshQueue]);
   const queuedItems = queued ?? (box.queued ?? []).map((text, i) => ({ id: `fleet-${i}`, text }));
+  // A compaction already on its way (sent, queued, or underway): the "compact" advice steps aside.
+  const compactPending = React.useMemo(() => {
+    const last = groups[groups.length - 1];
+    return (
+      (last?.kind === "compact" && (last.state === "pending" || last.state === "running") && runState === "running") ||
+      pendingReplies.some((r) => isCompactCommand(r.text)) ||
+      queuedItems.some((q) => isCompactCommand(q.text))
+    );
+  }, [groups, runState, pendingReplies, queuedItems]);
+  const compactNow = async () => {
+    const live = runState === "running";
+    if (!live) echo("/compact");
+    try {
+      const res = await api.resume(box.name, "/compact");
+      if ("queued" in res && res.queued) {
+        refreshQueue();
+        toast("Compaction queued", { description: "It runs as its own turn once the agent finishes this one." });
+      }
+    } catch (e) {
+      if (!live) onReplyFailed?.("/compact");
+      toast.error("Could not compact", { description: e instanceof Error ? e.message : String(e) });
+    }
+  };
   const cancelQueued = (id: string) => {
     api
       .dequeue(box.name, id.startsWith("fleet-") ? undefined : id)
@@ -1011,7 +1036,7 @@ export function Thread({
   // Operator-message index per group: the task is 1, each you/asked group after it increments.
   const messageIndex = React.useMemo(() => {
     let n = 1;
-    return groups.map((g) => (g.kind === "you" || g.kind === "asked" ? ++n : n));
+    return groups.map((g) => (g.kind === "you" || g.kind === "asked" || (g.kind === "compact" && g.fromYou) ? ++n : n));
   }, [groups]);
   const messageCount = messageIndex[messageIndex.length - 1] ?? 1;
   const editMessage = React.useCallback((text: string) => setSeed({ text, n: Date.now() }), []);
@@ -1168,8 +1193,12 @@ export function Thread({
                 in its place. One that is withdrawn (delivery failed) folds away as before. */}
             <AnimatePresence initial={false} custom={{ still, instant: echoesLanded }}>
               {pendingReplies.filter((r) => !(optimisticAsk && r.text === sentAnswer)).map((r) => (
-                <Rise key={r.id} still={still} className="mt-5">
-                  <YouItem text={r.text} noEnter />
+                <Rise key={r.id} still={still} className={isCompactCommand(r.text) ? "mt-3" : "mt-5"}>
+                  {isCompactCommand(r.text) ? (
+                    <CompactItem c={{ state: "pending", trigger: "manual", instructions: compactInstructions(r.text) || undefined }} live />
+                  ) : (
+                    <YouItem text={r.text} noEnter />
+                  )}
                 </Rise>
               ))}
             </AnimatePresence>
@@ -1205,11 +1234,20 @@ export function Thread({
               </p>
             )}
 
-            {/* Context nearly full: warn before quality degrades — the advice is the point. */}
-            {!sleeping && !loadingTrace && ctxHealth?.level === "critical" && (
-              <p className="text-attention-text enter text-micro" role="status">
-                {ctxHealth.label} — {ctxHealth.advice}
-              </p>
+            {/* Context nearly full: warn before quality degrades — the advice is the point, and on a
+                Claude Code thread the fix is one click away. */}
+            {!sleeping && !loadingTrace && ctxHealth?.advice && !compactPending && (
+              <div className="enter flex flex-wrap items-center gap-x-3 gap-y-1.5" role="status">
+                <p className="text-attention-text text-micro">
+                  {ctxHealth.label} — {ctxHealth.advice}
+                </p>
+                {canCompact && (
+                  <Button size="xs" variant="outline" onClick={() => void compactNow()}>
+                    <Shrink className="size-3.5" />
+                    {runState === "running" ? "Compact after this turn" : "Compact now"}
+                  </Button>
+                )}
+              </div>
             )}
 
 
@@ -1342,6 +1380,7 @@ export function Thread({
         }}
         onFocusRequest={onFocusRequest}
         onReplyFailed={onReplyFailed}
+        canCompact={canCompact}
         seed={seed}
         phase={starting ? "starting" : showQuestion ? "asked" : idle ? "fresh" : undefined}
       />
@@ -1525,6 +1564,12 @@ const GroupRow = React.memo(function GroupRow({
       );
     case "memory":
       return <MemoryItem notes={g.notes} />;
+    case "compact":
+      return (
+        <div className="mt-3">
+          <CompactItem c={g} live={live} />
+        </div>
+      );
     case "say":
       return (
         <div data-say className="min-w-0">
@@ -1548,7 +1593,9 @@ type TraceGroup =
   | { kind: "think"; text: string; ms?: number }
   | { kind: "work"; items: TrailItem[] }
   | { kind: "plan"; board: TaskBoard }
-  | { kind: "memory"; notes: { note: string; text: string; area?: string; updated?: boolean }[] };
+  | { kind: "memory"; notes: { note: string; text: string; area?: string; updated?: boolean }[] }
+  /** A compaction; `fromYou` when a `/compact` the user sent opened it (it counts as their message). */
+  | ({ kind: "compact"; fromYou?: boolean } & CompactView);
 
 function groupTrace(events: TraceEvent[]): TraceGroup[] {
   const out: TraceGroup[] = [];
@@ -1579,6 +1626,27 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
         if (prior && prior.kind === "lifecycle" && modelOf(prior.label) === modelOf(e.label)) continue;
       }
       out.push({ kind: "lifecycle", label: sentence(e.label), detail: e.detail });
+    } else if (e.kind === "you" && isCompactCommand(e.text)) {
+      // `/compact` is a seam, not a bubble: it opens the divider its ⟦compact⟧ lines then fill in.
+      const instructions = compactInstructions(e.text);
+      out.push({ kind: "compact", state: "pending", trigger: "manual", fromYou: true, at: e.at, ...(instructions ? { instructions } : {}) });
+    } else if (e.kind === "compact") {
+      // Folds into the `/compact` that asked for it (only a repeated "session started" may sit
+      // between them); an automatic one, or one whose command is above the log tail, stands alone.
+      let j = out.length - 1;
+      while (j >= 0 && out[j].kind === "lifecycle") j--;
+      const prev = out[j];
+      const view = {
+        state: e.state,
+        ...(e.trigger ? { trigger: e.trigger } : {}),
+        ...(e.preTokens !== undefined ? { preTokens: e.preTokens } : {}),
+        ...(e.postTokens !== undefined ? { postTokens: e.postTokens } : {}),
+        ...(e.ms !== undefined ? { ms: e.ms } : {}),
+        ...(e.error ? { error: e.error } : {}),
+        ...(e.summary ? { summary: e.summary } : {}),
+      };
+      if (prev?.kind === "compact" && prev.state === "pending") out[j] = { ...prev, ...view };
+      else out.push({ kind: "compact", ...view, at: e.at });
     } else if (e.kind === "you") {
       // An answer to a question the transcript recorded (⟦ask⟧ … ⟦/ask⟧ right before) folds into one
       // "asked — answered" item, so the decision stays readable when scrolling back.

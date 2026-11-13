@@ -1,5 +1,5 @@
 import * as React from "react";
-import { X } from "lucide-react";
+import { Shrink, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { menuMotion } from "./MentionMenu";
@@ -17,6 +17,12 @@ import { SkillsEmpty } from "@/components/composer/Toolbar";
  * (unit-tested); the menu only exists while something matches, so typing `/workspace/...` just types.
  */
 
+/** A built-in command the composer offers next to the skills (e.g. `/compact`). */
+export interface SlashCommand {
+  name: string;
+  description: string;
+}
+
 const SHELL = "bg-popover text-popover-foreground absolute inset-x-2 z-20 rounded-xl border shadow-e3";
 
 export function SkillMenu({
@@ -25,6 +31,7 @@ export function SkillMenu({
   onClose,
   onMatches,
   side = "top",
+  commands = [],
 }: {
   state: SlashState;
   onPick: (name: string) => void;
@@ -33,6 +40,8 @@ export function SkillMenu({
   onMatches: (n: number) => void;
   /** "top" opens above the composer (thread), "bottom" below it (the Hub, near the top of the page). */
   side?: "top" | "bottom";
+  /** Built-in commands, listed above the skills; only offered where a command can run. */
+  commands?: SlashCommand[];
 }) {
   const cached = useCached("skills", (signal) => api.skills(signal));
   const [cursor, setCursor] = React.useState(0);
@@ -40,10 +49,14 @@ export function SkillMenu({
   const q = state.query.toLowerCase();
   const enabled = (cached.data?.skills ?? []).filter((s) => s.enabled).length;
   // A bare `/` with no enabled skills at all: say so and point at the Skills page, rather than nothing.
-  const empty = !!cached.data && enabled === 0 && q === "";
+  const cmds = React.useMemo(() => commands.filter((c) => c.name.startsWith(q)), [commands, q]);
+  const empty = !!cached.data && enabled === 0 && q === "" && cmds.length === 0;
   const matches = React.useMemo(
-    () => (cached.data?.skills ?? []).filter((s) => s.enabled && s.name.includes(q)),
-    [cached.data, q]
+    () => [
+      ...cmds.map((c) => ({ name: c.name, description: c.description, command: true })),
+      ...(cached.data?.skills ?? []).filter((s) => s.enabled && s.name.includes(q)).map((s) => ({ name: s.name, description: s.description, command: false })),
+    ],
+    [cached.data, q, cmds]
   );
 
   React.useEffect(() => {
@@ -84,13 +97,13 @@ export function SkillMenu({
           className={cn(SHELL, "max-h-72 overflow-y-auto p-1", side === "top" ? "bottom-full mb-2" : "top-full mt-2")}
     >
       <div className="text-muted-foreground flex items-center gap-2 px-2.5 py-1.5 text-micro">
-        <span className="flex-1">Run a skill with the rest of your message</span>
+        <span className="flex-1">{cmds.length && matches.length === cmds.length ? "Run a command" : cmds.length ? "Run a command, or a skill with the rest of your message" : "Run a skill with the rest of your message"}</span>
         <kbd className="rounded border px-1 py-px">↑↓</kbd>
         <kbd className="rounded border px-1 py-px">↵</kbd>
       </div>
       {matches.map((s, i) => (
         <button
-          key={s.name}
+          key={`${s.command ? "cmd" : "skill"}:${s.name}`}
           type="button"
           role="option"
           aria-selected={i === cursor}
@@ -109,7 +122,7 @@ export function SkillMenu({
               aria-hidden
             />
           )}
-          <SkillMark name={s.name} size={15} className="text-muted-foreground" />
+          {s.command ? <Shrink className="text-muted-foreground size-[15px] shrink-0" aria-hidden /> : <SkillMark name={s.name} size={15} className="text-muted-foreground" />}
           <span className="stamp shrink-0 font-medium">/{s.name}</span>
           <span className="text-muted-foreground min-w-0 truncate">{s.description}</span>
         </button>

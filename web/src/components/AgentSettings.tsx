@@ -2,6 +2,8 @@ import * as React from "react";
 import { Check, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AgentPrefs, type HarnessView } from "@/lib/api";
+import type { AutoCompactMode } from "@/lib/context-health";
+import { setAutoCompactMode } from "@/hooks/useAutoCompactMode";
 import { DriverBadges } from "@/components/DriverPicker";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/field";
@@ -26,11 +28,20 @@ const DESC: Record<AgentId, string> = {
  * launches, so switching is always safe. `harnesses` adds a per-driver count of saved harnesses
  * that pin it.
  */
+/** What each auto-compact setting does, in the reader's terms (src/agent-kind.ts AutoCompactMode). */
+const COMPACT_HINT: Record<AutoCompactMode, string> = {
+  standard:
+    "Claude Code threads summarize their conversation on their own when the context window nearly fills, and keep going. Send /compact in a thread to do it sooner. Applies from each thread's next turn.",
+  early:
+    "Threads summarize at about 100K tokens: leaner, cheaper turns on long threads, at the cost of detail from early in the conversation. Applies from each thread's next turn.",
+  off: "Threads never summarize on their own — send /compact when the meter fills. A run that reaches the limit stops with “prompt is too long”. Applies from each thread's next turn.",
+};
+
 export function AgentSettings({ harnesses = [] }: { harnesses?: HarnessView[] }) {
   const [prefs, setPrefs] = React.useState<AgentPrefs | null>(null);
   const [catalog, setCatalog] = React.useState<{ default: string; models: { id: string; label: string }[] } | null>(null);
   // Which control is saving: an agent id, or "model" for the select.
-  const [busy, setBusy] = React.useState<AgentId | "model" | null>(null);
+  const [busy, setBusy] = React.useState<AgentId | "model" | "compact" | null>(null);
   const [saved, setSaved] = React.useState(false);
 
   React.useEffect(() => {
@@ -46,12 +57,14 @@ export function AgentSettings({ harnesses = [] }: { harnesses?: HarnessView[] })
     return () => ctrl.abort();
   }, []);
 
-  const save = async (next: { defaultAgent: AgentId; defaultModel: string }, who: AgentId | "model") => {
+  const save = async (next: { defaultAgent: AgentId; defaultModel: string; autoCompact?: AutoCompactMode }, who: AgentId | "model" | "compact") => {
     if (!prefs || busy) return;
     setBusy(who);
     try {
       const choice = prefs.agents.find((a) => a.id === next.defaultAgent);
-      setPrefs(await api.saveAgentPrefs({ ...next, ...(choice?.supervised === false ? { allowPartialSupervision: true } : {}) }));
+      const saved = await api.saveAgentPrefs({ ...next, ...(choice?.supervised === false ? { allowPartialSupervision: true } : {}) });
+      setPrefs(saved);
+      setAutoCompactMode(saved.autoCompact);
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1500);
     } catch (e) {
@@ -159,6 +172,27 @@ export function AgentSettings({ harnesses = [] }: { harnesses?: HarnessView[] })
                 </option>
               ))}
               {prefs.defaultModel && catalog && !catalog.models.some((m) => m.id === prefs.defaultModel) && <option value={prefs.defaultModel}>{prefs.defaultModel} (not in the catalog)</option>}
+            </select>
+          )}
+        </Field>
+      )}
+      {prefs && (
+        <Field
+          label="Auto-compact"
+          className="mt-5 max-w-xl"
+          hint={COMPACT_HINT[prefs.autoCompact ?? "standard"]}
+        >
+          {(wire) => (
+            <select
+              {...wire}
+              className={cn(inputClass, "cursor-pointer")}
+              value={prefs.autoCompact ?? "standard"}
+              disabled={busy !== null}
+              onChange={(e) => void save({ defaultAgent: prefs.defaultAgent, defaultModel: prefs.defaultModel ?? "", autoCompact: e.target.value as AutoCompactMode }, "compact")}
+            >
+              <option value="standard">When the context is nearly full (default)</option>
+              <option value="early">Early — at about 100K tokens</option>
+              <option value="off">Off — only when I send /compact</option>
             </select>
           )}
         </Field>

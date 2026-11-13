@@ -16,6 +16,7 @@
  */
 import type { WatchSnapshot } from "./monitor.js";
 import type { Db } from "./db.js";
+import { isCompactCommand } from "./drivers/sentinels.js";
 
 export interface QueuedMessage {
   id: string;
@@ -97,6 +98,19 @@ export class Inbox {
     return list;
   }
 
+  /**
+   * Like {@link drain}, but only the next batch {@link deliveryBatchSize} allows: a queued `/compact`
+   * is its own turn, so the mail before it goes first and the mail after it waits for it.
+   */
+  drainNext(session: string): QueuedMessage[] {
+    const list = this.queues.get(session) ?? [];
+    const n = deliveryBatchSize(list);
+    const rest = list.slice(n);
+    if (rest.length) this.queues.set(session, rest);
+    else this.queues.delete(session);
+    return list.slice(0, n);
+  }
+
   /** Delete the durable rows of a delivered batch (call after resume resolves). */
   commitDelivered(session: string, batch: QueuedMessage[]): void {
     if (!batch.length) return;
@@ -121,6 +135,18 @@ export class Inbox {
   sessions(): string[] {
     return [...this.queues.keys()];
   }
+}
+
+/**
+ * How many queued messages go out in the next turn. Ordinary messages join into one follow-up, but a
+ * `/compact` must reach the CLI as the whole prompt (joined to other text it is just words to the
+ * model) — so it is delivered alone, in its place in the order.
+ */
+export function deliveryBatchSize(messages: QueuedMessage[]): number {
+  if (!messages.length) return 0;
+  if (isCompactCommand(messages[0].text)) return 1;
+  const next = messages.findIndex((m) => isCompactCommand(m.text));
+  return next < 0 ? messages.length : next;
 }
 
 /** Join queued messages into one follow-up for `claude -c`, in order, separated clearly. */
@@ -164,9 +190,9 @@ export function startInboxDelivery(opts: {
           if (!opts.inbox.list(session).length) continue;
         }
         if (snap.runState === "done" || snap.runState === "idle") {
-          const batch = opts.inbox.drain(session);
+          const batch = opts.inbox.drainNext(session);
           if (!batch.length) continue;
-          log(`[inbox] delivering ${batch.length} queued message(s) to ${session}`);
+          log(`[inbox] delivering ${batch.length} queued message(s) to ${session} (${opts.inbox.list(session).length} after it)`);
           try {
             await opts.resume(session, joinQueued(batch));
             opts.inbox.commitDelivered(session, batch);

@@ -28,6 +28,23 @@ export interface AgentPrefs {
   defaultAgent: AgentKind;
   /** The model the composer preselects for this owner (a model id of the default agent); absent = the agent's own default. */
   defaultModel?: string;
+  /** When Claude Code compacts the conversation on its own; absent = "standard" (its default). */
+  autoCompact?: AutoCompactMode;
+}
+
+/**
+ * Auto-compaction, for Claude Code threads. Claude Code summarizes the conversation by itself when
+ * the context window nearly fills; this picks when:
+ *  - "standard": Claude Code's default, close to the full window.
+ *  - "early": at about 100K tokens — a leaner context, cheaper and sharper turns on long threads,
+ *    at the cost of detail from early in the conversation.
+ *  - "off": never on its own; the thread warns as the window fills and /compact still works. A
+ *    run that hits the limit stops with "prompt is too long".
+ */
+export type AutoCompactMode = "standard" | "early" | "off";
+export const AUTO_COMPACT_MODES: readonly AutoCompactMode[] = ["standard", "early", "off"] as const;
+export function isAutoCompactMode(v: unknown): v is AutoCompactMode {
+  return v === "standard" || v === "early" || v === "off";
 }
 
 export const AGENT_PREFS_KIND = "agent-prefs";
@@ -37,15 +54,19 @@ export const AGENT_PREFS_KIND = "agent-prefs";
  * an error (silently coercing a typo'd pick to claude would look like the setting didn't save).
  */
 export function normalizeAgentPrefs(raw: unknown): AgentPrefs {
-  const r = (raw ?? {}) as { defaultAgent?: unknown; defaultModel?: unknown };
+  const r = (raw ?? {}) as { defaultAgent?: unknown; defaultModel?: unknown; autoCompact?: unknown };
   const model = modelOf(r.defaultModel);
+  if (r.autoCompact !== undefined && r.autoCompact !== null && r.autoCompact !== "" && !isAutoCompactMode(r.autoCompact)) {
+    throw new Error(`autoCompact must be one of: ${AUTO_COMPACT_MODES.join(", ")}`);
+  }
+  const compact = compactOf(r.autoCompact);
   if (r.defaultAgent === undefined || r.defaultAgent === null || r.defaultAgent === "") {
-    return { defaultAgent: "claude", ...model };
+    return { defaultAgent: "claude", ...model, ...compact };
   }
   if (!isAgentKind(r.defaultAgent)) {
     throw new Error(`defaultAgent must be one of: ${AGENT_KINDS.join(", ")}`);
   }
-  return { defaultAgent: r.defaultAgent, ...model };
+  return { defaultAgent: r.defaultAgent, ...model, ...compact };
 }
 
 /** A non-empty, short model id; anything else means "no preference". */
@@ -54,13 +75,18 @@ function modelOf(v: unknown): { defaultModel?: string } {
   return s ? { defaultModel: s } : {};
 }
 
+/** "standard" is the default and is not stored, so an untouched blob and a reset one read the same. */
+function compactOf(v: unknown): { autoCompact?: AutoCompactMode } {
+  return isAutoCompactMode(v) && v !== "standard" ? { autoCompact: v } : {};
+}
+
 /** The stored prefs for an owner; a missing/corrupt blob degrades to the default, never throws. */
 export function loadAgentPrefs(owner = ownerKey()): AgentPrefs {
   try {
     const raw = loadBlob(AGENT_PREFS_KIND, owner);
     if (!raw) return { defaultAgent: "claude" };
-    const parsed = JSON.parse(raw) as { defaultAgent?: unknown; defaultModel?: unknown };
-    return { defaultAgent: isAgentKind(parsed.defaultAgent) ? parsed.defaultAgent : "claude", ...modelOf(parsed.defaultModel) };
+    const parsed = JSON.parse(raw) as { defaultAgent?: unknown; defaultModel?: unknown; autoCompact?: unknown };
+    return { defaultAgent: isAgentKind(parsed.defaultAgent) ? parsed.defaultAgent : "claude", ...modelOf(parsed.defaultModel), ...compactOf(parsed.autoCompact) };
   } catch {
     return { defaultAgent: "claude" };
   }

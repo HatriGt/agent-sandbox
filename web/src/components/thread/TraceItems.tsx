@@ -1,5 +1,6 @@
 import * as React from "react";
-import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Clock, Copy, FileSearch, FileText, KeyRound, Loader2, Pencil, Play, Terminal, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Clock, Copy, FileSearch, FileText, KeyRound, Loader2, Pencil, Play, Shrink, Terminal, Undo2 } from "lucide-react";
+import { fmtK } from "@/lib/context-health";
 import { parseYouMessage } from "@/lib/you-message";
 import { inlineTokens, splitTokens } from "@/lib/inline-tokens";
 import { FileMark } from "@/lib/fileIcon";
@@ -70,6 +71,95 @@ export function LifecycleItem({ label, detail }: { label: string; detail?: strin
       <span className="label text-muted-foreground shrink-0">{label}</span>
       {detail && <span className="text-faint truncate text-micro">{detail}</span>}
       <span className="bg-border h-px flex-1" aria-hidden />
+    </div>
+  );
+}
+
+/** One compaction, as the thread draws it (built from a `/compact` turn and/or a ⟦compact⟧ event). */
+export interface CompactView {
+  /** pending: `/compact` sent, the CLI has not started it yet. */
+  state: "pending" | "running" | "done" | "failed";
+  trigger?: "manual" | "auto";
+  preTokens?: number;
+  postTokens?: number;
+  ms?: number;
+  error?: string;
+  summary?: string;
+  /** What the `/compact` asked the summary to keep. */
+  instructions?: string;
+  at?: number;
+}
+
+/**
+ * A compaction is a seam in the conversation, not a message: a divider across the column saying
+ * the agent now works from a summary of everything above it — and, once done, how much it shed and
+ * what the summary says. `live` is whether the run is still going (a pending/running one that is not
+ * live never finished).
+ */
+export function CompactItem({ c, live }: { c: CompactView; live: boolean }) {
+  const [open, setOpen] = React.useState(false);
+  const fresh = c.at !== undefined && Date.now() - c.at < 45_000;
+  const working = (c.state === "running" || c.state === "pending") && (live || fresh);
+  const stopped = !working && (c.state === "running" || c.state === "pending");
+  const label = working
+    ? "Compacting context…"
+    : c.state === "done"
+      ? c.trigger === "auto"
+        ? "Context compacted automatically"
+        : "Context compacted"
+      : c.state === "failed"
+        ? "Compaction failed"
+        : "Compaction did not finish";
+  const detail =
+    c.state === "done"
+      ? [
+          c.preTokens !== undefined && c.postTokens !== undefined ? `${fmtK(c.preTokens)} → ${fmtK(c.postTokens)} tokens` : null,
+          c.ms ? formatDuration(c.ms) : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
+      : c.state === "failed"
+        ? c.error
+        : stopped
+          ? "the turn ended before it reported back — the context is unchanged"
+          : c.instructions
+            ? `keeping: ${c.instructions}`
+            : c.trigger === "auto"
+              ? "the context window is nearly full"
+              : undefined;
+  const Icon = working ? Loader2 : c.state === "failed" || stopped ? AlertTriangle : Shrink;
+  return (
+    <div className="enter min-w-0 py-0.5" role={working ? "status" : undefined}>
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="bg-border h-px w-4 shrink-0" aria-hidden />
+        <span className={cn("label flex shrink-0 items-center gap-1.5", c.state === "failed" || stopped ? "text-attention-text" : working ? "text-foreground" : "text-muted-foreground")}>
+          <Icon className={cn("size-3.5", working && "animate-spin")} aria-hidden />
+          {label}
+        </span>
+        {detail && <span className="text-faint stamp min-w-0 truncate text-micro">{detail}</span>}
+        <span className="bg-border h-px min-w-4 flex-1" aria-hidden />
+        {c.summary && (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring flex shrink-0 cursor-pointer items-center gap-1 rounded-sm text-micro focus-visible:ring-2 focus-visible:outline-none"
+          >
+            {open ? <ChevronDown className="size-3.5" aria-hidden /> : <ChevronRight className="size-3.5" aria-hidden />}
+            Summary
+          </button>
+        )}
+      </div>
+      {c.summary && (
+        <Collapse open={open}>
+          <div className="bg-muted/40 text-muted-foreground mt-2 max-h-80 overflow-y-auto rounded-lg border px-3 py-2.5 text-meta">
+            <p className="text-faint mb-1.5 text-micro">What the agent kept — it continues from this summary.</p>
+            <div className="text-foreground/90 prose-sm">
+              <StreamingMarkdown text={c.summary} live={false} />
+            </div>
+          </div>
+        </Collapse>
+      )}
     </div>
   );
 }

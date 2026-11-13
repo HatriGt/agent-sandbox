@@ -15,6 +15,7 @@ import { MentionMenu, expandMentions, mentionAt, type MentionState } from "./Men
 import { useModelChoice } from "./ModelPicker";
 import { ComposerToolbar, ModelMenu, PlusMenu, SkillsMenu, ToolButton, useComposerMenus } from "@/components/composer/Toolbar";
 import { SkillMenu } from "./SkillMenu";
+import { COMPACT_COMMAND, isCompactCommand } from "@/lib/compact";
 import { slashAt, type SlashState } from "@/lib/slash";
 import { useInlineTags } from "@/hooks/useInlineTags";
 import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
@@ -45,6 +46,7 @@ export function SendBar({
   onFocusRequest,
   seed,
   onReplyFailed,
+  canCompact,
   phase,
   top,
 }: {
@@ -64,6 +66,8 @@ export function SendBar({
   onFocusRequest?: (focus: () => void) => void;
   /** The server could not deliver this reply: the parent drops the optimistic echo. */
   onReplyFailed?: (text: string) => void;
+  /** This thread's agent takes `/compact` (Claude Code): the slash menu offers it. */
+  canCompact?: boolean;
   /** Text to drop into the composer (e.g. a starter prompt); `n` changes to re-apply the same text.
    *  `append` adds it after a non-empty draft instead of replacing it (a quoted selection). */
   seed?: { text: string; n: number; append?: boolean; /** Joins the current line (a tag) instead of starting a paragraph. */ inline?: boolean; /** A picture that arrives with the text (a browser element, a screenshot). */ image?: { name: string; dataUrl: string; label?: string; note?: string } } | null;
@@ -133,6 +137,13 @@ export function SendBar({
   const textarea = () => document.getElementById("send-input") as HTMLTextAreaElement | null;
   // Skills and files are tags in the text itself, drawn as pills where they sit in the line.
   const tags = useInlineTags(value, setValue, textarea);
+  // `/compact` is offered only where it can run: first thing in the message, on a Claude Code thread.
+  const slashCommands = React.useMemo(
+    () => (canCompact && slash && value.slice(0, slash.start).trim() === "" ? [COMPACT_COMMAND] : []),
+    [canCompact, slash, value]
+  );
+  // The whole message is a command typed out in full: Enter sends it instead of re-picking it.
+  const typedCommand = !!slash && value.trim() === `/${slash.query}` && slashCommands.some((c) => c.name === slash.query);
 
   // Dictation: finalized phrases land at the caret through the same setValue path typing uses,
   // so drafts, @-mentions and /-skills keep working. Nothing auto-sends.
@@ -239,6 +250,11 @@ export function SendBar({
       setTimeout(() => sendRef.current(), 60);
       return;
     }
+    const compact = isCompactCommand(text);
+    if (compact && images.length) {
+      toast.error("Send /compact on its own", { description: "Images go with a normal message — remove them, or send them after the compaction." });
+      return;
+    }
     voice.stop();
     setSending(true);
     setError(null);
@@ -278,8 +294,10 @@ export function SendBar({
         if ("queued" in res && res.queued) {
           if (!busy) onReplyFailed?.(echo);
           onQueued?.();
-          toast("Sent to the agent", {
-            description: "It is mid-turn. It reads your message at its next step and replies in the thread.",
+          toast(compact ? "Compaction queued" : "Sent to the agent", {
+            description: compact
+              ? "It runs as its own turn once the agent finishes this one."
+              : "It is mid-turn. It reads your message at its next step and replies in the thread.",
             icon: <Clock className="size-4" />,
           });
         }
@@ -329,7 +347,7 @@ export function SendBar({
         <VoicePill state={voice.state} interim={voice.interim} />
         <AnimatePresence initial={false}>
           {mention && <MentionMenu key="mention" session={boxName} repos={repos} state={mention} onPick={pickFile} onClose={() => (mention && (dismissed.current.mention = mention.start), setMention(null))} />}
-          {!mention && slash && <SkillMenu key="skill" state={slash} onPick={pickSkill} onClose={() => (slash && (dismissed.current.slash = slash.start), setSlash(null))} onMatches={setSlashMatches} />}
+          {!mention && slash && <SkillMenu key="skill" state={slash} commands={slashCommands} onPick={pickSkill} onClose={() => (slash && (dismissed.current.slash = slash.start), setSlash(null))} onMatches={setSlashMatches} />}
         </AnimatePresence>
         <PromptInput
           value={value}
@@ -342,7 +360,7 @@ export function SendBar({
           enterSends={!touch}
           onSubmit={() => {
             if (mention) return; // Enter inside the mention menu picks a file
-            if (slash && slashMatches > 0) return; // Enter inside the skill menu picks a skill
+            if (slash && slashMatches > 0 && !typedCommand) return; // Enter inside the skill menu picks a skill
             void send();
           }}
           isLoading={sending}
@@ -414,7 +432,7 @@ export function SendBar({
                 e.preventDefault();
                 e.stopPropagation();
                 document.dispatchEvent(new CustomEvent("asb:mention-nav", { detail: e.key }));
-              } else if (slash && slashMatches > 0) {
+              } else if (slash && slashMatches > 0 && !(typedCommand && e.key === "Enter")) {
                 e.preventDefault();
                 e.stopPropagation();
                 document.dispatchEvent(new CustomEvent("asb:skill-nav", { detail: e.key }));

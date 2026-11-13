@@ -55,7 +55,8 @@ import { autoRetryOf, makeVerifyRetrier, verifyPlanOf, type VerifyPlan, type Ver
 import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
 import { AGENT_KINDS, AGENT_LABELS, isAgentKind, loadAgentPrefs, normalizeAgentPrefs, saveAgentPrefs } from "./agent-kind.js";
-import { assertSelectable, listDrivers } from "./drivers/index.js";
+import { assertSelectable, driverFor, listDrivers } from "./drivers/index.js";
+import { isCompactCommand } from "./drivers/sentinels.js";
 import {
   allProviderSecrets,
   CLI_LOGIN_POLICY,
@@ -2034,16 +2035,29 @@ app.post("/resume.json", async (req: Request, res: Response) => {
       }
       boxModels.set(session, model.trim());
     }
+    // `/compact` is a command to the CLI, not words for the agent: only drivers that implement it
+    // take it (an omp/codex thread would receive the literal text as a task).
+    const compact = isCompactCommand(message);
+    if (compact) {
+      const agent = (await watchHub.read(session)).agent ?? "claude";
+      if (!isAgentKind(agent) || !driverFor(agent).capabilities.compact) {
+        res.status(400).json({ error: `/compact works on Claude Code threads; this thread runs ${isAgentKind(agent) ? AGENT_LABELS[agent] : agent}.` });
+        return;
+      }
+    }
     // Mid-turn: a second `claude -c` would race the running one, so the message waits in the inbox
     // and is delivered the moment the run finishes. `force` (answering a question) bypasses.
     if (!force) {
       const snap = await watchHub.read(session);
       if (snap.runState === "running") {
+        // Anything typed after a queued /compact waits behind it, so it is not mirrored either.
+        const behindCompact = compact || inbox.list(session).some((m) => isCompactCommand(m.text));
         const q = inbox.enqueue(session, message);
         // Mirror it into the box: the gate delivers it at the agent's next tool call, inside the
-        // turn (src/drivers/inbox-gate.ts). Best-effort — turn-end delivery is the fallback.
-        mirrorInboxMessage(cfg, session, q).catch((e) => console.error(`[inbox] mirror to ${session} failed: ${(e as Error).message}`));
-        res.json({ queued: true, id: q.id, delivery: "next-step" });
+        // turn (src/drivers/inbox-gate.ts). Best-effort — turn-end delivery is the fallback. Never a
+        // /compact: compacting is its own turn, after this one ends.
+        if (!behindCompact) mirrorInboxMessage(cfg, session, q).catch((e) => console.error(`[inbox] mirror to ${session} failed: ${(e as Error).message}`));
+        res.json({ queued: true, id: q.id, delivery: behindCompact ? "turn-end" : "next-step" });
         return;
       }
     }
@@ -2393,7 +2407,11 @@ app.post("/agent-prefs.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const p = principalOf(res);
   try {
-    const prefs = normalizeAgentPrefs(req.body ?? {});
+    // A body without `autoCompact` (the driver picker) keeps the stored one: the two settings are
+    // saved from different controls and neither may silently reset the other.
+    const body = { ...((req.body ?? {}) as Record<string, unknown>) };
+    if (!("autoCompact" in body)) body.autoCompact = loadAgentPrefs(p.kind === "user" ? p.userId : OPERATOR_OWNER).autoCompact;
+    const prefs = normalizeAgentPrefs(body);
     assertSelectable(prefs.defaultAgent, (req.body as { allowPartialSupervision?: unknown } | undefined)?.allowPartialSupervision === true);
     saveAgentPrefs(prefs, p.kind === "user" ? p.userId : OPERATOR_OWNER);
     forgetOwnerAgent(ownerKey(p));

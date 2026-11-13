@@ -3,7 +3,8 @@ import { ArrowUpRight, Cpu, GitBranch, PanelRightClose } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { BoxView, FleetLifecycle } from "@/lib/api";
 import type { TraceEvent } from "@/lib/trace";
-import { contextHealth, lastUsage } from "@/lib/context-health";
+import { contextHealthOf, fmtK, lastUsage } from "@/lib/context-health";
+import { useAutoCompactMode } from "@/hooks/useAutoCompactMode";
 import { deadlineLabel, deadlineOf, displayState, fmtDuration, parseUptimeSec } from "@/lib/lifecycle";
 import { fmtAgo, friendlyName, isSleeping, threadTitle } from "@/lib/format";
 import { questionHeadline } from "@/lib/question";
@@ -160,7 +161,11 @@ function RunTab({
   const now = useNow(running);
   const elapsedMs = startedAt !== undefined ? Math.max(0, (running ? now : (endedAt ?? now)) - startedAt) : undefined;
   const usage = React.useMemo(() => lastUsage(events), [events]);
-  const ctx = usage ? contextHealth(usage.contextTokens) : null;
+  const compactMode = useAutoCompactMode();
+  const ctx = React.useMemo(() => contextHealthOf(events, compactMode), [events, compactMode]);
+  // Compactions this thread went through, newest last — the meter says how many and what the last did.
+  const compactions = React.useMemo(() => events.filter((e): e is Extract<TraceEvent, { kind: "compact" }> => e.kind === "compact" && e.state === "done"), [events]);
+  const lastCompact = compactions[compactions.length - 1];
   const deadline = React.useMemo(() => deadlineOf(box, lifecycle, now), [box, lifecycle, now]);
   const left = deadlineLabel(deadline);
   const sleeping = isSleeping(box);
@@ -192,15 +197,29 @@ function RunTab({
                 <div className="flex items-baseline justify-between text-meta">
                   <span className="text-muted-foreground">Context</span>
                   <span className={cn("stamp", ctx.level === "critical" ? "text-destructive" : ctx.level === "high" ? "text-attention-text" : "text-foreground")}>
-                    {Math.round(ctx.fraction * 100)}% · {fmtTokens(usage.contextTokens)}
+                    {Math.round(ctx.fraction * 100)}% · {fmtTokens(ctx.tokens)}
                   </span>
                 </div>
-                <div role="meter" aria-label={ctx.label} aria-valuenow={Math.round(ctx.fraction * 100)} aria-valuemin={0} aria-valuemax={100} className="bg-border/70 mt-1 h-1 overflow-hidden rounded-full">
+                <div role="meter" aria-label={ctx.label} aria-valuenow={Math.round(ctx.fraction * 100)} aria-valuemin={0} aria-valuemax={100} className="bg-border/70 relative mt-1 h-1 rounded-full">
                   <div
                     className={cn("h-full rounded-full transition-[width] duration-700", ctx.level === "critical" ? "bg-destructive" : ctx.level === "high" ? "bg-warn" : "bg-live")}
                     style={{ width: `${Math.max(ctx.fraction * 100, 2)}%` }}
                   />
+                  {/* Where Claude Code compacts on its own. */}
+                  {ctx.compactAt !== undefined && (
+                    <span aria-hidden className="bg-foreground/45 absolute -top-0.5 h-2 w-px" style={{ left: `${(ctx.compactAt / ctx.window) * 100}%` }} />
+                  )}
                 </div>
+                <p className="text-faint mt-1 text-micro leading-snug">
+                  {ctx.compactAt !== undefined ? `Compacts on its own at about ${fmtK(ctx.compactAt)} of ${fmtK(ctx.window)}` : `Auto-compact is off · ${fmtK(ctx.window)} window`}
+                  {lastCompact && (
+                    <>
+                      {" · "}
+                      compacted {compactions.length === 1 ? "once" : `${compactions.length}×`}
+                      {lastCompact.preTokens !== undefined && lastCompact.postTokens !== undefined && `, last ${fmtK(lastCompact.preTokens)} → ${fmtK(lastCompact.postTokens)}`}
+                    </>
+                  )}
+                </p>
                 {ctx.advice && <p className="text-attention-text mt-1.5 text-micro leading-snug">{ctx.advice}</p>}
               </div>
             )}
