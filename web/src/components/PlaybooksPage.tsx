@@ -14,6 +14,7 @@ import { Bar } from "@/components/thread/Skeletons";
 import { DataTable, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
 import { setPrefill } from "@/lib/draft";
 import { useGo } from "@/lib/route";
+import { StepPipeline, type PipelineStep } from "@/components/autopilot/StepPipeline";
 
 const EXAMPLE = `name: ship-feature
 description: implement, prove it with tests, then review your own diff
@@ -30,11 +31,17 @@ steps:
   - command: npm run lint
 `;
 
-const STARTERS: { name: string; line: string; yaml: string }[] = [
-  { name: "Ship a feature", line: "Implement → test → self-review → lint", yaml: EXAMPLE },
+const STARTERS: { name: string; line: string; steps: PipelineStep[]; yaml: string }[] = [
+  {
+    name: "Ship a feature",
+    line: "Implement, prove it with tests, then review your own diff",
+    steps: [{ kind: "agent", label: "Implement" }, { kind: "check", label: "npm test", retry: 2 }, { kind: "agent", label: "Review" }, { kind: "check", label: "npm run lint" }],
+    yaml: EXAMPLE,
+  },
   {
     name: "Fix a bug",
     line: "Reproduce with a failing test first, then fix until it passes",
+    steps: [{ kind: "agent", label: "Reproduce" }, { kind: "agent", label: "Fix" }, { kind: "check", label: "npm test", retry: 3 }],
     yaml: `name: fix-bug
 description: reproduce with a failing test, then fix
 steps:
@@ -52,6 +59,7 @@ steps:
   {
     name: "Keep CI green",
     line: "Make the change, then typecheck and test with retries",
+    steps: [{ kind: "agent", label: "Your task" }, { kind: "check", label: "tsc --noEmit", retry: 2 }, { kind: "check", label: "npm test", retry: 2 }],
     yaml: `name: ci-green
 description: change, then typecheck and test until green
 steps:
@@ -65,6 +73,7 @@ steps:
   {
     name: "Plan, then build",
     line: "Write a plan to PLAN.md, then implement it step by step",
+    steps: [{ kind: "agent", label: "Plan" }, { kind: "check", label: "test -s PLAN.md" }, { kind: "agent", label: "Build" }],
     yaml: `name: plan-then-build
 description: write a plan first, then follow it
 steps:
@@ -242,16 +251,20 @@ export function PlaybooksPage({ boxes, onAutomate }: { boxes: BoxView[]; onAutom
                 )}
               </SettingsSection>
               <SettingsSection id="starters" title="Start from a template" purpose="Opens in the editor — change anything before you save.">
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid gap-2.5 @2xl:grid-cols-2">
                   {STARTERS.map((t) => (
                     <button
                       key={t.name}
                       type="button"
                       onClick={() => setEditing({ yaml: t.yaml })}
-                      className="bg-card hover:bg-muted/50 focus-visible:ring-live/50 rounded-lg border px-4 py-3 text-left outline-none transition-colors focus-visible:ring-2"
+                      className="group bg-card hover:border-foreground/25 focus-visible:ring-ring flex flex-col rounded-xl border p-3.5 text-left outline-none transition-[border-color,transform] duration-150 focus-visible:ring-2 active:scale-[0.985]"
                     >
-                      <span className="text-foreground block text-meta font-medium">{t.name}</span>
-                      <span className="text-muted-foreground block text-micro">{t.line}</span>
+                      <span className="flex items-baseline justify-between gap-3">
+                        <span className="text-foreground text-meta font-medium">{t.name}</span>
+                        <span className="text-faint shrink-0 text-micro tabular">{t.steps.length} steps</span>
+                      </span>
+                      <span className="text-muted-foreground mt-0.5 text-micro">{t.line}</span>
+                      <StepPipeline steps={t.steps} className="mt-3" />
                     </button>
                   ))}
                 </div>

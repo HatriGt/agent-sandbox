@@ -5,8 +5,11 @@ import { ArrowLeft, ListChecks, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TabPanel } from "@/components/ui/animated-tabs";
 import { NumberTicker } from "@/components/ui/number-ticker";
+import { useNow } from "@/hooks/useNow";
+import { fmtCountdown, upcoming } from "@/components/autopilot/UpNext";
+import { automationLabel } from "@/components/Automations";
 import { cn } from "@/lib/utils";
-import { api, type BoxView } from "@/lib/api";
+import { api, type Automation, type BoxView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { Automations, seedAutomation } from "@/components/Automations";
 import { PlaybooksPage } from "@/components/PlaybooksPage";
@@ -50,40 +53,60 @@ export function AutopilotPage({
           <ArrowLeft className="size-4" />
           Back
         </Button>
-        <header className="mb-5">
+        <header className="mb-6">
           <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Autopilot</h1>
           <p className="text-muted-foreground mt-1 text-meta">Work that runs without you: when it starts, and how it gets done.</p>
+          <LiveLine triggers={triggers} onOpen={() => onTab("automations")} />
         </header>
-        <div role="tablist" aria-label="Autopilot" className="mb-5 flex gap-1 border-b">
+        <div
+          role="tablist"
+          aria-label="Autopilot"
+          className="bg-muted/60 mb-6 grid grid-cols-2 gap-1 rounded-xl p-1 @2xl:inline-grid @2xl:min-w-[34rem]"
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+            e.preventDefault();
+            const next = ORDER[(ORDER.indexOf(tab) + (e.key === "ArrowRight" ? 1 : ORDER.length - 1)) % ORDER.length];
+            onTab(next);
+            requestAnimationFrame(() => document.getElementById(`autopilot-tab-${next}`)?.focus());
+          }}
+        >
           {tabs.map((t) => {
             const on = t.id === tab;
             return (
               <button
                 key={t.id}
+                id={`autopilot-tab-${t.id}`}
                 role="tab"
                 type="button"
                 aria-selected={on}
+                tabIndex={on ? 0 : -1}
                 onClick={() => onTab(t.id)}
                 className={cn(
-                  "relative -mb-px flex cursor-pointer items-center gap-2 px-3 pt-1 pb-2.5 text-meta transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-t-md",
+                  "relative flex min-w-0 cursor-pointer items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   on ? "text-foreground" : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                {t.icon}
-                <span className="font-medium">{t.label}</span>
-                {t.count ? (
-                  <span className={cn("pop-in rounded-full px-1.5 text-micro tabular-nums", t.attention ? "text-attention-text ring-1 ring-inset ring-attention/40" : "bg-muted text-muted-foreground")} title={t.attention ? "Something is awaiting your approval" : undefined}>
-                    <NumberTicker value={t.count} from={t.count} />
-                  </span>
-                ) : null}
-                <span className="text-faint hidden text-micro lg:inline">{t.hint}</span>
                 {on && (
                   <motion.span
                     layoutId="autopilot-tab"
-                    className="bg-foreground absolute inset-x-2 bottom-0 h-0.5 rounded-full"
+                    className="bg-card absolute inset-0 rounded-lg border shadow-xs"
                     transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 40 }}
                   />
                 )}
+                <span className={cn("relative grid size-8 shrink-0 place-items-center rounded-lg transition-colors", on ? "bg-foreground text-background" : "bg-background/70 border")} aria-hidden>
+                  {t.icon}
+                </span>
+                <span className="relative min-w-0">
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-meta font-medium">{t.label}</span>
+                    {t.count ? (
+                      <span className={cn("pop-in rounded-full px-1.5 text-micro tabular-nums", t.attention ? "text-attention-text ring-1 ring-inset ring-attention/40" : "bg-muted text-muted-foreground")} title={t.attention ? "Something is awaiting your approval" : undefined}>
+                        <NumberTicker value={t.count} from={t.count} />
+                      </span>
+                    ) : null}
+                  </span>
+                  <span className="text-faint block truncate text-micro">{t.hint}</span>
+                </span>
               </button>
             );
           })}
@@ -103,5 +126,44 @@ export function AutopilotPage({
         </TabPanel>
       </div>
     </div>
+  );
+}
+
+/**
+ * One live sentence under the title: what is on, what is waiting on you, and the next run with a
+ * ticking countdown. Present facts from the automation list itself — never a total over the past.
+ */
+function LiveLine({ triggers, onOpen }: { triggers: Automation[] | undefined; onOpen: () => void }) {
+  const now = useNow(!!triggers?.length, 30_000);
+  if (!triggers?.length) return null;
+  const on = triggers.filter((t) => t.enabled).length;
+  const running = triggers.reduce((n, t) => n + (t.active > 0 ? 1 : 0), 0);
+  const waiting = triggers.filter((t) => t.status === "needs-ok" || (t.proposed && !t.enabled)).length;
+  const next = upcoming(triggers, now)[0];
+  return (
+    <p className="enter text-muted-foreground mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-micro" aria-live="polite">
+      <span className="inline-flex items-center gap-1.5">
+        <span className={cn("size-1.5 rounded-full", on ? "bg-ok" : "bg-muted-foreground/50")} aria-hidden />
+        <span className="text-foreground tabular font-medium">{on}</span> on
+        {triggers.length > on ? <span className="text-faint">· {triggers.length - on} paused</span> : null}
+      </span>
+      {running > 0 && (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="bg-live animate-pulse size-1.5 rounded-full" aria-hidden />
+          <span className="text-foreground tabular font-medium">{running}</span> running now
+        </span>
+      )}
+      {waiting > 0 && (
+        <button type="button" onClick={onOpen} className="text-attention-text ring-attention/40 inline-flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-0.5 font-medium ring-1 ring-inset">
+          {waiting} waiting on you
+        </button>
+      )}
+      {next && (
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          Next: <span className="text-foreground max-w-[16rem] truncate">{automationLabel(next.name)}</span>
+          <span className="tabular font-mono">{fmtCountdown(next.nextFire!, now)}</span>
+        </span>
+      )}
+    </p>
   );
 }

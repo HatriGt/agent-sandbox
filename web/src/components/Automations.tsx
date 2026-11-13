@@ -22,6 +22,8 @@ import { PrFollowupsPanel } from "@/components/PrFollowupsPanel";
 import { SchedulePicker, describeCron } from "@/components/SchedulePicker";
 import { RepoPicker } from "@/components/RepoPicker";
 import { DataTable, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
+import { UpNext } from "@/components/autopilot/UpNext";
+import { RecipeGallery, type Recipe } from "@/components/autopilot/Recipes";
 
 /**
  * Automations: runs that start themselves — on a schedule, on a webhook, on a GitHub event, or after
@@ -167,6 +169,73 @@ function blank(kind: AutomationKind = "schedule"): AutomationDraft {
   };
 }
 
+/* ─── recipes: the common automations, each a filled-in draft for the editor ─── */
+
+const RECIPES: Array<Recipe & { draft: () => AutomationDraft }> = [
+  {
+    id: "overnight",
+    icon: CalendarClock,
+    title: "Fix what broke overnight",
+    line: "Every weekday before you start: run the tests, and open a PR that fixes whatever fails.",
+    trigger: "Weekdays 02:00",
+    draft: () => ({ ...blank("schedule"), name: "Fix what broke overnight" }),
+  },
+  {
+    id: "issue-pr",
+    icon: GitPullRequest,
+    title: "Issue → pull request",
+    line: "Label an issue “agent” and a run picks it up, opens a PR, and comments its receipt on the issue.",
+    trigger: "Issue labelled agent",
+    draft: () => ({ ...blank("github"), name: "Fix issues labelled agent" }),
+  },
+  {
+    id: "review",
+    icon: Radar,
+    title: "Review every new PR",
+    line: "When a pull request opens, read the diff and post one review comment with concrete findings.",
+    trigger: "PR opened",
+    draft: () => ({ ...blank("watch"), name: "Review new pull requests" }),
+  },
+  {
+    id: "ci",
+    icon: FlaskConical,
+    title: "Watch CI on main",
+    line: "Every 30 minutes, look for failed runs on the default branch; fix or explain only when one failed.",
+    trigger: "Every 30 min",
+    quiet: true,
+    draft: () => {
+      const p = WATCH_PRESETS.find((w) => w.id === "ci")!;
+      return { ...blank("schedule"), name: p.name, spec: { ...blank("schedule").spec, cron: p.cron }, taskTemplate: p.task, quiet: true };
+    },
+  },
+  {
+    id: "deps",
+    icon: RotateCw,
+    title: "Weekly dependency refresh",
+    line: "Monday morning: upgrade outdated dependencies, keep the ones that pass the tests, open one PR.",
+    trigger: "Mondays 09:00",
+    draft: () => ({
+      ...blank("schedule"),
+      name: "Weekly dependency refresh",
+      spec: { ...blank("schedule").spec, cron: "0 9 * * 1" },
+      taskTemplate:
+        "Update outdated dependencies to their latest compatible versions. Run the build and the tests after each group of upgrades; drop any upgrade that breaks them. Open one PR listing what was upgraded and what was skipped and why.",
+    }),
+  },
+  {
+    id: "triage",
+    icon: ListChecks,
+    title: "Triage new issues",
+    line: "Every 15 minutes, read new issues with a label nobody answered yet, reproduce, and summarise what each needs.",
+    trigger: "Every 15 min",
+    quiet: true,
+    draft: () => {
+      const p = WATCH_PRESETS.find((w) => w.id === "issues")!;
+      return { ...blank("schedule"), name: p.name, spec: { ...blank("schedule").spec, cron: p.cron }, taskTemplate: p.task, quiet: true };
+    },
+  },
+];
+
 /** "in 3h" / "in 12 min" — epoch ms in the future. */
 function fmtIn(ms: number, now = Date.now()): string {
   const s = Math.max(0, Math.round((ms - now) / 1000));
@@ -255,6 +324,10 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
     }
   };
 
+  const pickRecipe = (id: string) => {
+    const r = RECIPES.find((x) => x.id === id);
+    if (r) setEditing({ id: null, draft: r.draft() });
+  };
   const names = Object.fromEntries((rows ?? []).map((r) => [r.id, r.name]));
   const counts = { all: rows?.length ?? 0, rules: rows?.filter((a) => !fromChat(a)).length ?? 0, chat: rows?.filter(fromChat).length ?? 0 };
   // Waiting on you first, then live ones, then paused.
@@ -279,7 +352,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
     <div className="min-w-0">
       {/* On a wide page the list and the PR rules sit side by side: the rules are settings you
           glance at, not something to scroll past the whole list to reach. */}
-      <div className="@6xl:grid @6xl:grid-cols-[minmax(0,1fr)_24rem] @6xl:items-start @6xl:gap-x-10">
+      <div className="@7xl:grid @7xl:grid-cols-[minmax(0,1fr)_24rem] @7xl:items-start @7xl:gap-x-10">
        <div className="min-w-0">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <p className="text-muted-foreground min-w-0 flex-[1_1_20rem] text-meta">
@@ -296,6 +369,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
             )}
           </AnimatePresence>
         </div>
+        {rows && rows.length > 0 && <UpNext rows={rows} glyph={GLYPH} label={automationLabel} onOpen={(a) => setEditing({ id: a.id, draft: toDraft(a) })} />}
         {rows && rows.length > 0 && (
           <div role="radiogroup" aria-label="Source" className="mb-3 flex flex-wrap gap-1.5">
             {SOURCES.map((s) => (
@@ -331,22 +405,26 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
           ) : !listed.length && source === "chat" ? (
             <EmptyState icon={CalendarClock} title="Nothing scheduled from a chat" line="Ask the agent to run something later or on a schedule and it shows up here." />
           ) : !listed.length ? (
-            <EmptyState
-              icon={Workflow}
-              title="No automations yet"
-              line="Start a run on a schedule, when a GitHub issue gets a label, when a webhook is called, or when another run finishes."
-              action={
+            <div className="space-y-6">
+              <div className="bg-card enter flex flex-wrap items-center gap-x-5 gap-y-3 rounded-xl border px-5 py-4">
+                <span className="bg-muted text-foreground grid size-10 shrink-0 place-items-center rounded-xl" aria-hidden>
+                  <Workflow className="size-5" strokeWidth={1.75} />
+                </span>
+                <div className="min-w-0 flex-[1_1_16rem]">
+                  <p className="text-foreground text-body font-medium">No automations yet</p>
+                  <p className="text-muted-foreground mt-0.5 text-meta">Pick a recipe below to get a filled-in draft, or start from a blank one.</p>
+                </div>
                 <Button size="sm" onClick={() => setEditing({ id: null, draft: blank() })}>
                   <Plus />
-                  New automation
+                  Blank automation
                 </Button>
-              }
-              facts={[
-                { icon: CalendarClock, text: "“Weekdays 02:00: fix whatever broke overnight” — in your own timezone." },
-                { icon: GitPullRequest, text: "Label an issue “agent” and a run picks it up, then comments its receipt on the issue." },
-                { icon: ShieldCheck, text: "One run at a time by default, PR-only, and a storm cap of 12 fires an hour." },
-              ]}
-            />
+              </div>
+              <RecipeGallery recipes={RECIPES} onPick={pickRecipe} />
+              <p className="text-muted-foreground flex items-start gap-2 text-micro">
+                <ShieldCheck className="mt-px size-3.5 shrink-0" aria-hidden />
+                One run at a time by default, PR-only, and a storm cap of 12 fires an hour. Schedules run in your own timezone.
+              </p>
+            </div>
           ) : (
             <AutomationList
               rows={listed}
@@ -359,8 +437,9 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
             />
           )}
         </Swap>
+        {rows && rows.length > 0 && rows.length < 4 && source !== "chat" && <RecipeGallery recipes={RECIPES} onPick={pickRecipe} heading="Add another from a recipe" className="mt-8" />}
        </div>
-        <div className="min-w-0 @6xl:sticky @6xl:top-6">
+        <div className="min-w-0 @7xl:sticky @7xl:top-6">
           <PrFollowupsPanel />
         </div>
       </div>
@@ -533,7 +612,9 @@ function AutomationList({
         );
         return (
           <span className="flex min-w-0 items-center gap-3">
-            <Glyph className={cn("size-4 shrink-0", a.enabled ? "text-live" : "text-muted-foreground")} strokeWidth={1.75} aria-hidden />
+            <span className={cn("grid size-7 shrink-0 place-items-center rounded-lg border", a.enabled ? "bg-background text-live" : "bg-muted/50 text-muted-foreground")} title={KIND_LABEL[a.kind]} aria-hidden>
+              <Glyph className="size-3.5" strokeWidth={1.75} />
+            </span>
             <span className="text-foreground min-w-0 truncate font-medium" title={a.name}>
               {automationLabel(a.name)}
             </span>
