@@ -10,7 +10,14 @@ import { cn } from "@/lib/utils";
  * `ChangedFilesCard` is the standalone card with a header: count, totals, expand/collapse all and
  * Open diff.
  */
-export type ChangedEntry = { path: string; additions: number; deletions: number; status?: string };
+export type ChangedEntry = {
+  path: string;
+  additions: number;
+  deletions: number;
+  status?: string;
+  /** false: a file the agent wrote that git does not count (outside a repo) — no +/− on its row. */
+  counted?: boolean;
+};
 
 type Stat = { additions: number; deletions: number };
 type DirNode = { kind: "dir"; name: string; path: string; children: TreeNode[]; stat: Stat };
@@ -108,7 +115,7 @@ export function ChangedFilesTree({
               <FileIcon path={n.path} size={14} className="text-muted-foreground/70 shrink-0" />
               <span className={cn("min-w-0 truncate font-mono text-xs", gone ? "text-muted-foreground line-through" : "text-foreground/85 group-hover:text-foreground")}>{n.name}</span>
               {(n.file.status === "untracked" || n.file.status === "added") && <span className="text-ok shrink-0 font-mono text-[10px]">new</span>}
-              <DiffStat {...n.stat} className="ml-auto text-[10px]" />
+              {n.file.counted === false ? <span className="ml-auto" /> : <DiffStat {...n.stat} className="ml-auto text-[10px]" />}
             </button>
           </li>
         );

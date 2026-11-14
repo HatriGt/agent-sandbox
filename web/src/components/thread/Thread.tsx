@@ -29,7 +29,7 @@ import { matchReplies, stampReply, type PendingReply } from "@/lib/replies";
 import { parseMcpName } from "@/lib/mcp";
 import { McpConnectItem } from "./McpItem";
 import { setPrefill } from "@/lib/draft";
-import { ProducedFiles } from "./ProducedFiles";
+import { ChangedFilesCard, type ChangedEntry } from "./ChangedFilesTree";
 import { useRunDigest } from "./DigestCard";
 import { useOutcome } from "./OutcomeCard";
 import { nextSteps } from "@/lib/next-steps";
@@ -242,6 +242,13 @@ export function Thread({
   // every 20s while running. Opening a file shows it in the side pane.
   const [changes, setChanges] = React.useState<ChangedFile[]>([]);
   const [changesLoading, setChangesLoading] = React.useState(false);
+  // The turn's changed files (T3 Code style): git's changes with their +/-, plus any file the agent
+  // wrote that git does not count (a report outside a repo), listed without counts.
+  const turnFiles = React.useMemo<ChangedEntry[]>(() => {
+    const out = new Map<string, ChangedEntry>(changes.map((c) => [c.path, c]));
+    for (const a of artifacts) if (!out.has(a.relPath)) out.set(a.relPath, { path: a.relPath, additions: 0, deletions: 0, status: "added", counted: false });
+    return [...out.values()];
+  }, [changes, artifacts]);
   // Each request is a new object so re-opening the same file (at another line) still navigates.
   const [openFile, setOpenFile] = React.useState<OpenRequest | null>(null);
   const openChange = React.useCallback((f: ChangedFile) => setOpenFile({ path: f.path }), []);
@@ -1241,7 +1248,11 @@ export function Thread({
               ))}
             </AnimatePresence>
 
-            {!sleeping && !loadingTrace && artifacts.length > 0 && runState !== "running" && pendingReplies.length === 0 && <ProducedFiles session={box.name} files={artifacts} />}
+            {!sleeping && !loadingTrace && turnFiles.length > 0 && runState !== "running" && pendingReplies.length === 0 && (
+              <Rise still={still}>
+                <ChangedFilesCard files={turnFiles} onOpen={(f) => setOpenFile({ path: f.path })} onOpenDiff={changes.length ? openReview : undefined} />
+              </Rise>
+            )}
 
             {/* MCP servers the install left out of this box: the agent is running without them. */}
             {!sleeping && !loadingTrace && !!snap?.mcpNotes?.length && !!mcpNotesText(snap.mcpNotes) && (
