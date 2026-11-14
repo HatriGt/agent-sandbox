@@ -57,7 +57,7 @@ const isAdmin = (p: Principal): p is Extract<Principal, { kind: "user" }> => p.k
 export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
   // An admin sees the operator's machines (mayAccess), so they see the operator's schedules too:
   // a run started over MCP with the bearer token has no user owner, and what its agent schedules
-  // would otherwise be invisible in the dashboard â€” the pill empty, the Scheduled tab blank.
+  // would otherwise be invisible in the dashboard — the pill empty, the Scheduled tab blank.
   const ownerOfP = (p: Principal, id?: string) => {
     if (p.kind !== "user") return OPERATOR_OWNER;
     if (id && isAdmin(p) && getTriggerById(c.db, id)?.owner === OPERATOR_OWNER) return OPERATOR_OWNER;
@@ -119,7 +119,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
   });
 
   // Live template preview: render a draft template against the trigger's last real payload (or a
-  // sample the editor supplies). Pure â€” nothing is started. Registered before
+  // sample the editor supplies). Pure — nothing is started. Registered before
   // /triggers/:id.json, which would otherwise match "preview.json".
   app.post("/triggers/preview.json", (req, res) => {
     if (!c.dashAuthed(req, res)) return;
@@ -177,13 +177,13 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     })
   );
 
-  // "Run now" â€” the test path. Renders against the last real payload when there is one.
+  // "Run now" — the test path. Renders against the last real payload when there is one.
   app.post("/triggers/:id/run.json", async (req, res) => {
     if (!c.dashAuthed(req, res)) return;
     const owner = ownerOfP(c.principalOf(res), req.params.id);
     const t = getTrigger(c.db, owner, req.params.id);
     if (!t) return void res.status(404).json({ error: "no such automation" });
-    if (t.kind === "chain") return void res.status(400).json({ error: "a chain runs after its parent â€” run the parent instead" });
+    if (t.kind === "chain") return void res.status(400).json({ error: "a chain runs after its parent — run the parent instead" });
     try {
       const payload = lastPayload(c.db, owner, t.id);
       const match = t.kind === "github" && payload ? matchGithub(t.spec, t.repos ?? [], githubEventOf(t.spec.event), payload) : t.kind === "watch" ? watchSubject(payload) : undefined;
@@ -194,7 +194,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     }
   });
 
-  // â”€â”€â”€ deliveries (bet 4): the short log of what arrived and what happened to it â”€â”€â”€
+  // ─── deliveries (bet 4): the short log of what arrived and what happened to it ───
   app.get("/triggers/:id/deliveries.json", (req, res) => {
     if (!c.dashAuthed(req, res)) return;
     const owner = ownerOfP(c.principalOf(res), req.params.id);
@@ -220,7 +220,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     }
   });
 
-  // â”€â”€â”€ the receiver â”€â”€â”€
+  // ─── the receiver ───
   const perTrigger = makeRateLimiter({ limit: 60, windowMs: 60_000 });
 
   type Out = { status: number; body: Record<string, unknown> };
@@ -294,7 +294,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
         return { status: 202, body: { ok: true, followup: true } };
       }
     }
-    // Stored for the editor's preview â€” redacted like every other stored text.
+    // Stored for the editor's preview — redacted like every other stored text.
     try {
       savePayload(c.db, t.id, JSON.parse(c.redact(JSON.stringify(payload))));
     } catch {

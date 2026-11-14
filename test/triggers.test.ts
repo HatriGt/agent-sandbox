@@ -32,12 +32,12 @@ const box = makeSecretBox(crypto.randomBytes(32));
 
 test("cron: parse, next fire in UTC and in the owner's timezone", () => {
   const c = parseCron("0 2 * * 1-5");
-  // Wed 2026-09-30 10:00Z â†’ next weekday 02:00 UTC is Thu 2026-10-01 02:00Z.
+  // Wed 2026-09-30 10:00Z → next weekday 02:00 UTC is Thu 2026-10-01 02:00Z.
   const from = Date.UTC(2026, 8, 30, 10, 0);
   assert.equal(nextFire(c, from, "UTC"), Date.UTC(2026, 9, 1, 2, 0));
   // 02:00 in Berlin (CEST, UTC+2) is 00:00Z.
   assert.equal(nextFire(c, from, "Europe/Berlin"), Date.UTC(2026, 9, 1, 0, 0));
-  // Friday evening â†’ Monday.
+  // Friday evening → Monday.
   assert.equal(nextFire(c, Date.UTC(2026, 9, 2, 12, 0), "UTC"), Date.UTC(2026, 9, 5, 2, 0));
   assert.equal(nextFire(parseCron("*/15 * * * *"), Date.UTC(2026, 8, 30, 10, 7), "UTC"), Date.UTC(2026, 8, 30, 10, 15));
   assert.throws(() => parseCron("61 * * * *"));
@@ -91,7 +91,7 @@ test("dedupe: delivery id and body hash are claimed once", () => {
   assert.ok(!claimDelivery(db, "t1", keys, 2000), "replay rejected");
   assert.ok(!claimDelivery(db, "t1", deliveryKeys({ "x-github-delivery": "d-2" }, Buffer.from("{}")), 3000), "same body, new id rejected");
   assert.ok(claimDelivery(db, "t2", keys, 3000), "per trigger");
-  // Generic: short body window â€” the same ping later is legitimate.
+  // Generic: short body window — the same ping later is legitimate.
   const g = deliveryKeys({}, Buffer.from("ping"));
   assert.ok(claimDelivery(db, "t3", g, 0, 7 * 86400_000, 60_000));
   assert.ok(!claimDelivery(db, "t3", g, 30_000, 7 * 86400_000, 60_000));
