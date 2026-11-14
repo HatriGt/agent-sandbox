@@ -912,7 +912,10 @@ export default function App() {
           {/* The two rail bodies crossfade (the column width tweens underneath), so a collapse reads
               as one motion instead of a jump-cut between two layouts. */}
           {collapsed ? (
-            <nav key="rail" className="rail-reveal flex flex-1 flex-col items-center gap-1.5 px-2 pt-1 pb-3" aria-label="Sections">
+            <nav key="rail" className="rail-reveal flex min-h-0 flex-1 flex-col items-center gap-1.5 overflow-y-auto px-2 pt-1 pb-3 [scrollbar-width:none]" aria-label="Sections">
+              {/* Expand sits first, right under the logo where Collapse was: the way back is where the way out was. */}
+              <RailIcon onClick={() => setCollapsed(false)} icon={<PanelLeftOpen />} label="Expand sidebar" />
+              <span className="bg-border my-0.5 h-px w-6" aria-hidden />
               <RailIcon onClick={newTask} icon={<Plus />} label="New task" shortcut="n" primary />
               <RailIcon active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label={waiting.length ? `Fleet view · ${waiting.length} action needed` : "Fleet view"} shortcut="g f" badge={boxes.length || undefined} dot={waiting.length > 0} />
               <RailIcon active={view === "automations" || view === "automation-runs" || view === "playbooks"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
@@ -934,7 +937,6 @@ export default function App() {
                 <ThemePicker side="right" align="end">
                   <RailIcon icon={<Palette />} label={`Theme: ${theme.label}`} />
                 </ThemePicker>
-                <RailIcon onClick={() => setCollapsed(false)} icon={<PanelLeftOpen />} label="Expand sidebar" />
               </div>
             </nav>
           ) : (
