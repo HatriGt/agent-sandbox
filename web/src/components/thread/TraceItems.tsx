@@ -1483,7 +1483,7 @@ export function YouItem({
               </Tooltip>
             )}
           </div>
-          <div className="you-bubble text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-lead">
+          <div className="you-bubble text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-body leading-relaxed">
             <div className={cn("break-words whitespace-pre-wrap [overflow-wrap:anywhere]", long && !open && "line-clamp-[10]")}>
               {skillName && (
                 <span className={cn(YOU_TAG, "bg-live/12 text-live mr-1.5")}>

@@ -23,7 +23,7 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
         // `overflow-clip` keeps highlighted content inside the rounded corners. The surface is the
         // muted token (NOT `--card`, which equals the white canvas in light mode and would read as
         // white-on-white). It sits in the prose, not above it, so no shadow.
-        "group not-prose relative my-3 flex w-full flex-col overflow-clip rounded-md border",
+        "group not-prose relative my-[0.65rem] flex w-full flex-col overflow-clip rounded-md border",
         "border-border bg-muted/40 text-card-foreground",
         className
       )}

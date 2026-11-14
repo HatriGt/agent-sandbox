@@ -4,6 +4,7 @@ import { api, type RunDigest } from "@/lib/api";
 import { fmtDuration } from "@/lib/lifecycle";
 import { Collapse } from "@/components/ui/collapse";
 import { cn } from "@/lib/utils";
+import { ChangedFilesCard, totalsOf } from "./ChangedFilesTree";
 
 const FILE_CAP = 6;
 
@@ -113,19 +114,7 @@ export function DigestCard({ digest }: { digest: RunDigest }) {
           {(digest.files.length > 0 || digest.failedCommands.length > 0 || blocked.length > 0 || digest.questions.length > 0) && (
             <div className="flex min-w-0 flex-col gap-3">
               {digest.files.length > 0 && (
-                <div className="min-w-0">
-                  <p className="label text-muted-foreground mb-1.5">{digest.files.length === 1 ? "1 file changed" : `${digest.files.length} files changed`}</p>
-                  <ul className="flex flex-col gap-0.5">
-                    {files.map((f) => (
-                      <li key={f.path} className="stamp text-muted-foreground flex items-baseline gap-2">
-                        <span className="text-foreground min-w-0 truncate">{f.path}</span>
-                        {f.additions > 0 && <span className="text-ok shrink-0">+{f.additions}</span>}
-                        {f.deletions > 0 && <span className="text-destructive shrink-0">−{f.deletions}</span>}
-                      </li>
-                    ))}
-                    {moreFiles > 0 && <li className="stamp text-muted-foreground">+{moreFiles} more</li>}
-                  </ul>
-                </div>
+                <ChangedFilesCard className="min-w-0" files={files} more={moreFiles} totals={totalsOf(digest.files)} />
               )}
               {digest.failedCommands.length > 0 && (
                 <div className="min-w-0">
