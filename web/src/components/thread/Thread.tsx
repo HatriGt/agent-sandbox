@@ -38,6 +38,7 @@ import { ThreadHeader } from "./ThreadHeader";
 import { RunInspector } from "./RunInspector";
 import { SideChat } from "./SideChat";
 import { asQuote, useSideChat } from "@/lib/sidechat";
+import { jumpToQuote, type QuoteRef } from "@/lib/quote-jump";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { SchedulePill } from "./SchedulePill";
 import { ScheduledCard } from "./ScheduledCard";
@@ -511,7 +512,7 @@ export function Thread({
   // in-box checkpoint taken when turn k-1 finished). Refetched whenever a turn settles.
   const [revertable, setRevertable] = React.useState<Set<number>>(new Set());
   const [revertAsk, setRevertAsk] = React.useState<{ message: number; discarded: number } | null>(null);
-  const [seed, setSeed] = React.useState<{ text: string; n: number; append?: boolean; inline?: boolean; image?: { name: string; dataUrl: string; label?: string; note?: string } } | null>(null);
+  const [seed, setSeed] = React.useState<{ text: string; n: number; append?: boolean; inline?: boolean; image?: { name: string; dataUrl: string; label?: string; note?: string }; quote?: { text: string; turn?: string } } | null>(null);
   const [reverting, setReverting] = React.useState(false);
   const canRevertNow = !sleeping && runState !== "running";
   // Restore points and an open revert confirm belong to one machine: a thread switch must not keep
@@ -869,7 +870,7 @@ export function Thread({
     },
     [openSideChat, side]
   );
-  const quoteSelection = React.useCallback((text: string) => setSeed({ text: `${asQuote(text)}\n\n`, n: Date.now(), append: true }), []);
+  const quoteSelection = React.useCallback((text: string, turn?: string) => setSeed({ text: "", n: Date.now(), quote: { text, turn } }), []);
   // The run's model, from the formatter's "session started (model X)" marker — observed, not assumed.
   const runModel = React.useMemo(() => {
     for (const e of events) {
@@ -904,6 +905,13 @@ export function Thread({
     return () => window.clearTimeout(t);
   }, [loadingTrace]);
   const stick = useStickToBottom({ resize: landed && runState === "running" && !sleeping ? "smooth" : "instant", initial: "instant" });
+  // A quote pill in the composer: back to the passage it was taken from.
+  const jumpQuote = React.useCallback(
+    (q: QuoteRef) => {
+      if (!jumpToQuote(stick.scrollRef.current, q)) toast("That passage is no longer in the conversation");
+    },
+    [stick.scrollRef]
+  );
 
   // A long agent message must not drag the view to its end. Once the newest reply's first line
   // reaches the top while it is still the last thing in the thread, following stops there and the
@@ -1389,6 +1397,7 @@ export function Thread({
           jumpToLatest.current();
         }}
         onFocusRequest={onFocusRequest}
+        onJumpToQuote={jumpQuote}
         onReplyFailed={onReplyFailed}
         canCompact={canCompact}
         context={contextStatus}

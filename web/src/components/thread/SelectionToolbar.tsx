@@ -6,6 +6,7 @@ import { useReducedMotion } from "@/lib/motion-pref";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { IconSwap } from "@/components/ui/icon-swap";
 import { cn } from "@/lib/utils";
+import { turnOf } from "@/lib/quote-jump";
 
 /**
  * The floating pill over a text selection in the conversation (Claude desktop's "Ask in side chat").
@@ -21,7 +22,7 @@ export function SelectionToolbar({
 }: {
   scrollerRef: React.RefObject<HTMLElement | null>;
   onAsk: (text: string) => void;
-  onQuote: (text: string) => void;
+  onQuote: (text: string, turn?: string) => void;
 }) {
   const enabled = useMediaQuery("(min-width: 48rem) and (hover: hover) and (pointer: fine)");
   const still = useReducedMotion();
@@ -104,7 +105,7 @@ export function SelectionToolbar({
   };
   const quote = () => {
     if (!pill) return;
-    onQuote(pill.text);
+    onQuote(pill.text, pill.turn);
     setPill(null);
   };
   const copy = () => {
@@ -163,6 +164,8 @@ interface Pill {
   /** Viewport y the pill hangs from: above the first line, or below it when near the top. */
   readonly y: number;
   readonly below: boolean;
+  /** The `data-turn` row the selection starts in, so a quote can jump back to it. */
+  readonly turn?: string;
 }
 
 const DEBOUNCE_MS = 80;
@@ -185,7 +188,7 @@ function readSelection(root: HTMLElement): Pill | null {
   const view = root.getBoundingClientRect();
   if (first.bottom < view.top || first.top > view.bottom) return null;
   const below = first.top < TOP_MIN;
-  return { text, x: first.left + first.width / 2, y: below ? first.bottom + GAP : first.top - GAP, below };
+  return { text, x: first.left + first.width / 2, y: below ? first.bottom + GAP : first.top - GAP, below, turn: turnOf(range.startContainer) };
 }
 
 function PillButton({ primary = false, className, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { primary?: boolean }) {

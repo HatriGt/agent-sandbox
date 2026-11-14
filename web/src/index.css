@@ -1812,3 +1812,13 @@ col { transition: width 0.2s var(--ease-out-quint); }
 [data-motion="reduced"] .press-row:active {
   transform: none;
 }
+
+/* "Quote in reply" pill → the quoted passage, highlighted for a moment (lib/quote-jump.ts). */
+::highlight(quote-jump) {
+  background-color: color-mix(in oklch, var(--live) 28%, transparent);
+}
+.quote-jump-flash {
+  border-radius: 4px;
+  background-color: color-mix(in oklch, var(--live) 14%, transparent);
+  transition: background-color 0.4s;
+}

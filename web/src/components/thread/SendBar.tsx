@@ -1,7 +1,7 @@
 import * as React from "react";
 import { pushSent, readDraft, readSent, writeDraft } from "@/lib/draft";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { ArrowUp, AtSign, Check as CheckIcon, Clock, ImagePlus, Loader2, MessageCircleQuestion, X } from "lucide-react";
+import { ArrowUp, AtSign, Check as CheckIcon, Clock, ImagePlus, Loader2, MessageCircleQuestion, Quote, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { ATTACHMENTS_DIR } from "@/lib/session-context";
@@ -22,6 +22,8 @@ import { useInlineTags } from "@/hooks/useInlineTags";
 import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
 import { VoiceButton, VoicePill } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
+import { asQuote } from "@/lib/sidechat";
+import { quoteLabel, type QuoteRef } from "@/lib/quote-jump";
 
 /**
  * The composer.
@@ -45,6 +47,7 @@ export function SendBar({
   onReplied,
   onQueued,
   onFocusRequest,
+  onJumpToQuote,
   seed,
   onReplyFailed,
   canCompact,
@@ -66,6 +69,8 @@ export function SendBar({
   onReplied: (text: string) => void;
   onQueued?: () => void;
   onFocusRequest?: (focus: () => void) => void;
+  /** A quote pill was clicked: scroll the conversation to the passage it came from. */
+  onJumpToQuote?: (quote: QuoteRef) => void;
   /** The server could not deliver this reply: the parent drops the optimistic echo. */
   onReplyFailed?: (text: string) => void;
   /** This thread's agent takes `/compact` (Claude Code): the slash menu offers it. */
@@ -74,7 +79,7 @@ export function SendBar({
   context?: ContextStatus | null;
   /** Text to drop into the composer (e.g. a starter prompt); `n` changes to re-apply the same text.
    *  `append` adds it after a non-empty draft instead of replacing it (a quoted selection). */
-  seed?: { text: string; n: number; append?: boolean; /** Joins the current line (a tag) instead of starting a paragraph. */ inline?: boolean; /** A picture that arrives with the text (a browser element, a screenshot). */ image?: { name: string; dataUrl: string; label?: string; note?: string } } | null;
+  seed?: { text: string; n: number; append?: boolean; /** Joins the current line (a tag) instead of starting a paragraph. */ inline?: boolean; /** A picture that arrives with the text (a browser element, a screenshot). */ image?: { name: string; dataUrl: string; label?: string; note?: string }; /** A passage of the conversation, attached as a pill and sent as `> ` lines ahead of the text. */ quote?: { text: string; turn?: string } } | null;
 }) {
   const busy = runState === "running" && !sleeping;
   const [value, setValue] = React.useState(() => readDraft(boxName));
@@ -105,6 +110,9 @@ export function SendBar({
   // `label` is what the chip is called; `note` is what the agent is told about the picture (a browser
   // element's selector and markup). Neither is prose the person has to read or keep in their message.
   const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string; size: number; label?: string; note?: string }[]>([]);
+  // Passages quoted from the conversation ("Quote in reply"): pills above the text, not `> ` lines in
+  // it. They go out as markdown quotes ahead of the message; a click on one jumps back to the passage.
+  const [quotes, setQuotes] = React.useState<QuoteRef[]>([]);
   // The composer outlives a thread switch (the Thread is not keyed per box): what belongs to the
   // previous thread — its pictures, its error, an open menu — must not ride along to the next one.
   const prevBox = React.useRef(boxName);
@@ -112,6 +120,7 @@ export function SendBar({
     if (prevBox.current === boxName) return;
     prevBox.current = boxName;
     setImages([]);
+    setQuotes([]);
     setError(null);
     setMention(null);
     setSlash(null);
@@ -186,8 +195,10 @@ export function SendBar({
   }, [onFocusRequest]);
   React.useEffect(() => {
     if (!seed) return;
-    // A seed that is only a picture (a browser element) leaves the words being written alone.
-    if (seed.text || !seed.image) setValue((prev) => (seed.inline ? `${prev && !/\s$/.test(prev) ? `${prev} ` : prev}${seed.text} ` : seed.append && prev.trim() ? `${prev.trimEnd()}\n\n${seed.text}` : seed.text));
+    const quote = seed.quote;
+    if (quote) setQuotes((prev) => (prev.some((q) => q.text === quote.text) ? prev : [...prev, { id: `${seed.n}`, text: quote.text, turn: quote.turn }]));
+    // A seed that is only a picture or a quote leaves the words being written alone.
+    if (seed.text || (!seed.image && !seed.quote)) setValue((prev) => (seed.inline ? `${prev && !/\s$/.test(prev) ? `${prev} ` : prev}${seed.text} ` : seed.append && prev.trim() ? `${prev.trimEnd()}\n\n${seed.text}` : seed.text));
     const image = seed.image;
     if (image) setImages((prev) => [...prev, { id: `${seed.n}-${prev.length}`, name: image.name, dataUrl: image.dataUrl, size: Math.round(image.dataUrl.length * 0.75), label: image.label, note: image.note }]);
     requestAnimationFrame(() => {
@@ -260,7 +271,7 @@ export function SendBar({
 
   const send = async () => {
     const text = value.trim();
-    if ((!text && !images.length) || sending) return;
+    if ((!text && !images.length && !quotes.length) || sending) return;
     if (readersInFlight.current > 0) {
       // A pasted image is still decoding; sending now would drop it. Retry (via the ref, so the
       // retry sees the state that includes the decoded image) once the reader lands.
@@ -268,17 +279,19 @@ export function SendBar({
       return;
     }
     const compact = isCompactCommand(text);
-    if (compact && images.length) {
-      toast.error("Send /compact on its own", { description: "Images go with a normal message — remove them, or send them after the compaction." });
+    if (compact && (images.length || quotes.length)) {
+      toast.error("Send /compact on its own", { description: "Images and quotes go with a normal message — remove them, or send them after the compaction." });
       return;
     }
     voice.stop();
     setSending(true);
     setError(null);
     const attachedImages = images;
+    const attachedQuotes = quotes;
     // The tags travel as written: the controller reads every `/skill` in the message, and each
     // `@path` is also spelled out as a full path so the agent opens the right file.
     let message = expandMentions(text).trim();
+    if (attachedQuotes.length) message = [...attachedQuotes.map((q) => asQuote(q.text)), message].filter(Boolean).join("\n\n");
     try {
       // Upload images first so the message can name their in-box paths.
       let imagesTail = "";
@@ -295,6 +308,7 @@ export function SendBar({
       }
       setValue("");
       setImages([]);
+      setQuotes([]);
       tags.reset();
       recall.current = null;
       // Echo NOW. The controller wakes/kicks the run in a few seconds; a message that only appears
@@ -330,6 +344,7 @@ export function SendBar({
       writeDraft(boxName, text);
       setValue(text);
       setImages(attachedImages);
+      setQuotes(attachedQuotes);
       toast.error("Could not send", { description: msg });
       setSending(false);
       return;
@@ -404,6 +419,34 @@ export function SendBar({
           {top}
           {/* Chip rows stay mounted through their own exit: the last chip used to vanish with the row. */}
           <AnimatePresence initial={false}>
+          {quotes.length > 0 && (
+            <ChipRow key="quotes" still={still} className="flex flex-wrap gap-1.5 px-2 pt-1.5">
+              <AnimatePresence initial={false} mode="popLayout">
+              {quotes.map((q) => (
+                <motion.span key={q.id} {...chipMotion(still)} className="bg-muted/60 inline-flex h-7 max-w-full items-center rounded-md border text-micro">
+                  <button
+                    type="button"
+                    onClick={() => onJumpToQuote?.(q)}
+                    title={q.text.length > 400 ? `${q.text.slice(0, 400)}…` : q.text}
+                    aria-label={`Show the quoted text in the conversation: ${quoteLabel(q.text)}`}
+                    className="text-muted-foreground hover:text-foreground flex h-full min-w-0 cursor-pointer items-center gap-1.5 pr-1 pl-2"
+                  >
+                    <Quote className="size-3 shrink-0" aria-hidden />
+                    <span className="truncate">{quoteLabel(q.text)}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuotes((prev) => prev.filter((x) => x.id !== q.id))}
+                    aria-label="Remove the quote"
+                    className="text-muted-foreground hover:text-foreground hover:bg-muted mr-1 grid size-5 shrink-0 cursor-pointer place-items-center rounded"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </motion.span>
+              ))}
+              </AnimatePresence>
+            </ChipRow>
+          )}
           {images.length > 0 && (
             <ChipRow key="images" still={still} className="flex flex-wrap gap-2 px-2 pt-1.5">
               <AnimatePresence initial={false} mode="popLayout">
