@@ -563,8 +563,12 @@ export function Hub({
   }, [howto, loading, runs.length, sessionRuns.length]);
 
   return (
-    <div className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 pt-8 pb-16 md:px-6 md:pt-[8vh]">
+    <div className="@container h-full min-w-0 overflow-y-auto">
+      {/* One column until Home itself is 80rem wide (a container query, so an open sidebar counts): then
+          what you start (greeting, composer, starters) sits left and what is running and what ran
+          sits right, both above the fold, instead of one 42rem column in a sea of empty page. */}
+      <div className="mx-auto grid w-full max-w-2xl items-start gap-8 px-5 pt-8 pb-16 md:px-6 md:pt-[8vh] @7xl:max-w-[84rem] @7xl:grid-cols-[minmax(0,36rem)_minmax(0,1fr)] @7xl:gap-x-14 @7xl:px-10">
+        <div className="flex min-w-0 flex-col gap-8">
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}>
           <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden" aria-label="Back to machines">
             <ArrowLeft className="size-4" />
@@ -852,6 +856,9 @@ export function Hub({
         </motion.div>
 
         {!loading && runs.length === 0 && getMe()?.kind === "user" && <GettingStarted onDismiss={() => setGsDismissed(true)} />}
+        </div>
+
+        <div className="flex min-w-0 flex-col gap-8 @7xl:pt-1">
         {/* Offline: the headline already says the fleet can't be read; a "Nothing running" card
             under it would be a claim about machines we cannot see. While the checklist is up it
             already explains what appears here — one teaching card at a time. */}
@@ -896,7 +903,7 @@ export function Hub({
               </h2>
               {loading ? <Bar className="h-3 w-20" /> : <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />}
             </div>
-            <ul className="bg-card divide-y overflow-hidden rounded-xl border">
+            <ul className="@container/live bg-card divide-y overflow-hidden rounded-xl border">
               <AnimatePresence initial={false}>
               {loading
                 ? [0, 1, 2].map((i) => (
@@ -927,16 +934,16 @@ export function Hub({
                           {b.runState === "waiting" && b.question ? questionHeadline(b.question) : threadTitle(b)}
                         </span>
                         {/* Fixed trailing columns, so the stamps line up down the list. Phone: the task wins the row. */}
-                        <span className={`${b.stalled ? "text-destructive" : "text-faint"} tabular hidden w-32 shrink-0 text-end text-micro sm:inline`}>
+                        <span className={`${b.stalled ? "text-destructive" : "text-faint"} tabular hidden w-32 shrink-0 text-end text-micro @xl/live:inline`}>
                           {b.lastOutputAt ? `${b.runState === "running" ? "last action " : ""}${fmtAgo(b.lastOutputAt)}` : ""}
                         </span>
-                        <span className="stamp text-muted-foreground hidden w-24 shrink-0 truncate text-end sm:inline" title={shortName(b.name)}>
+                        <span className="stamp text-muted-foreground hidden w-24 shrink-0 truncate text-end @md/live:inline" title={shortName(b.name)}>
                           {friendlyName(b.name)}
                         </span>
                         <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100" />
                       </button>
                       <Collapse open={b.runState === "waiting" && !!b.question}>
-                        {b.question && <QuestionChoices box={b.name} question={b.question} className="px-3.5 pb-2.5 sm:pl-[8.5rem]" />}
+                        {b.question && <QuestionChoices box={b.name} question={b.question} className="px-3.5 pb-2.5 @md/live:pl-[8.5rem]" />}
                       </Collapse>
                     </motion.li>
                   ))}
@@ -948,6 +955,7 @@ export function Hub({
 
         <RecentRuns onHistory={() => go({ view: "history" })} />
         <RecentActivity onAll={() => go({ view: "activity" })} />
+        </div>
       </div>
     </div>
   );
