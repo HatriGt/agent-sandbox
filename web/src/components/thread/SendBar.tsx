@@ -105,6 +105,19 @@ export function SendBar({
   // `label` is what the chip is called; `note` is what the agent is told about the picture (a browser
   // element's selector and markup). Neither is prose the person has to read or keep in their message.
   const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string; size: number; label?: string; note?: string }[]>([]);
+  // The composer outlives a thread switch (the Thread is not keyed per box): what belongs to the
+  // previous thread — its pictures, its error, an open menu — must not ride along to the next one.
+  const prevBox = React.useRef(boxName);
+  React.useEffect(() => {
+    if (prevBox.current === boxName) return;
+    prevBox.current = boxName;
+    setImages([]);
+    setError(null);
+    setMention(null);
+    setSlash(null);
+    setPreview(null);
+    recall.current = null;
+  }, [boxName]);
   const [dragOver, setDragOver] = React.useState(false);
   const [preview, setPreview] = React.useState<{ name: string; dataUrl: string } | null>(null);
   const fileInput = React.useRef<HTMLInputElement>(null);

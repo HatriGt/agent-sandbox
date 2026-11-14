@@ -87,7 +87,7 @@ export function CompareList({ refresh, onOpenBox, canStart }: { refresh: number;
             <ChevronRight className={cn("text-muted-foreground size-4 shrink-0 transition-transform", open === c.id && "rotate-90")} />
             <span className="text-foreground min-w-0 flex-1 truncate text-meta">{c.task}</span>
             <span className="text-faint shrink-0 text-micro tabular-nums">
-              {c.sides.length}/2 · {fmtAgo(c.createdAt)}
+              {c.sides.length}/2 · {fmtAgo(Math.floor(c.createdAt / 1000))}
             </span>
           </button>
           {open === c.id && <CompareView id={c.id} onOpenBox={onOpenBox} />}
@@ -193,7 +193,7 @@ export function AttemptGroupList({ refresh, onOpenBox }: { refresh?: number; onO
             <span className="text-foreground min-w-0 flex-1 truncate text-meta">{g.task}</span>
             <span className={cn("shrink-0 text-micro", g.status === "needs-pick" ? "text-foreground font-medium" : "text-faint")}>{STATUS_LABEL[g.status] ?? g.status}</span>
             <span className="text-faint shrink-0 text-micro tabular-nums">
-              {g.attempts.length} · {fmtAgo(g.createdAt)}
+              {g.attempts.length} · {fmtAgo(Math.floor(g.createdAt / 1000))}
             </span>
           </button>
           {open === g.id && <AttemptGroupView id={g.id} onOpenBox={onOpenBox} />}
@@ -266,7 +266,7 @@ export function AttemptGroupView({ id, onOpenBox }: { id: string; onOpenBox?: (b
         {d.decidedBy && (
           <span>
             {d.decidedBy === "auto" ? "picked automatically" : "picked by you"}
-            {d.decidedAt ? ` ${fmtAgo(d.decidedAt)}` : ""}
+            {d.decidedAt ? ` ${fmtAgo(Math.floor(d.decidedAt / 1000))}` : ""}
           </span>
         )}
         {d.prUrls.map((u) => (

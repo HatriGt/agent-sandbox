@@ -92,6 +92,9 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
     [repo, number]
   );
   React.useEffect(() => {
+    // Another PR on the same page: drop the previous one's title, diff and error instead of showing them under the new number.
+    setPr(null);
+    setError(null);
     const ctrl = new AbortController();
     void load(ctrl.signal);
     return () => ctrl.abort();
@@ -202,6 +205,7 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
         </div>
 
         {!pr ? (
+          error ? null : (
           <div className="overflow-hidden rounded-xl border">
             {[0, 1, 2].map((i) => (
               <div key={i} className="flex items-center gap-4 border-b px-4 py-4 last:border-b-0">
@@ -211,6 +215,7 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
               </div>
             ))}
           </div>
+          )
         ) : (
           <TabPanel value={tab} order={TABS} idBase="pr-section">
             {tab === "conversation" ? (
@@ -341,7 +346,8 @@ function Comment({ author, at, body, verdict: v }: { author?: string; at?: strin
 /** "3d ago" beats a raw locale timestamp in a timeline; the exact time stays in the title. */
 function relativeTime(at: string): string {
   const s = (Date.now() - new Date(at).getTime()) / 1000;
-  if (!Number.isFinite(s) || s < 0) return new Date(at).toLocaleDateString();
+  if (!Number.isFinite(s)) return "";
+  if (s < 0) return new Date(at).toLocaleDateString();
   if (s < 60) return "just now";
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;

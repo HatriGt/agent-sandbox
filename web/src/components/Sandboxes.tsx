@@ -437,7 +437,7 @@ function DestroySleeping({ boxes, onDestroyed }: { boxes: StableBox[]; onDestroy
         toast.error(`Could not destroy ${friendlyName(b.name)}`, { description: e instanceof Error ? e.message : String(e) });
       }
     }
-    toast.success(`Destroyed ${ok} sleeping ${ok === 1 ? "sandbox" : "sandboxes"}`);
+    if (ok) toast.success(`Destroyed ${ok} sleeping ${ok === 1 ? "sandbox" : "sandboxes"}`);
   };
   return (
     <ArmButton

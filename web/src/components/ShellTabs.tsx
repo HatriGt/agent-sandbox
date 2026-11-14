@@ -265,6 +265,8 @@ export function ShellBar({
               title={isGone ? `${t.label} (no longer in the fleet)` : t.label}
               onClick={() => onSelect(t.route)}
               onKeyDown={(e) => {
+                // Enter/Space on the close button is that button's own click, not a tab switch.
+                if (e.target !== e.currentTarget) return;
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   onSelect(t.route);
@@ -303,7 +305,7 @@ export function ShellBar({
                   // 20px visible, 28px to the pointer (after:-inset-1): the tab's own 6px end padding
                   // keeps that from reaching the next tab.
                   "hover:bg-muted text-faint hover:text-foreground press-small relative grid size-5 shrink-0 cursor-pointer place-items-center rounded after:absolute after:-inset-1 after:content-['']",
-                  active ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+                  active ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 focus-visible:opacity-100"
                 )}
               >
                 <X className="size-3" />

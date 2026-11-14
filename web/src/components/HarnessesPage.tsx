@@ -278,7 +278,7 @@ function provenance(h: HarnessView): string {
         : h.builtin && h.updatedAt === h.createdAt
           ? "Added "
           : "Updated ";
-  return `${lead}${fmtAgo(h.origin?.at ?? h.updatedAt)}`;
+  return `${lead}${fmtAgo(Math.floor((h.origin?.at ?? h.updatedAt) / 1000))}`;
 }
 
 const HARNESS_COLUMNS: Column<HarnessView>[] = [
@@ -330,7 +330,7 @@ const HARNESS_COLUMNS: Column<HarnessView>[] = [
     sort: (h) => h.origin?.at ?? h.updatedAt,
     cell: (h) => (
       <span className="text-faint block truncate text-micro" title={provenance(h)}>
-        {fmtAgo(h.origin?.at ?? h.updatedAt)}
+        {fmtAgo(Math.floor((h.origin?.at ?? h.updatedAt) / 1000))}
       </span>
     ),
   },

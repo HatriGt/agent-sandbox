@@ -58,8 +58,13 @@ export function MentionMenu({
           setTotal(r.total);
           setCursor(0);
         })
-        .catch(() => setFiles([]))
-        .finally(() => setLoading(false));
+        .catch(() => {
+          // A superseded query (aborted) must not blank the list or end the next query's loading state.
+          if (!ctrl.signal.aborted) setFiles([]);
+        })
+        .finally(() => {
+          if (!ctrl.signal.aborted) setLoading(false);
+        });
     }, 80);
     return () => {
       window.clearTimeout(t);
@@ -81,14 +86,22 @@ export function MentionMenu({
     return () => document.removeEventListener("asb:mention-nav", onNav);
   }, [files, cursor, onPick, onClose]);
 
+  // Arrowing past the visible rows keeps the highlighted file in view.
+  const listRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [cursor, files]);
+
   return (
-    <motion.div
+    // The peek sits beside the list, outside its scroll box — inside it, `overflow-y-auto` clipped it away.
+    <motion.div {...menuMotion(still)} className="absolute inset-x-2 bottom-full z-20 mb-2">
+    <MentionPeek session={session} path={files[cursor] ?? null} />
+    <div
+      ref={listRef}
       role="listbox"
       aria-label="Files in the workspace"
-      {...menuMotion(still)}
-      className="bg-popover text-popover-foreground absolute inset-x-2 bottom-full z-20 mb-2 max-h-72 overflow-y-auto rounded-xl border p-1 shadow-e3"
+      className="bg-popover text-popover-foreground max-h-72 overflow-y-auto rounded-xl border p-1 shadow-e3"
     >
-      <MentionPeek session={session} path={files[cursor] ?? null} />
       <div className="text-muted-foreground flex items-center justify-between gap-3 px-2.5 py-1.5 text-micro">
         <span className="flex min-w-0 items-center gap-2">
           {repos.length > 0 ? (
@@ -168,6 +181,7 @@ export function MentionMenu({
           </button>
         );
       })}
+    </div>
     </motion.div>
   );
 }

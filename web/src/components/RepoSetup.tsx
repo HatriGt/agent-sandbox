@@ -21,15 +21,25 @@ const CMDS = ["install", "build", "test", "lint"] as const;
 
 export function RepoSetup() {
   const [data, setData] = React.useState<RepoSetupsResponse | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
   React.useEffect(() => {
     const ctrl = new AbortController();
-    api.repoSetups(ctrl.signal).then(setData).catch(() => {});
+    api
+      .repoSetups(ctrl.signal)
+      .then(setData)
+      .catch((e: unknown) => {
+        if (!ctrl.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+      });
     return () => ctrl.abort();
   }, []);
   return (
     <SettingsSection id="repo-setup" title="Repo setup" meta="learned once · install · test · verify">
-      <Swap state={!data ? "loading" : data.profiles.length === 0 ? "empty" : "list"}>
-      {!data ? (
+      <Swap state={!data ? (error ? "error" : "loading") : data.profiles.length === 0 ? "empty" : "list"}>
+      {!data && error ? (
+        <p role="alert" className="text-destructive text-micro">
+          Could not load repo setups: {error}
+        </p>
+      ) : !data ? (
         <div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading">
           <Bar className="h-12 w-full rounded-lg" />
         </div>
@@ -67,7 +77,7 @@ function SetupRow({ repo, profile: p, onChange }: { repo: string; profile: RepoS
     <div className="border-border flex items-start gap-3 rounded-lg border p-3">
       <div className="min-w-0 flex-1">
         <div className="text-foreground text-meta font-medium">{repo}</div>
-        <dl className="mt-1 grid grid-cols-[4.5rem_1fr] gap-x-2 gap-y-0.5 text-micro">
+        <dl className="mt-1 grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-2 gap-y-0.5 text-micro">
           {CMDS.filter((k) => p[k]).map((k) => (
             <React.Fragment key={k}>
               <dt className="text-muted-foreground">{k}</dt>

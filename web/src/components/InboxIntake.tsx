@@ -176,7 +176,7 @@ export function InboxIntake() {
           <div>
             <Label>Default repo (used when the text names none)</Label>
             <div className="flex items-center gap-2">
-              <Input mono placeholder="owner/name" value={repo} onChange={(e) => setRepo(e.target.value)} />
+              <Input mono aria-label="Default repo" placeholder="owner/name" value={repo} onChange={(e) => setRepo(e.target.value)} />
               <Button variant="outline" size="sm" disabled={repo === (v.channel.defaultRepo ?? "")} onClick={() => safeSave({ defaultRepo: repo })}>
                 Save
               </Button>
@@ -259,7 +259,7 @@ export function InboxIntake() {
                     <span className="text-muted-foreground min-w-0 truncate">
                       {[d.reason, d.detail].filter(Boolean).join(" · ")}
                       {d.box && (
-                        <a className="text-primary ml-2 underline-offset-4 hover:underline" href={`/dashboard/box/${encodeURIComponent(d.box)}`}>
+                        <a className="text-primary ml-2 underline-offset-4 hover:underline" href={`/dashboard/box/${encodeURIComponent(d.box)}${location.search}`}>
                           open
                         </a>
                       )}

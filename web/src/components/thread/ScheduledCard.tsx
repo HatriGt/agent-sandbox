@@ -1,3 +1,4 @@
+import * as React from "react";
 import { ArrowUpRight, CalendarClock, Loader2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
@@ -84,6 +85,8 @@ function when(it: ThreadScheduleItem, now: number): string {
 function Card({ it, now, still, busy, actions, onDiscuss }: { it: ThreadScheduleItem; now: number; still: boolean; busy: boolean; actions: Actions; onDiscuss?: (proposal: string) => void }) {
   const pending = it.relation === "proposed";
   const over = it.status === "done" || it.status === "cancelled";
+  // Which button was pressed: `busy` covers the card, so Dismiss must not read "Approving…".
+  const [pressed, setPressed] = React.useState<"approve" | "dismiss" | null>(null);
   return (
     <motion.div
       {...leave(still)}
@@ -114,12 +117,13 @@ function Card({ it, now, still, busy, actions, onDiscuss }: { it: ThreadSchedule
                   Discuss
                 </Button>
               )}
-              <Button variant="ghost" size="sm" disabled={busy} onClick={() => void actions.dismiss(it)}>
-                Dismiss
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => (setPressed("dismiss"), void actions.dismiss(it))}>
+                {busy && pressed === "dismiss" && <Loader2 className="animate-spin" />}
+                {busy && pressed === "dismiss" ? "Dismissing…" : "Dismiss"}
               </Button>
-              <Button variant="attention" size="sm" disabled={busy} onClick={() => void actions.approve(it)}>
-                {busy && <Loader2 className="animate-spin" />}
-                {busy ? "Approving…" : "Approve"}
+              <Button variant="attention" size="sm" disabled={busy} onClick={() => (setPressed("approve"), void actions.approve(it))}>
+                {busy && pressed === "approve" && <Loader2 className="animate-spin" />}
+                {busy && pressed === "approve" ? "Approving…" : "Approve"}
               </Button>
             </div>
           </>

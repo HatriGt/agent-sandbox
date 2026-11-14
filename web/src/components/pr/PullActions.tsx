@@ -228,6 +228,7 @@ export function CommentComposer({ session, repo, number, onPosted }: { session: 
         value={text}
         onChange={(e) => setText(e.target.value)}
         rows={3}
+        aria-label="Comment"
         placeholder="Leave a comment…"
         className="placeholder:text-faint text-foreground w-full resize-y bg-transparent text-meta outline-none"
       />

@@ -49,7 +49,7 @@ export function SpansBlock({ spans, unit, source }: { spans: Span[]; unit?: stri
   const range = max - min || 1;
   const [tip, setTip] = React.useState<TipState | null>(null);
   return (
-    <VizFrame title={`${spans.length} spans`} source={source}>
+    <VizFrame title={`${spans.length} ${spans.length === 1 ? "span" : "spans"}`} source={source}>
       <div className="relative flex flex-col gap-1.5 px-4 py-3" onMouseLeave={() => setTip(null)}>
         {spans.map((s, i) => {
           const left = ((s.start - min) / range) * 100;

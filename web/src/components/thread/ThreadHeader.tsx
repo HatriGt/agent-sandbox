@@ -169,7 +169,15 @@ export function ThreadHeader({
   }, [addRepo]);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const cancelRef = React.useRef<HTMLButtonElement>(null);
-  React.useEffect(() => setEditing(false), [box.name]);
+  // The header outlives a thread switch (e.g. browser Back): a Destroy/resize confirm, the repo picker
+  // or the details panel opened for the previous machine must not stay open aimed at this one.
+  React.useEffect(() => {
+    setEditing(false);
+    setConfirm(false);
+    setResizeTo(null);
+    setAddRepo(false);
+    setDetails(false);
+  }, [box.name]);
 
   const startRename = () => {
     setDraft(title);
@@ -507,7 +515,7 @@ export function ThreadHeader({
         {onStop && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" onClick={onStop} disabled={stopping} className="text-muted-foreground">
+              <Button variant="ghost" size="sm" onClick={onStop} disabled={stopping} aria-label={stopping ? "Stopping…" : "Stop"} className="text-muted-foreground">
                 {stopping ? <Loader2 className="animate-spin" /> : <Square className="fill-current" />}
                 <span className="hidden sm:inline">{stopping ? "Stopping…" : "Stop"}</span>
               </Button>
@@ -570,6 +578,7 @@ export function ThreadHeader({
                 size="sm"
                 onClick={onToggleDensity}
                 aria-pressed={density === "trace"}
+                aria-label="Trace view"
                 data-density={density}
                 className={cn("text-muted-foreground", density === "trace" && "bg-accent text-foreground")}
               >

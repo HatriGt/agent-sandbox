@@ -128,8 +128,8 @@ export function SkillEditor({
     return () => window.removeEventListener("beforeunload", h);
   }, [dirty, initial, hasAnything]);
 
-  const save = React.useCallback(async () => {
-    if (!valid || saving.current || (initial && !dirty)) return;
+  const save = React.useCallback(async (): Promise<boolean> => {
+    if (!valid || saving.current || (initial && !dirty)) return false;
     saving.current = true;
     setBusy(true);
     setErr(null);
@@ -146,8 +146,10 @@ export function SkillEditor({
       if (saved) onSaved(saved);
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1600);
+      return true;
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
+      return false;
     } finally {
       saving.current = false;
       setBusy(false);
@@ -328,8 +330,10 @@ export function SkillEditor({
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => {
-                  void navigator.clipboard?.writeText(rawMd);
-                  toast.success("SKILL.md copied");
+                  navigator.clipboard
+                    .writeText(rawMd)
+                    .then(() => toast.success("SKILL.md copied"))
+                    .catch((e: unknown) => toast.error("Could not copy", { description: e instanceof Error ? e.message : String(e) }));
                 }}
               >
                 <Copy />
@@ -509,8 +513,9 @@ export function SkillEditor({
                 size="sm"
                 loading={busy}
                 onClick={async () => {
-                  await save();
-                  onClose();
+                  // A failed save keeps the editor (and its error) open instead of discarding the edits.
+                  if (await save()) onClose();
+                  else setConfirmClose(false);
                 }}
               >
                 {initial ? "Save & leave" : "Create & leave"}

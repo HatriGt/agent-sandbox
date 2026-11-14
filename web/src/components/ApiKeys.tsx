@@ -54,7 +54,13 @@ export function ApiKeys() {
   const [creating, setCreating] = React.useState(false);
   const [fresh, setFresh] = React.useState<{ token: string; name: string } | null>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
-  const load = React.useCallback(() => api.apiKeys().then((r) => setKeys(r.keys)).catch(() => setKeys([])), []);
+  const load = React.useCallback(() => api
+        .apiKeys()
+        .then((r) => setKeys(r.keys))
+        .catch((e: unknown) => {
+          toast.error("Could not load API keys", { description: e instanceof Error ? e.message : String(e) });
+          setKeys((prev) => prev ?? []);
+        }), []);
   React.useEffect(() => void load(), [load]);
 
   const create = async () => {

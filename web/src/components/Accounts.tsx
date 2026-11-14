@@ -304,6 +304,10 @@ type Device =
 function DeviceFlow({ onDone }: { onDone: (list: AccountView[]) => void }) {
   const [state, setState] = React.useState<Device>({ phase: "idle" });
   const [copied, setCopied] = React.useState(false);
+  // The parent passes a fresh callback every render; reading it through a ref keeps a re-render
+  // from restarting the poll (which pushed the next check back a full interval each time).
+  const onDoneRef = React.useRef(onDone);
+  onDoneRef.current = onDone;
   const start = async () => {
     setState({ phase: "starting" });
     try {
@@ -326,7 +330,7 @@ function DeviceFlow({ onDone }: { onDone: (list: AccountView[]) => void }) {
         if (cancelled) return;
         if (r.status === "done") {
           toast.success(`Connected ${r.login}`);
-          onDone(r.accounts);
+          onDoneRef.current(r.accounts);
           return;
         }
         if (r.status === "expired") return setState({ phase: "failed", message: "The code expired. Start again." });
@@ -343,7 +347,7 @@ function DeviceFlow({ onDone }: { onDone: (list: AccountView[]) => void }) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [state, onDone]);
+  }, [state]);
 
   // Stepper: 0 = start · 1 = approve on GitHub · 2 = connected (the dialog closes on done).
   const step = state.phase === "waiting" ? 1 : 0;

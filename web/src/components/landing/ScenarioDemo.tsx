@@ -87,7 +87,8 @@ function useClock(reduced: boolean, visible: boolean) {
     }
   }, [reduced]);
   React.useEffect(() => {
-    if (!playing || !visible || reduced) return;
+    // Reduced motion never autoplays (playing starts false), but an explicit Play still plays.
+    if (!playing || !visible) return;
     let last = performance.now();
     let raf = 0;
     const tick = (now: number) => {
@@ -98,7 +99,7 @@ function useClock(reduced: boolean, visible: boolean) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [playing, visible, reduced]);
+  }, [playing, visible]);
   return { t, setT, playing, setPlaying };
 }
 
@@ -162,9 +163,9 @@ export function ScenarioDemo() {
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2">
-        <button type="button" onClick={() => (reduced ? replay() : setPlaying(!playing))} className={cn(focusRing, ctrlBtn)} aria-label={playing && !reduced ? "Pause the scenario" : "Play the scenario"}>
-          {playing && !reduced ? <Pause className="size-3.5" aria-hidden /> : <Play className="size-3.5" aria-hidden />}
-          {playing && !reduced ? "Pause" : "Play"}
+        <button type="button" onClick={() => setPlaying(!playing)} className={cn(focusRing, ctrlBtn)} aria-label={playing ? "Pause the scenario" : "Play the scenario"}>
+          {playing ? <Pause className="size-3.5" aria-hidden /> : <Play className="size-3.5" aria-hidden />}
+          {playing ? "Pause" : "Play"}
         </button>
         <button type="button" onClick={replay} className={cn(focusRing, ctrlBtn)} aria-label="Replay the scenario from the start">
           <RotateCcw className="size-3.5" aria-hidden /> Replay

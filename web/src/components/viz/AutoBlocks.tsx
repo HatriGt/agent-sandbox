@@ -94,7 +94,7 @@ export function StackTraceBlock({ trace, source }: { trace: StackTrace; source: 
   }
   const folded = trace.frames.filter((f) => f.vendor).length;
   return (
-    <VizFrame title={`${trace.language === "js" ? "JavaScript" : trace.language === "py" ? "Python" : trace.language === "java" ? "Java" : trace.language === "go" ? "Go" : trace.language === "rust" ? "Rust" : ""} stack trace · ${trace.frames.length} frames`.trim()} source={source}>
+    <VizFrame title={`${trace.language === "js" ? "JavaScript" : trace.language === "py" ? "Python" : trace.language === "java" ? "Java" : trace.language === "go" ? "Go" : trace.language === "rust" ? "Rust" : ""} stack trace · ${trace.frames.length} ${trace.frames.length === 1 ? "frame" : "frames"}`.trim()} source={source}>
       <div className="border-destructive/30 bg-destructive/6 border-l-2 px-4 py-2.5">
         <p className="text-destructive m-0 flex items-start gap-2 text-meta font-medium">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />

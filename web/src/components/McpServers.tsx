@@ -116,7 +116,7 @@ export function McpServers() {
       title="MCP servers"
       meta={servers ? (servers.length === 0 ? "none yet" : `${counts.on} of ${servers.length} on`) : undefined}
       actions={
-        hasServers ? (
+        hasServers || view === "json" ? (
           <>
             <AnimatedTabs
               ariaLabel="View"
@@ -550,7 +550,7 @@ function JsonView({ config, onSave }: { config: McpServersResponse["config"] | n
   const dirty = text !== pristine;
 
   const save = async () => {
-    if (!dirty || "error" in parsed) return;
+    if (busy || !dirty || "error" in parsed) return;
     setBusy(true);
     try {
       await onSave(text);

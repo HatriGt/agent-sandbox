@@ -291,14 +291,14 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
                 </Button>
               </div>
             </>
-          ) : !rows.length ? (
+          ) : !rows.length && !liveRows.length ? (
             <div className="rounded-xl border border-dashed py-14 text-center">
               <p className="text-foreground text-lead font-medium">Nothing here yet</p>
               <p className="text-muted-foreground mx-auto mt-1 max-w-sm text-meta">
                 When a run finishes, its receipt is kept even after the machine is reaped.
               </p>
             </div>
-          ) : !visible.length ? (
+          ) : !tableRows.length ? (
             <>
               <div className="mb-3 flex flex-wrap items-center justify-end gap-2">{filters}</div>
               <div className="rounded-xl border border-dashed py-12 text-center">

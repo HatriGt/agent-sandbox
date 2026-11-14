@@ -43,6 +43,7 @@ export function QuestionCard({
     setSelected(null);
     setOther(!hasOptions);
     setCustom("");
+    setShowContext(false);
   }, [question, hasOptions]);
 
   // Dictate the free-text answer; sending stays behind the explicit button.
@@ -87,6 +88,10 @@ export function QuestionCard({
         return (cur + (e.key === "ArrowDown" ? 1 : -1) + len) % len;
       });
     } else if (e.key === "Enter" && canSend) {
+      // Enter on another control in the card (Discuss, More context, an unpicked option, Something
+      // else) is that control's own press, not "send the current pick".
+      const t = e.target as HTMLElement;
+      if (t !== e.currentTarget && !(t.getAttribute("role") === "radio" && t.getAttribute("aria-checked") === "true")) return;
       e.preventDefault();
       send();
     }

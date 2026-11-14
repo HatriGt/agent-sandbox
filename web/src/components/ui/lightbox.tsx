@@ -17,6 +17,7 @@ export function Lightbox({ src, name, open, onClose }: { src: string | null; nam
   const [natural, setNatural] = React.useState<{ w: number; h: number } | null>(null);
   const drag = React.useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
   const stageRef = React.useRef<HTMLDivElement>(null);
+  const rootRef = React.useRef<HTMLDivElement>(null);
 
   const reset = React.useCallback(
     (nat = natural) => {
@@ -48,6 +49,15 @@ export function Lightbox({ src, name, open, onClose }: { src: string | null; nam
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, reset]);
+
+  // Focus moves into the viewer (so a screen reader announces it and Tab starts in its toolbar)
+  // and goes back to the thumbnail that opened it on close.
+  React.useEffect(() => {
+    if (!open) return;
+    const opener = document.activeElement as HTMLElement | null;
+    rootRef.current?.focus({ preventScroll: true });
+    return () => opener?.focus?.({ preventScroll: true });
+  }, [open]);
 
   const zoom = (factor: number, at?: { x: number; y: number }) => {
     setScale((s) => {
@@ -88,7 +98,9 @@ export function Lightbox({ src, name, open, onClose }: { src: string | null; nam
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-[100] flex flex-col bg-black/80 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] flex flex-col bg-black/80 outline-none backdrop-blur-sm"
+          ref={rootRef}
+          tabIndex={-1}
           role="dialog"
           aria-modal="true"
           aria-label={`Image ${name}`}

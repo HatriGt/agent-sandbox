@@ -216,7 +216,7 @@ export function Activity({ boxes, onBack }: { boxes: BoxView[]; onBack: () => vo
             ) : state === "nomatch" ? (
               <ListEmpty icon={ActivityIcon} title={`No ${filter} rows loaded`} line={auditDone ? "There are none in the last 90 days." : "Load more to look further back."} action={!auditDone && oldest ? <Button size="sm" variant="outline" loading={busy} onClick={() => loadAudit({ at: oldest.at, id: oldest.id })}>Show more</Button> : undefined} />
             ) : (
-              <DataTable aria-label="Activity" bordered={false} size="sm" rows={visible} onRowClick={(r) => r.run != null && go({ view: "history" })} rowLabel={(r) => (r.run != null ? `${r.verb} ${r.box ?? ""} — open in History` : `${r.verb} ${r.box ?? ""}`)} columns={columns} rowKey={(r) => r.id} groupOf={(r) => dayLabel(r.at)} search={{ placeholder: "Search activity", text: (r) => `${r.verb} ${r.box ?? ""} ${r.detail ?? ""} ${r.status}` }} />
+              <DataTable aria-label="Activity" bordered={false} size="sm" rows={visible} rowClickable={(r) => r.run != null} onRowClick={() => go({ view: "history" })} rowLabel={(r) => (r.run != null ? `${r.verb} ${r.box ?? ""} — open in History` : `${r.verb} ${r.box ?? ""}`)} columns={columns} rowKey={(r) => r.id} groupOf={(r) => dayLabel(r.at)} search={{ placeholder: "Search activity", text: (r) => `${r.verb} ${r.box ?? ""} ${r.detail ?? ""} ${r.status}` }} />
             )}
           </Swap>
           {state === "list" && !auditDone && oldest && (

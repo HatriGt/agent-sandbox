@@ -198,7 +198,13 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
               ? "Unlimited time. Thank you."
               : user.expired
                 ? "Your history and settings are kept; starting or resuming machines needs an upgrade — or self-host for free."
-                : `${user.daysLeft === 0 ? "Ends today" : `${user.daysLeft} day${user.daysLeft === 1 ? "" : "s"} left`} · ends ${new Date(user.trialEndsAt ?? 0).toLocaleDateString()} · no card on file`}
+                : [
+                    user.daysLeft == null ? null : user.daysLeft === 0 ? "Ends today" : `${user.daysLeft} day${user.daysLeft === 1 ? "" : "s"} left`,
+                    user.trialEndsAt ? `ends ${new Date(user.trialEndsAt).toLocaleDateString()}` : null,
+                    "no card on file",
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
           </p>
           <Swap state={inUse !== null && maxBoxes ? "usage" : maxBoxes ? "cap" : "none"}>
             {inUse !== null && maxBoxes ? (
@@ -207,7 +213,7 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
                 <span className="text-muted-foreground text-meta tabular-nums">
                   <NumberTicker value={inUse} from={inUse} /> of {maxBoxes} machines in use
                 </span>
-                {user.plan === "trial" && !user.expired && <span className="stamp text-muted-foreground">{user.daysLeft === 0 ? "ends today" : `${user.daysLeft}d left`}</span>}
+                {user.plan === "trial" && !user.expired && user.daysLeft != null && <span className="stamp text-muted-foreground">{user.daysLeft === 0 ? "ends today" : `${user.daysLeft}d left`}</span>}
               </div>
             ) : maxBoxes ? (
               <p className="text-muted-foreground mt-3 text-meta">up to {maxBoxes} machines at once</p>
@@ -232,10 +238,9 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
         <SettingsSection id="profile" title="Profile" purpose="How you appear in the console and in notifications." meta={user.github ? "GitHub sign-in linked" : undefined}>
           <form
             className="grid max-w-xl gap-4 sm:grid-cols-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void saveProfile();
-            }}
+            // The Save button is the form's submit button: its onClick already saves (Enter in a field
+            // clicks it too), so saving here as well sent every change twice.
+            onSubmit={(e) => e.preventDefault()}
           >
             <Field label="Name">{(w) => <Input {...w} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />}</Field>
             <Field label="Email" optional error={!emailOk ? "That does not look like an email address." : undefined} help="Only used to address notifications.">

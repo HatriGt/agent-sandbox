@@ -65,7 +65,7 @@ export function describeCron(cron: string): string {
   const at = `${two(s.hour)}:${two(s.minute)}`;
   switch (s.freq) {
     case "minutes":
-      return `Every ${s.step} minutes`;
+      return s.step === 1 ? "Every minute" : `Every ${s.step} minutes`;
     case "hourly":
       return s.minute ? `Every hour at :${two(s.minute)}` : "Every hour";
     case "daily":
@@ -122,8 +122,8 @@ export function SchedulePicker({ cron, timezone, onChange }: { cron: string; tim
           {s.freq === "minutes" && (
             <>
               <span className="text-muted-foreground">every</span>
-              <select className={field} value={STEPS.includes(s.step) ? s.step : 30} onChange={(e) => update({ step: Number(e.target.value) })}>
-                {STEPS.map((n) => (
+              <select className={field} value={s.step} onChange={(e) => update({ step: Number(e.target.value) })} aria-label="Minutes between runs">
+                {(STEPS.includes(s.step) ? STEPS : [...STEPS, s.step].sort((a, b) => a - b)).map((n) => (
                   <option key={n} value={n}>
                     {n} min
                   </option>
@@ -134,8 +134,8 @@ export function SchedulePicker({ cron, timezone, onChange }: { cron: string; tim
           {s.freq === "hourly" && (
             <>
               <span className="text-muted-foreground">at minute</span>
-              <select className={field} value={s.minute} onChange={(e) => update({ minute: Number(e.target.value) })}>
-                {[0, 15, 30, 45].map((n) => (
+              <select className={field} value={s.minute} onChange={(e) => update({ minute: Number(e.target.value) })} aria-label="Minute past the hour">
+                {([0, 15, 30, 45].includes(s.minute) ? [0, 15, 30, 45] : [0, 15, 30, 45, s.minute].sort((a, b) => a - b)).map((n) => (
                   <option key={n} value={n}>
                     :{two(n)}
                   </option>
@@ -157,6 +157,7 @@ export function SchedulePicker({ cron, timezone, onChange }: { cron: string; tim
               <span className="text-muted-foreground">at</span>
               <input
                 type="time"
+                aria-label="Time of day"
                 className={cn(field, "tabular-nums")}
                 value={`${two(s.hour)}:${two(s.minute)}`}
                 onChange={(e) => {
@@ -178,7 +179,7 @@ export function SchedulePicker({ cron, timezone, onChange }: { cron: string; tim
                   ))}
                 </select>
               ) : (
-                <input className={cn(field, "w-44")} value={timezone} onChange={(e) => onChange({ timezone: e.target.value })} placeholder={localZone} />
+                <input className={cn(field, "w-44")} value={timezone} onChange={(e) => onChange({ timezone: e.target.value })} placeholder={localZone} aria-label="Timezone" />
               )}
             </>
           )}

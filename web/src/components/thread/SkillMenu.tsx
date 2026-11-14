@@ -78,6 +78,12 @@ export function SkillMenu({
     return () => document.removeEventListener("asb:skill-nav", onNav);
   }, [matches, cursor, onPick, onClose]);
 
+  // Arrowing past the visible rows keeps the highlighted skill in view.
+  const listRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>('[role="option"][aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [cursor, matches]);
+
   // Own AnimatePresence too: the menu also closes when the query stops matching while the component
   // stays mounted; the composer's presence wrapper covers the token going away, and `propagate`
   // lets that outer exit reach the listbox through this inner presence.
@@ -91,6 +97,7 @@ export function SkillMenu({
       {matches.length > 0 && (
         <motion.div
           key="skill-menu"
+          ref={listRef}
           role="listbox"
           aria-label="Skills"
           {...menuMotion(still, side)}

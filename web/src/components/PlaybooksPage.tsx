@@ -320,7 +320,7 @@ function PlaybookTable({
             {w.name}
           </span>
           <span className="text-muted-foreground block truncate text-micro" title={w.description}>
-            {w.description || `updated ${fmtAgo(w.updatedAt)}`}
+            {w.description || `updated ${fmtAgo(Math.round(w.updatedAt / 1000))}`}
           </span>
         </>
       ),
@@ -459,19 +459,26 @@ function WorkflowEditor({ initial, isNew, onCancel, onSave }: { initial: string;
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
+    // An older preview answering after a newer edit must not overwrite what the newer one says.
+    let stale = false;
     const t = setTimeout(() => {
       api
         .workflowPreview(yaml)
         .then((r) => {
+          if (stale) return;
           setPreview(r.workflow);
           setProblem(null);
         })
         .catch((e: Error) => {
+          if (stale) return;
           setPreview(null);
           setProblem(e.message);
         });
     }, 250);
-    return () => clearTimeout(t);
+    return () => {
+      stale = true;
+      clearTimeout(t);
+    };
   }, [yaml]);
 
   const copy = async () => {
@@ -590,7 +597,7 @@ function ImportFromRepo({ dir, onCancel, onDone }: { dir: string; onCancel: () =
               mono
               value={repo}
               onChange={(e) => setRepo(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && void run()}
+              onKeyDown={(e) => e.key === "Enter" && !busy && void run()}
               placeholder="owner/repo or owner/repo@branch"
               autoFocus
             />

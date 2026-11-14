@@ -507,6 +507,12 @@ export function Thread({
   const [seed, setSeed] = React.useState<{ text: string; n: number; append?: boolean; inline?: boolean; image?: { name: string; dataUrl: string; label?: string; note?: string } } | null>(null);
   const [reverting, setReverting] = React.useState(false);
   const canRevertNow = !sleeping && runState !== "running";
+  // Restore points and an open revert confirm belong to one machine: a thread switch must not keep
+  // offering the previous box's points, or aim its open "Revert" dialog at this box.
+  React.useEffect(() => {
+    setRevertable(new Set());
+    setRevertAsk(null);
+  }, [box.name]);
   React.useEffect(() => {
     if (runState === "running") return;
     const ctrl = new AbortController();

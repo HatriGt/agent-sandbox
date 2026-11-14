@@ -8,6 +8,7 @@ import { useCached } from "@/lib/cache";
 import { fmtAgo, friendlyName } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { ArmButton } from "@/components/ui/arm-button";
 import { Collapse } from "@/components/ui/collapse";
 import { EmptyState } from "@/components/ui/empty-state";
 import { inputClass } from "@/components/ui/field";
@@ -53,7 +54,7 @@ function areaGroups(list: MemoryNote[]): AreaGroup[] {
     .sort((a, b) => (a.area === "" ? 1 : b.area === "" ? -1 : b.notes.length - a.notes.length || a.area.localeCompare(b.area)));
 }
 
-type Apply = (p: Promise<MemoryNotesResponse>, ok?: string) => Promise<void>;
+type Apply = (p: Promise<MemoryNotesResponse>, ok?: string) => Promise<boolean>;
 
 export function MemoryPage({ onBack }: { onBack: () => void }) {
   const cached = useCached("memory-notes", (signal) => api.memoryNotes(signal));
@@ -72,8 +73,10 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
       try {
         cached.setData(await p);
         if (ok) toast.success(ok);
+        return true;
       } catch (e) {
         toast.error((e as Error).message);
+        return false;
       }
     },
     [cached],
@@ -214,7 +217,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
       toast.success(`Skill "${r.skill.name}" drafted`, {
         action: {
           label: "Open",
-          onClick: () => location.assign("/dashboard/skills"),
+          onClick: () => location.assign(`/dashboard/skills${location.search}`),
         },
       });
     } catch (e) {
@@ -279,8 +282,9 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
           id="memory-composer"
           onCancel={() => setComposing(false)}
           onAdd={async (add) => {
-            await apply(api.memoryNoteAdd(add), "Added");
-            setComposing(false);
+            const ok = await apply(api.memoryNoteAdd(add), "Added");
+            if (ok) setComposing(false);
+            return ok;
           }}
         />
       </Collapse>
@@ -517,16 +521,15 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                                 {n.repo && ` · ${n.repo}`}
                               </p>
                             </div>
-                            <Button
+                            <ArmButton
                               variant="ghost"
                               size="icon-sm"
-                              aria-label="Delete from history"
-                              title="Forget"
+                              icon={<Trash2 className="size-4" />}
+                              label="Delete from history"
+                              armedLabel="Forget?"
                               className="hover:text-destructive shrink-0"
-                              onClick={() => void apply(api.memoryNoteDelete(n.id), "Forgotten")}
-                            >
-                              <Trash2 className="size-4" />
-                            </Button>
+                              onConfirm={() => apply(api.memoryNoteDelete(n.id), "Forgotten").then(() => {})}
+                            />
                           </motion.li>
                         ))}
                         </AnimatePresence>
@@ -579,7 +582,7 @@ function AreaHeader({ group: g, onArea, unfiled }: { group: AreaGroup; onArea: (
 }
 
 /** Add a preference, rule, or a piece of domain knowledge by hand. */
-function Composer({ id, onAdd, onCancel }: { id: string; onAdd: (add: { kind: MemoryKind; text: string; repo?: string; area?: string; paths?: string; links?: string }) => Promise<void>; onCancel: () => void }) {
+function Composer({ id, onAdd, onCancel }: { id: string; onAdd: (add: { kind: MemoryKind; text: string; repo?: string; area?: string; paths?: string; links?: string }) => Promise<boolean>; onCancel: () => void }) {
   const [kind, setKind] = React.useState<"preference" | "rule" | "domain">("preference");
   const [text, setText] = React.useState("");
   const [repo, setRepo] = React.useState("");
@@ -597,8 +600,7 @@ function Composer({ id, onAdd, onCancel }: { id: string; onAdd: (add: { kind: Me
     if (kind === "domain" && (!repo.trim() || !area.trim())) return;
     setBusy(true);
     try {
-      await onAdd(kind === "domain" ? { kind, text: t, repo: repo.trim(), area: area.trim(), paths: paths.trim() || undefined, links: links.trim() || undefined } : { kind, text: t });
-      setText("");
+      if (await onAdd(kind === "domain" ? { kind, text: t, repo: repo.trim(), area: area.trim(), paths: paths.trim() || undefined, links: links.trim() || undefined } : { kind, text: t })) setText("");
     } finally {
       setBusy(false);
     }
@@ -716,7 +718,7 @@ function NoteRow({
 }: {
   note: MemoryNote;
   onPin: (pinned: boolean) => void;
-  onSave: (patch: { text?: string; area?: string; paths?: string; links?: string; repo?: string }) => Promise<void>;
+  onSave: (patch: { text?: string; area?: string; paths?: string; links?: string; repo?: string }) => Promise<boolean>;
   onDelete: () => void;
   onKeep: () => void;
   onPromote?: () => void;
@@ -762,7 +764,7 @@ function NoteRow({
       if (dPaths.trim() !== (note.paths ?? []).join(", ")) patch.paths = dPaths.trim();
       if (dLinks.trim() !== (note.links ?? []).join(", ")) patch.links = dLinks.trim();
     }
-    if (Object.keys(patch).length) await onSave(patch);
+    if (Object.keys(patch).length && !(await onSave(patch))) return;
     setEditing(false);
   };
   const pending = note.status === "pending";
@@ -830,7 +832,7 @@ function NoteRow({
               <>
                 from{" "}
                 <a
-                  href={`/dashboard/box/${encodeURIComponent(note.source)}`}
+                  href={`/dashboard/box/${encodeURIComponent(note.source)}${location.search}`}
                   className="hover:text-foreground focus-visible:ring-ring rounded-sm underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
                 >
                   {friendlyName(note.source)}
@@ -865,7 +867,7 @@ function NoteRow({
             <p className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 text-micro">
               <span>
                 Unverified since {fmtAgo(Math.floor(note.stale.at / 1000))} — <span className="font-mono">{note.stale.paths.slice(0, 2).join(", ")}</span> changed in{" "}
-                <a href={`/dashboard/box/${encodeURIComponent(note.stale.box)}`} className="hover:text-foreground underline-offset-2 hover:underline">
+                <a href={`/dashboard/box/${encodeURIComponent(note.stale.box)}${location.search}`} className="hover:text-foreground underline-offset-2 hover:underline">
                   {friendlyName(note.stale.box)}
                 </a>
                 . The next run in this area will confirm or replace it.
@@ -902,7 +904,7 @@ function NoteRow({
                         {v.source && v.source !== "operator" && v.source !== "you" ? (
                           <>
                             from{" "}
-                            <a href={`/dashboard/box/${encodeURIComponent(v.source)}`} className="hover:text-foreground focus-visible:ring-ring rounded-sm underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none">
+                            <a href={`/dashboard/box/${encodeURIComponent(v.source)}${location.search}`} className="hover:text-foreground focus-visible:ring-ring rounded-sm underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none">
                               {friendlyName(v.source)}
                             </a>
                           </>
@@ -963,9 +965,7 @@ function NoteRow({
           <Button variant="ghost" size="icon-sm" aria-label="Edit note" title="Edit" onClick={startEdit}>
             <Pencil className="size-4" />
           </Button>
-          <Button variant="ghost" size="icon-sm" aria-label="Delete note" title="Forget" className="hover:text-destructive" onClick={onDelete}>
-            <Trash2 className="size-4" />
-          </Button>
+          <ArmButton variant="ghost" size="icon-sm" icon={<Trash2 className="size-4" />} label="Delete note" armedLabel="Forget?" className="hover:text-destructive" onConfirm={onDelete} />
         </div>
       )}
     </motion.li>

@@ -52,6 +52,7 @@ import { IconSwap } from "@/components/ui/icon-swap";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { OVERLAY_OPEN } from "@/lib/workspace-model";
 
 // Secondary pages are code-split: the thread — the page you live in — never pays for them.
 const Sandboxes = React.lazy(lazyRetry(() => import("@/components/Sandboxes").then((m) => ({ default: m.Sandboxes }))));
@@ -292,7 +293,10 @@ export default function App() {
     go({ view: "playbooks" });
     setMobileRail(false);
   }, [go]);
-  const showAutomations = React.useCallback(() => go({ view: "automations" }), [go]);
+  const showAutomations = React.useCallback(() => {
+    go({ view: "automations" });
+    setMobileRail(false);
+  }, [go]);
   const goAutopilot = React.useCallback((t: AutopilotTab) => go({ view: t }), [go]);
   const showHistory = React.useCallback(() => {
     go({ view: "history" });
@@ -485,8 +489,11 @@ export default function App() {
     let pendingG = false;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
-      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+      // A modal (shortcuts list, confirm dialog, the phone drawer) owns the keyboard: "n" or "j" must
+      // not navigate the page hidden behind it.
+      const modal = !!document.querySelector(OVERLAY_OPEN);
+      if (typing || modal || e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === "g") {
         pendingG = true;
         window.setTimeout(() => (pendingG = false), 800);

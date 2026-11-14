@@ -14,7 +14,7 @@ const GraphCanvas = React.lazy(lazyRetry(() => import("./GraphCanvas")));
  */
 export function GraphBlock({ dag, source }: { dag: Dag; source: string }) {
   return (
-    <VizFrame title={`${dag.nodes.length} nodes`} source={source} ownsZoom>
+    <VizFrame title={`${dag.nodes.length} ${dag.nodes.length === 1 ? "node" : "nodes"}`} source={source} ownsZoom>
       <GraphBody dag={dag} />
     </VizFrame>
   );

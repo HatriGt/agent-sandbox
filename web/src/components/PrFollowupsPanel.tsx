@@ -74,6 +74,8 @@ export function PrFollowupsPanel() {
     }
   };
   const rotate = async () => {
+    // Rotating replaces the secret existing webhooks sign with; their deliveries fail until they are updated.
+    if (hook && !confirm("A webhook still using the current secret stops working until you give it the new one. Rotate the secret?")) return;
     try {
       const r = await api.rotatePrFollowupHook();
       setHook({ id: r.id, events: r.events });
@@ -82,7 +84,11 @@ export function PrFollowupsPanel() {
       toast.error("Could not create the webhook", { description: e instanceof Error ? e.message : String(e) });
     }
   };
-  const copy = (s: string) => void navigator.clipboard.writeText(s).then(() => toast.success("Copied"));
+  const copy = (s: string) =>
+    void navigator.clipboard.writeText(s).then(
+      () => toast.success("Copied"),
+      () => toast.error("Could not copy — your browser blocked the clipboard")
+    );
 
   if (!prefs) return null;
   return (

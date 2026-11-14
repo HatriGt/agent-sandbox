@@ -130,17 +130,21 @@ function ToolMenu({ open, onOpenChange, title, trigger, side = "top", align = "s
   const rootRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const panelRef = React.useRef<HTMLDivElement>(null);
+  // `onOpenChange` is a fresh closure on every parent render; keep it out of the effect's deps so
+  // typing inside a menu (e.g. the verify input) does not re-run the effect and yank focus back to the first item.
+  const onOpenChangeRef = React.useRef(onOpenChange);
+  onOpenChangeRef.current = onOpenChange;
 
   React.useEffect(() => {
     if (!open || phone) return;
     const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onOpenChange(false);
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onOpenChangeRef.current(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        onOpenChange(false);
+        onOpenChangeRef.current(false);
         triggerRef.current?.focus();
       }
     };
@@ -155,7 +159,7 @@ function ToolMenu({ open, onOpenChange, title, trigger, side = "top", align = "s
       window.removeEventListener("keydown", onKey, true);
       window.clearTimeout(t);
     };
-  }, [open, phone, onOpenChange]);
+  }, [open, phone]);
 
   return (
     <div ref={rootRef} className="relative shrink-0" onClick={(e) => e.stopPropagation()}>

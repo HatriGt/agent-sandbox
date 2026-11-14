@@ -174,7 +174,14 @@ function KVRows({ label, rows, onChange, keyPlaceholder, valuePlaceholder, addLa
                       )
                     )}
                   </div>
-                  <button type="button" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label={`Remove ${r.k || "row"}`} className="text-muted-foreground hover:text-destructive hover:bg-muted grid size-9 cursor-pointer place-items-center rounded-md transition-colors">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // `shown` is keyed by index: shift it with the rows so a revealed value never passes to the next row.
+                      setShown((s) => Object.fromEntries(Object.entries(s).flatMap(([k, v]) => (Number(k) === i ? [] : [[Number(k) > i ? Number(k) - 1 : Number(k), v]]))));
+                      onChange(rows.filter((_, j) => j !== i));
+                    }}
+                    aria-label={`Remove ${r.k || "row"}`} className="text-muted-foreground hover:text-destructive hover:bg-muted grid size-9 cursor-pointer place-items-center rounded-md transition-colors">
                     <X className="size-3.5" />
                   </button>
                 </motion.li>

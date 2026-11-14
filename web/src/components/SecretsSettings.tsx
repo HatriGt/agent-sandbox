@@ -36,7 +36,13 @@ export function SecretsSettings() {
   const [replacing, setReplacing] = React.useState<string | null>(null);
   const nameRef = React.useRef<HTMLInputElement>(null);
 
-  const load = React.useCallback(() => api.secrets().then(setData).catch(() => setData({ secrets: [] })), []);
+  const load = React.useCallback(() => api
+        .secrets()
+        .then(setData)
+        .catch((e: unknown) => {
+          toast.error("Could not load secrets", { description: describe(e) });
+          setData({ secrets: [] });
+        }), []);
   React.useEffect(() => void load(), [load]);
   React.useEffect(() => {
     api

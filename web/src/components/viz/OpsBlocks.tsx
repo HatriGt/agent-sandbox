@@ -126,7 +126,7 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
   };
   return (
     <VizFrame
-      title={`${lines.length} lines`}
+      title={`${lines.length} ${lines.length === 1 ? "line" : "lines"}`}
       source={source}
       rawLanguage="text"
       actions={

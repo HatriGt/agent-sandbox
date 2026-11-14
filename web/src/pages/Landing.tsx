@@ -232,7 +232,7 @@ export default function Landing() {
                   <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
                     {(saas || signedIn) && (
                       <Link to={consoleHref} className={cn(focusRing, secondaryBtn)}>
-                        {signedIn ? primaryLabel : saas ? "Sign up for hosted" : primaryLabel}
+                        {signedIn ? primaryLabel : saas && config?.signup ? "Sign up for hosted" : primaryLabel}
                         <ArrowRight className="size-3.5" aria-hidden />
                       </Link>
                     )}

@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { api, type ProviderKind, type ProvidersResponse, type ProviderView } from "@/lib/api";
 import { getMe } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { ArmButton } from "@/components/ui/arm-button";
 import { SettingsSection } from "@/components/ui/settings";
 import { Bar } from "@/components/thread/Skeletons";
 import { Collapse } from "@/components/ui/collapse";
@@ -147,6 +148,8 @@ function ProviderActions({ p }: { p: ProviderView }) {
       if (r.error) toast.error("Could not list models", { description: r.error });
       else toast.success(`${r.models.length} model${r.models.length === 1 ? "" : "s"}`);
       publish(await api.providers());
+    } catch (e) {
+      toast.error("Could not list models", { description: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(null);
     }
@@ -166,9 +169,7 @@ function ProviderActions({ p }: { p: ProviderView }) {
       <Button size="xs" variant="ghost" onClick={() => void refresh()} disabled={busy !== null} loading={busy === "models"} aria-label={`Refresh models for ${p.label}`}>
         <RefreshCw className="size-3.5" />
       </Button>
-      <Button size="xs" variant="ghost" onClick={() => void del()} disabled={busy !== null} loading={busy === "del"} aria-label={`Remove ${p.label}`}>
-        <Trash2 className="size-3.5" />
-      </Button>
+      <ArmButton size="icon-xs" variant="ghost" icon={<Trash2 />} label={`Remove ${p.label}`} armedLabel="Remove?" onConfirm={del} disabled={busy !== null} busy={busy === "del"} className="text-muted-foreground hover:text-destructive" />
     </span>
   );
 }

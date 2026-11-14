@@ -277,7 +277,8 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
   const [error, setError] = React.useState<string | null>(null);
   const [attempt, setAttempt] = React.useState(0);
   const [source, setSource] = React.useState<Source>("all");
-  const [editing, setEditing] = React.useState<{ id: string | null; draft: AutomationDraft } | null>(null);
+  // `key` pins the editor instance across create → edit, so the shown-once webhook URL survives the save.
+  const [editing, setEditing] = React.useState<{ id: string | null; draft: AutomationDraft; key?: string } | null>(null);
   // Keep the last draft while the sheet slides shut so its content doesn't vanish mid-exit.
   const lastEditing = React.useRef<typeof editing>(null);
   if (editing) lastEditing.current = editing;
@@ -404,6 +405,8 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
             </div>
           ) : !listed.length && source === "chat" ? (
             <EmptyState icon={CalendarClock} title="Nothing scheduled from a chat" line="Ask the agent to run something later or on a schedule and it shows up here." />
+          ) : !listed.length && rows.length > 0 ? (
+            <EmptyState icon={Workflow} title="No standing rules yet" line="Everything here was scheduled from a chat. New automation starts a standing rule." />
           ) : !listed.length ? (
             <div className="space-y-6">
               <div className="bg-card enter flex flex-wrap items-center gap-x-5 gap-y-3 rounded-xl border px-5 py-4">
@@ -452,7 +455,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
             className="w-[min(34rem,calc(100vw-1rem))]"
           >
             <Editor
-              key={shown.id ?? "new"}
+              key={shown.key ?? shown.id ?? "new"}
               id={shown.id}
               initial={shown.draft}
               others={(rows ?? []).filter((r) => r.id !== shown.id)}
@@ -462,7 +465,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
                   const list = prev ?? [];
                   return list.some((x) => x.id === t.id) ? list.map((x) => (x.id === t.id ? { ...t, active: x.active } : x)) : [{ ...t, active: 0 }, ...list];
                 });
-                setEditing((cur) => (cur ? { id: t.id, draft: toDraft(t) } : cur));
+                setEditing((cur) => (cur ? { id: t.id, draft: toDraft(t), key: cur.key ?? cur.id ?? "new" } : cur));
               }}
               onDeleted={(id) => {
                 setRows((prev) => (prev ?? []).filter((x) => x.id !== id));
@@ -866,6 +869,7 @@ function Editor({
 
   const rotate = async () => {
     if (!id) return;
+    if (!confirm("The current URL stops working immediately. Issue a new one?")) return;
     try {
       const r = await api.rotateTrigger(id);
       setHook({ url: r.hookUrl, secret: r.secret });
@@ -886,7 +890,11 @@ function Editor({
     }
   };
 
-  const copy = (s: string) => void navigator.clipboard?.writeText(s).then(() => toast.success("Copied"));
+  const copy = (s: string) =>
+    void navigator.clipboard?.writeText(s).then(
+      () => toast.success("Copied"),
+      () => toast.error("Could not copy — select and copy manually")
+    );
 
   return (
     <div className="flex flex-col gap-5 pb-2">

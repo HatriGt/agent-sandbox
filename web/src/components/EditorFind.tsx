@@ -123,7 +123,7 @@ export function EditorFind({ view, nonce, editable, rev, onClose }: { view: Edit
       animate={{ opacity: 1, y: 0 }}
       exit={still ? { opacity: 0 } : { opacity: 0, y: -6 }}
       transition={{ duration: 0.12, ease: EASE }}
-      className={cn("bg-popover text-popover-foreground shadow-e2 absolute top-2 right-3 z-10 flex items-stretch rounded-md border text-meta", editable && replaceOpen ? "w-[24rem]" : "w-80")}
+      className={cn("bg-popover text-popover-foreground shadow-e2 absolute top-2 right-3 z-10 flex items-stretch rounded-md border text-meta", editable && replaceOpen ? "w-[24rem]" : "w-80", "max-w-[calc(100%-1.5rem)]")}
     >
       {editable && (
         <button type="button" onClick={toggleReplace} aria-expanded={replaceOpen} aria-label={replaceOpen ? "Hide replace" : "Show replace"} className="text-muted-foreground hover:text-foreground hover:bg-muted grid w-5 shrink-0 cursor-pointer place-items-center rounded-l-md border-r">

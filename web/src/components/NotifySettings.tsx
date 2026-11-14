@@ -35,6 +35,7 @@ export function NotifySettings() {
   const [saving, setSaving] = React.useState(false);
   const [saved, setSaved] = React.useState(false);
   const [testing, setTesting] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const ctrl = new AbortController();
@@ -45,7 +46,9 @@ export function NotifySettings() {
         setUrl(s.url);
         setEvents(s.events);
       })
-      .catch(() => {});
+      .catch((e: unknown) => {
+        if (!ctrl.signal.aborted) setLoadError(e instanceof Error ? e.message : String(e));
+      });
     return () => ctrl.abort();
   }, []);
 
@@ -83,11 +86,17 @@ export function NotifySettings() {
     }
   };
 
-  const canTest = !!loaded?.url || !!url.trim() || !!loaded?.fallbackConfigured;
+  // The server tests the STORED webhook, so an edited, unsaved URL must be saved before it can be tested.
+  const urlDirty = loaded !== null && url.trim() !== loaded.url;
+  const canTest = !urlDirty && (!!loaded?.url || !!loaded?.fallbackConfigured);
   return (
     <SettingsSection id="notify" title="Notifications" meta={loaded ? `${onCount} of ${ALL.length} on` : undefined} purpose="Get pinged when a machine needs action or finishes. Point a webhook at Slack, ntfy, Discord — anything that accepts a JSON POST.">
       <Swap state={loaded === null ? "loading" : "form"}>
-        {loaded === null ? (
+        {loaded === null && loadError ? (
+          <p role="alert" className="text-destructive text-meta">
+            Could not load notification settings: {loadError}
+          </p>
+        ) : loaded === null ? (
           <div className="flex max-w-xl flex-col gap-4" aria-busy="true" aria-label="Loading">
             <Bar className="h-2.5 w-20" />
             <Bar className="h-9 w-full" />
@@ -120,7 +129,7 @@ export function NotifySettings() {
             </Panel>
             <div className="flex flex-wrap items-center gap-2">
               <SaveButton onClick={() => void save()} saving={saving} saved={saved} disabled={!urlOk || !dirty} />
-              <Button size="sm" variant="outline" onClick={() => void sendTest()} loading={testing} disabled={!canTest}>
+              <Button size="sm" variant="outline" onClick={() => void sendTest()} loading={testing} disabled={!canTest} title={urlDirty ? "Save the webhook URL first — the test goes to the saved one" : undefined}>
                 <Send />
                 Send test
               </Button>

@@ -33,6 +33,8 @@ export function Collapse({
         transition={transition}
         className={cn("overflow-hidden", className)}
         aria-hidden={!open}
+        // Closed content is kept mounted but must not take Tab focus while invisible.
+        inert={!open || undefined}
         style={{ pointerEvents: open ? undefined : "none" }}
       >
         {children}
