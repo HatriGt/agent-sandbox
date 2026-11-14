@@ -48,6 +48,50 @@ function touchesControlPath(s: string): boolean {
   return CONTROL_PATHS.some((re) => re.test(rest));
 }
 
+/** Commands that change or remove whatever path they are given. */
+const MUTATE_ANY = /^(rm|rmdir|mv|chmod|chown|chattr|truncate|tee|unlink|shred)$/;
+/** Commands that write only their LAST path argument (the destination); reading the sources is fine. */
+const MUTATE_DEST = /^(cp|install|ln|rsync)$/;
+
+/**
+ * Does this shell command WRITE a control path? Reading one is fine: skills live under
+ * ~/.claude/skills, and `cat ~/.claude/skills/x/SKILL.md 2>/dev/null` or `node ~/.claude/skills/x/run.mjs
+ * 2>&1` are how an agent uses them. The old test denied any command that named a control path and
+ * held a `>` anywhere, so a stderr redirect made reading a skill "changing the control files".
+ *
+ * Per segment (split on ; && || | and newlines): a `>`/`>>` whose target is a control path; a
+ * MUTATE_ANY command with a control path among its arguments; a MUTATE_DEST command whose destination
+ * is one; `sed -i`/`perl -i` on one; `dd of=` one; `find … -delete|-exec rm` over one. Variables set
+ * earlier in the command (`S=~/.claude/settings.json; rm $S`) are expanded first, so the indirection
+ * does not hide a write.
+ */
+function writesControlPath(cmd: string): boolean {
+  const vars: Record<string, string> = {};
+  for (const raw of cmd.split(/\|\||&&|[;|\n]/)) {
+    const seg = raw.replace(/\$\{?(\w+)\}?/g, (m: string, n: string) => (n in vars ? vars[n] : m));
+    for (const m of seg.matchAll(/(?:^|[^<>&\d])\d*>{1,2}\|?\s*([^\s<>&|;]+)/g)) {
+      if (touchesControlPath(m[1])) return true;
+    }
+    const words = seg.trim().split(/\s+/).filter(Boolean);
+    while (words.length && /^\w+=/.test(words[0])) {
+      const eq = words[0].indexOf("=");
+      vars[words[0].slice(0, eq)] = words[0].slice(eq + 1).replace(/^["']|["']$/g, "");
+      words.shift();
+    }
+    while (words.length && /^(sudo|env|command|exec|nohup|time|xargs)$/.test(words[0])) words.shift();
+    if (!words.length) continue;
+    const name = words[0].split("/").pop() || "";
+    const args = words.slice(1);
+    const paths = args.filter((a) => !a.startsWith("-"));
+    if (MUTATE_ANY.test(name) && args.some((a) => touchesControlPath(a))) return true;
+    if (MUTATE_DEST.test(name) && paths.length && touchesControlPath(paths[paths.length - 1])) return true;
+    if ((name === "sed" || name === "perl") && args.some((a) => /^-\w*i/.test(a)) && args.some((a) => touchesControlPath(a))) return true;
+    if (name === "dd" && args.some((a) => a.startsWith("of=") && touchesControlPath(a.slice(3)))) return true;
+    if (name === "find" && /\s-(delete|exec\s+(rm|mv|chmod|truncate|tee))\b/.test(seg) && touchesControlPath(seg)) return true;
+  }
+  return false;
+}
+
 export function guardDecision(tool: string, input: Record<string, unknown> | undefined): GuardDecision {
   const inp = input ?? {};
   if (tool === "Write" || tool === "Edit" || tool === "MultiEdit" || tool === "NotebookEdit") {
@@ -60,8 +104,8 @@ export function guardDecision(tool: string, input: Record<string, unknown> | und
   if (tool === "Bash") {
     const cmd = String(inp.command ?? "");
     const flat = cmd.replace(/\s+/g, " ");
-    // 1. Editing or deleting the control plane through the shell.
-    if (/(>>?|\btee\b|\bsed\s+-i|\brm\b|\bmv\b|\bcp\b|\bchmod\b|\btruncate\b)/.test(flat) && touchesControlPath(flat)) {
+    // 1. Editing or deleting the control plane through the shell (reading it, e.g. a skill, is fine).
+    if (writesControlPath(cmd)) {
       return { deny: true, reason: "Refusing to change the sandbox's control files (~/.claude, .agent.*, credentials). Work in /workspace only." };
     }
     if (DISABLE_CONTROLS.test(flat)) {
@@ -99,8 +143,11 @@ export function guardNodeProgram(): string {
     `const PIPE_TO_NETWORK=${String(PIPE_TO_NETWORK)};`,
     `const DESTRUCTIVE_ROOT=${String(DESTRUCTIVE_ROOT)};`,
     `const DISABLE_CONTROLS=${String(DISABLE_CONTROLS)};`,
+    `const MUTATE_ANY=${String(MUTATE_ANY)};`,
+    `const MUTATE_DEST=${String(MUTATE_DEST)};`,
     `const MEMORY_PATH=${String(MEMORY_PATH)};`,
     `function touchesControlPath(s){const rest=s.replace(MEMORY_PATH," ");return CONTROL_PATHS.some(re=>re.test(rest))}`,
+    writesControlPath.toString(),
   ].join("\n");
   return (
     `${consts}\n${src}\n` +
