@@ -1,13 +1,11 @@
 import * as React from "react";
-import { ChevronRight, Home, PanelLeftClose, PanelLeftOpen, Search, X } from "lucide-react";
+import { ChevronRight, Home, Search, X } from "lucide-react";
 import { motion } from "motion/react";
 import type { BoxView } from "@/lib/api";
 import type { ConsoleRoute } from "@/lib/route";
 import { useReducedMotion } from "@/lib/motion-pref";
-import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { NumberTicker } from "@/components/ui/number-ticker";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { openPalette } from "@/components/CommandPalette";
 import { cn } from "@/lib/utils";
 
@@ -170,8 +168,6 @@ export function ShellBar({
   boxes,
   working,
   waiting,
-  collapsed,
-  onToggleSidebar,
   onOpenWaiting,
   onSelect,
   onHome,
@@ -186,8 +182,6 @@ export function ShellBar({
   boxes: BoxView[];
   working: number;
   waiting: number;
-  collapsed: boolean;
-  onToggleSidebar: () => void;
   onOpenWaiting: () => void;
   onSelect: (r: TabRoute) => void;
   onHome: () => void;
@@ -206,15 +200,8 @@ export function ShellBar({
   );
   return (
     <div data-shell-bar className="bg-sidebar hidden h-10 shrink-0 items-stretch gap-2 pr-3 pl-1.5 md:flex">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon-sm" onClick={onToggleSidebar} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-pressed={!collapsed} className="hit-40 my-auto">
-            {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">{collapsed ? "Expand sidebar" : "Collapse sidebar"}</TooltipContent>
-      </Tooltip>
-
+      {/* No sidebar toggle here: the sidebar carries its own (Collapse in its header, Expand at the
+          foot of the rail). A second one in the tab bar did the same thing from two places. */}
       <div role="tablist" aria-label="Open tabs" className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none]">
         <button
           type="button"

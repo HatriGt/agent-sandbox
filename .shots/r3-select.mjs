@@ -131,6 +131,7 @@ page.on("pageerror", (e) => errors.push(String(e)));
 page.on("response", (r) => r.status() >= 400 && errors.push(`${r.status()} ${r.url()}`));
 const json = (route, body) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 const asked = [];
+const resumed = [];
 await serveWorktreeFonts(ctx);
 await page.route("**/*", async (route) => {
   const u = new URL(route.request().url());
@@ -175,6 +176,8 @@ await page.route("**/*", async (route) => {
       return json(route, { repo: "orders-api", branch: "feat/sliding-window-limiter", upstream: "origin/feat/sliding-window-limiter", ahead: 0, behind: 0, lastCommit: "feat: sliding-window rate limiter", clean: false, changed: 2 });
     case "/memory.json":
     case "/resume.json":
+      resumed.push(route.request().postDataJSON());
+      return json(route, { ok: true });
     case "/title.json":
     case "/wake.json":
       return json(route, { ok: true });
@@ -285,21 +288,50 @@ if (phone) {
   check("empty draft sends Explain this. under the quote", wire2.startsWith("> Two things worth your eyes") && wire2.endsWith("\n\nExplain this."), JSON.stringify(wire2.slice(-40)));
   await shot("-default");
 
-  /* 4 ─ Quote in reply: into the main composer, appended when a draft exists */
+  /* 4 ─ Quote in reply: a ❝…❞ tag in the text drawn as a pill (like a skill); a click on it jumps back */
+  const quotePill = () => page.locator(".tag-pill-quote");
+  const draft = () => page.locator("#send-input").inputValue();
   await selectParagraph("The limiter now keeps");
   await pill().getByRole("button", { name: "Quote in reply" }).click();
-  await page.waitForTimeout(250);
-  const v1 = await page.locator("#send-input").inputValue();
-  check("Quote in reply lands in the composer", v1.startsWith("> The limiter now keeps") && v1.endsWith("\n\n"), JSON.stringify(v1.slice(0, 40)));
-  check("composer is focused with the caret at the end", await page.evaluate(() => { const t = document.activeElement; return t?.id === "send-input" && t.selectionStart === t.value.length; }));
+  await page.waitForTimeout(350);
+  const d1 = await draft();
+  check("Quote in reply writes a short quote tag into the text", /^❝The limiter now keeps[^❞]*…❞ $/.test(d1), JSON.stringify(d1));
+  check("the tag is drawn as a pill in the line", (await quotePill().count()) === 1 && (await quotePill().innerText()).startsWith("❝The limiter"));
+  check("composer is focused with the caret after the tag", await page.evaluate(() => { const t = document.activeElement; return t?.id === "send-input" && t.selectionStart === t.value.length; }));
   await shot("-quote-reply");
-  await page.locator("#send-input").type("Also check the tests.");
+  await shot("-quote-reply-zoom", await clipAround(page.locator("#send-input"), 16));
+  await page.keyboard.type("Also check the tests.");
   await selectParagraph("Two things worth your eyes");
   await pill().getByRole("button", { name: "Quote in reply" }).click();
-  await page.waitForTimeout(250);
-  const v2 = await page.locator("#send-input").inputValue();
-  check("a second quote appends after the draft", v2.startsWith("> The limiter") && v2.includes("Also check the tests.\n\n> Two things"), JSON.stringify(v2.slice(-60)));
+  await page.waitForTimeout(350);
+  const d2 = await draft();
+  check("a second quote lands after the typed words", (await quotePill().count()) === 2 && /^❝The limiter[^❞]*❞ Also check the tests\. ❝Two things[^❞]*❞ $/.test(d2), JSON.stringify(d2));
   await shot("-quote-append");
+  // Jump: scroll the conversation away, click on the first pill in the text, the passage comes back highlighted.
+  await conv().evaluate((root) => {
+    const el = [root, ...root.querySelectorAll("*")].find((n) => n.scrollHeight > n.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(n).overflowY));
+    if (el) el.scrollTop = el.scrollHeight;
+  });
+  await page.waitForTimeout(200);
+  const pb = await quotePill().first().boundingBox();
+  await page.mouse.click(pb.x + pb.width / 2, pb.y + pb.height / 2);
+  await page.waitForTimeout(900);
+  const jumped = await page.evaluate(() => {
+    const hl = CSS.highlights?.get("quote-jump");
+    const r = hl ? [...hl][0] : null;
+    if (!r) return null;
+    const b = r.getBoundingClientRect();
+    return { text: r.toString().slice(0, 30), top: Math.round(b.top), inView: b.top >= 0 && b.bottom <= innerHeight };
+  });
+  check("clicking the pill in the text highlights the passage in view", !!jumped && jumped.text.startsWith("The limiter now keeps") && jumped.inView, JSON.stringify(jumped));
+  await shot("-quote-jump");
+  // Backspace right after a quote tag takes the whole tag out, like a picked skill.
+  await page.locator("#send-input").evaluate((t) => { t.focus(); t.setSelectionRange(t.value.length - 1, t.value.length - 1); });
+  await page.keyboard.press("Backspace");
+  await page.waitForTimeout(200);
+  const d3 = await draft();
+  check("Backspace after a quote tag removes all of it", (await quotePill().count()) === 1 && !d3.includes("Two things"), JSON.stringify(d3));
+  await page.locator("#send-input").evaluate((t) => { t.focus(); t.setSelectionRange(t.value.length, t.value.length); });
 
   /* 5 ─ Copy, Escape */
   await selectParagraph("The limiter now keeps");
@@ -341,6 +373,13 @@ if (phone) {
   await page.waitForTimeout(200);
   const after = (await pill().count()) ? await pill().boundingBox() : null;
   check("scroll repositions or hides the pill", !!scrolled && scrolled.to !== scrolled.from && (!after || (before && Math.abs(after.y - before.y) > 100)), `scrollTop ${JSON.stringify(scrolled)} · pill y before ${before ? Math.round(before.y) : "none"} · after ${after ? Math.round(after.y) : "none"}`);
+
+  /* 8 ─ (last: a send sticks the thread to the bottom) the tag goes out as the whole passage in > lines */
+  await page.locator("#send-input").press("Enter");
+  await page.waitForTimeout(700);
+  const sentMsg = resumed.at(-1)?.message ?? JSON.stringify(resumed.at(-1) ?? null);
+  check("the tag is sent as the full passage in > lines, then the text", /^> The limiter now keeps six 10-second buckets[\s\S]*\{ limit, window \}\.\n\nAlso check the tests\.$/.test(sentMsg), JSON.stringify(String(sentMsg).slice(0, 50) + " … " + String(sentMsg).slice(-40)));
+  check("the composer is empty after sending", (await draft()) === "" && (await quotePill().count()) === 0);
 }
 
 console.log("shots:", shots.join(" "));

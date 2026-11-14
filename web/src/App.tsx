@@ -970,8 +970,6 @@ export default function App() {
             boxes={boxes}
             working={working}
             waiting={waiting.length}
-            collapsed={collapsed}
-            onToggleSidebar={() => setCollapsed(!collapsed)}
             onOpenWaiting={() => waiting[0] && open(waiting[0].name)}
             onSelect={go}
             onHome={goHub}
