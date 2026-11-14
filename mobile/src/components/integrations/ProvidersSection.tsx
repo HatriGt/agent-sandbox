@@ -4,6 +4,7 @@ import { api, type ProviderKind, type ProvidersResponse, type ProviderView } fro
 import { useAuth } from "@/state/auth";
 import { SettingsSection } from "@/components/ui/SettingsSection";
 import { T } from "@/components/ui/AppText";
+import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
@@ -140,7 +141,8 @@ function ProviderRow({ p, onChanged, onNote }: { p: ProviderView; onChanged: (r:
       </T>
       <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
         <Button small variant="ghost" title="Refresh models" loading={busy === "models"} disabled={busy !== null} onPress={() => void refresh()} />
-        <Button small variant="ghost" title="Remove provider" loading={busy === "del"} disabled={busy !== null} onPress={() => void del()} />
+        {/* Removing a provider breaks every harness/run pinned to it — arm-to-confirm like other removals. */}
+        <ArmButton small variant="ghost" title="Remove provider" armedTitle="Tap again to remove" disabled={busy !== null && busy !== "del"} onConfirm={del} />
       </View>
     </Card>
   );

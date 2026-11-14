@@ -141,13 +141,18 @@ export function Composer({
       setFileHits([]);
       return;
     }
+    // A slower reply for an older query must not replace the hits for what is typed now.
+    let cancelled = false;
     const t = setTimeout(() => {
       api
         .files(session, mention.query)
-        .then((r) => setFileHits(r.files.slice(0, 8)))
-        .catch(() => setFileHits([]));
+        .then((r) => !cancelled && setFileHits(r.files.slice(0, 8)))
+        .catch(() => !cancelled && setFileHits([]));
     }, 120);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [mention?.query, mention, session]);
 
   const syncSendButton = (t: string, f: string[], s: string | null) => {

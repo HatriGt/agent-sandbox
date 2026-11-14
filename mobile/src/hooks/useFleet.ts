@@ -25,15 +25,19 @@ export function useFleet(active = true) {
   useEffect(() => {
     if (!active) return;
     let stopped = false;
-    const loop = async () => {
+    // A foreground restart while a tick is still in flight must not leave that tick's loop running
+    // too — each restart bumps the generation and only the newest loop reschedules (otherwise
+    // every resume could add another parallel poller).
+    let gen = 0;
+    const loop = async (mine: number) => {
       await tick();
-      if (!stopped) timer.current = setTimeout(loop, TICK_MS);
+      if (!stopped && mine === gen) timer.current = setTimeout(() => void loop(mine), TICK_MS);
     };
-    void loop();
+    void loop(gen);
     const sub = AppState.addEventListener("change", (st) => {
       if (st === "active" && !stopped) {
         if (timer.current) clearTimeout(timer.current);
-        void loop();
+        void loop(++gen);
       }
     });
     return () => {

@@ -220,7 +220,19 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
   const pickImage = async (camera: boolean) => {
     setSheet(null);
     const fn = camera ? ImagePicker.launchCameraAsync : ImagePicker.launchImageLibraryAsync;
-    const res = await fn({ mediaTypes: ["images"], quality: 0.7, base64: true });
+    // The camera needs a runtime grant; without asking first the launch rejected and the tap
+    // silently did nothing.
+    let res: ImagePicker.ImagePickerResult;
+    try {
+      if (camera && !(await ImagePicker.requestCameraPermissionsAsync()).granted) {
+        setError("Camera access is off for this app — allow it in system Settings to take a photo.");
+        return;
+      }
+      res = await fn({ mediaTypes: ["images"], quality: 0.7, base64: true });
+    } catch (e) {
+      setError(`Couldn't open the ${camera ? "camera" : "photo library"} — ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
     const asset = res.assets?.[0];
     if (!asset?.base64) return;
     if (attachments.length >= MAX_ATTACHMENTS) return;

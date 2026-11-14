@@ -218,7 +218,7 @@ export function PrSheet({
                   {checks?.total ? ` · ${checks.success}/${checks.total} checks` : ` · ${repo}`}
                 </T>
               </View>
-              <PressScale onPress={() => WebBrowser.openBrowserAsync(pr.url)} hitSlop={8} style={{ padding: 6 }}>
+              <PressScale onPress={() => WebBrowser.openBrowserAsync(pr.url)} hitSlop={8} accessibilityLabel="Open on GitHub" style={{ padding: 6 }}>
                 <Icon name="external-link" size={16} color={palette.mutedForeground} />
               </PressScale>
             </View>

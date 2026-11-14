@@ -2,7 +2,7 @@
 // /tree.json's flat paths; a text file opens in a plain monospace editor and saves via PUT /file.json.
 // Commit and push stay where they already live: the thread's Changes sheet.
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { Alert, Pressable, ScrollView, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { api } from "@/lib/api";
 import { pathResolver } from "@/lib/code-refs";
@@ -132,7 +132,19 @@ export default function Files() {
         ) : null}
         <View style={{ flexDirection: "row", gap: 8 }}>
           <Button title="Save" loading={saving} disabled={!dirty} onPress={() => void save()} />
-          <Button variant="ghost" title={dirty ? "Discard" : "Close"} onPress={() => setOpen(null)} />
+          <Button
+            variant="ghost"
+            title={dirty ? "Discard" : "Close"}
+            onPress={() =>
+              // Unsaved edits to a workspace file are gone for good once discarded — ask first.
+              dirty
+                ? Alert.alert("Discard your changes?", `Your unsaved edits to ${open.path.split("/").pop()} will be lost.`, [
+                    { text: "Keep editing", style: "cancel" },
+                    { text: "Discard", style: "destructive", onPress: () => setOpen(null) },
+                  ])
+                : setOpen(null)
+            }
+          />
         </View>
       </SettingsScreen>
     );

@@ -40,6 +40,10 @@ export function useWatch(session: string | undefined) {
   // on screen instead. The server's offset is 0 then, so its next `append` is the whole log — it must
   // REPLACE our stale copy, not extend it.
   const stale = useRef(false);
+  // The box this hook is showing NOW. A reply for the previous box (route reused with a new name)
+  // that lands after the switch must be dropped, not painted over this one's transcript.
+  const live = useRef(session);
+  live.current = session;
 
   const setLogBoth = (updater: (prev: string) => string) => {
     logRef.current = updater(logRef.current);
@@ -75,6 +79,7 @@ export function useWatch(session: string | undefined) {
       if (stopped.current) return;
       try {
         const snap = await api.watch(session);
+        if (stopped.current || live.current !== session) return;
         applySnapshot(snap);
         setGone(false);
         // Case-insensitive: watch.json says "running", fleet.json says "Running".
@@ -86,6 +91,7 @@ export function useWatch(session: string | undefined) {
           return;
         }
       } catch (e) {
+        if (stopped.current || live.current !== session) return;
         if ((e as { status?: number }).status === 404) setGone(true);
       }
       pollTimer.current = setTimeout(poll, DONE_POLL_MS);
@@ -197,6 +203,8 @@ export function useWatch(session: string | undefined) {
     logRef.current = seedLog;
     setLog(logRef.current);
     setMeta(cached?.meta ?? null);
+    // The previous box's "no longer exists" must not carry over to this one.
+    setGone(false);
     offset.current = undefined;
     // Fetch the snapshot immediately over plain GET: for a sleeping (stopped)
     // box the SSE stream may error without ever delivering meta, and the
@@ -205,6 +213,7 @@ export function useWatch(session: string | undefined) {
     api
       .watch(session)
       .then((snap) => {
+        if (live.current !== session) return;
         // The fresh server log wins over the cache SEED: for a reused name (warm claim, recreate)
         // the cached log is a previous run's transcript, and `prev || l` kept it on screen whenever
         // the SSE snapshot never arrived (the sleeping-box path). But this GET races the SSE
@@ -217,7 +226,7 @@ export function useWatch(session: string | undefined) {
         applySnapshot(snap);
       })
       .catch((e) => {
-        if ((e as { status?: number }).status === 404) setGone(true);
+        if (live.current === session && (e as { status?: number }).status === 404) setGone(true);
       });
     connect();
     const sub = AppState.addEventListener("change", (st) => {
@@ -245,7 +254,8 @@ export function useWatch(session: string | undefined) {
   const refresh = useCallback(async () => {
     if (!session) return;
     try {
-      applySnapshot(await api.watch(session));
+      const snap = await api.watch(session);
+      if (live.current === session) applySnapshot(snap);
     } catch {
       /* transient */
     }

@@ -169,7 +169,7 @@ export default function Home() {
             {greeting(name)}
           </T>
           <T variant="lead" tone="muted">
-            {snap ? fleetSentence(boxes) : "Checking the fleet…"}
+            {snap ? fleetSentence(boxes) : error ? `Couldn't reach the fleet — ${error}` : "Checking the fleet…"}
           </T>
 
           <TrialEndedNotice />

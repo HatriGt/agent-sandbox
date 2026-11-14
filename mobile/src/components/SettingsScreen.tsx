@@ -2,6 +2,7 @@ import React, { useRef } from "react";
 import { Animated, ScrollView, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useTheme } from "@/theme/ThemeContext";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
@@ -32,6 +33,7 @@ export function SettingsScreen({
 }) {
   const router = useRouter();
   const { palette } = useTheme();
+  const keyboardInset = useKeyboardInset();
   const y = useRef(new Animated.Value(0)).current;
   const handoff = y.interpolate({ inputRange: [HANDOFF, HANDOFF + 24], outputRange: [0, 1], extrapolate: "clamp" });
   const barTitleY = y.interpolate({ inputRange: [HANDOFF, HANDOFF + 24], outputRange: [6, 0], extrapolate: "clamp" });
@@ -61,7 +63,10 @@ export function SettingsScreen({
         ref={scrollRef}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y } } }], { useNativeDriver: true })}
         scrollEventThrottle={16}
-        contentContainerStyle={{ padding: 20, paddingTop: 4, gap: 12, paddingBottom: 40 }}
+        // Forms live on these screens: iOS insets for the keyboard natively; Android (edge-to-edge, no
+        // adjustResize) gets the keyboard height as bottom padding so the lower fields can scroll clear.
+        automaticallyAdjustKeyboardInsets
+        contentContainerStyle={{ padding: 20, paddingTop: 4, gap: 12, paddingBottom: 40 + keyboardInset }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >

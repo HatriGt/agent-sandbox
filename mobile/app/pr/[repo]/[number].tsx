@@ -11,8 +11,9 @@
  * `repo` is "owner/name" — a slash — so it travels as ONE url-encoded route segment and is
  * decoded here.
  */
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
@@ -58,17 +59,32 @@ function PullRequestScreen() {
   const [pr, setPr] = useState<PullDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("conversation");
+  const keyboardInset = useKeyboardInset();
 
+  // The PR this screen is showing right now — a reply for a previous repo/number (route reused by a
+  // second deep link) must not land on this one.
+  const target = useRef("");
+  target.current = `${repo}#${number}`;
   const load = useCallback(() => {
     // A missing param coerces to 0; only a real PR number is worth a round trip.
-    if (!repo || !Number.isInteger(number) || number <= 0) return;
+    if (!repo || !Number.isInteger(number) || number <= 0) {
+      setError("This link does not name a pull request.");
+      return;
+    }
+    const key = `${repo}#${number}`;
     api
       .pullDetail(repo, number)
       .then((d) => {
+        if (target.current !== key) return;
         setPr(d);
         setError(null);
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => target.current === key && setError(e instanceof Error ? e.message : String(e)));
+  }, [repo, number]);
+  useEffect(() => {
+    setPr(null);
+    setError(null);
+    setTab("conversation");
   }, [repo, number]);
   useEffect(load, [load]);
 
@@ -96,7 +112,9 @@ function PullRequestScreen() {
         </PressScale>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 0, gap: 12, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+      {/* The comment box sits at the bottom of a long page: inset for the keyboard (iOS natively,
+          Android edge-to-edge by padding) or it types blind under it. */}
+      <ScrollView automaticallyAdjustKeyboardInsets contentContainerStyle={{ padding: 20, paddingTop: 0, gap: 12, paddingBottom: 40 + keyboardInset }} keyboardShouldPersistTaps="handled">
         {error && !pr ? (
           <Card style={{ borderColor: `${palette.destructive}55`, backgroundColor: `${palette.destructive}14` }}>
             <T variant="meta" weight="semibold" style={{ color: palette.destructive }}>
@@ -200,7 +218,7 @@ function PullRequestScreen() {
         </View>
 
         {!pr ? (
-          <Card>
+          error ? null : <Card>
             <T variant="meta" tone="muted">
               Loading pull request…
             </T>

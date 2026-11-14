@@ -75,7 +75,7 @@ export function TurnRail({
           const active = i === activeIdx;
           const color = t.kind === "question" ? palette.attention : active ? palette.foreground : palette.lineStrong;
           return (
-            <PressScale key={t.key} onPress={() => onJump(t)} hitSlop={{ left: 14, right: 14, top: 5, bottom: 5 }}>
+            <PressScale key={t.key} onPress={() => onJump(t)} hitSlop={{ left: 14, right: 14, top: 5, bottom: 5 }} accessibilityLabel={t.kind === "task" ? "Jump to the task" : t.kind === "question" ? "Jump to question" : "Jump to your message"}>
               <View
                 style={{
                   width: active ? 8 : 6,

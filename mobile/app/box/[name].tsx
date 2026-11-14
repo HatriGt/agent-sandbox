@@ -100,7 +100,7 @@ function Thread() {
   const side = useSideChat(session);
   const [answering, setAnswering] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number; box: string } | null>(null);
   const [stick, setStick] = useState(true);
   const stickRef = useRef(true);
   stickRef.current = stick;
@@ -193,17 +193,32 @@ function Thread() {
     setReplies([]);
     setSettled(new Set());
     setPickedModel(null);
+    // Open sheets/confirms belong to the previous box. (A held prefill is also gated by its `box` tag:
+    // the composer remounts per box and would re-apply it before this effect runs.)
+    setPrefill(null);
+    setSheet(null);
+    setRevertAsk(null);
+    setMsgActions(null);
   }, [session]);
 
   useEffect(() => {
+    // The previous box's model list must not show (or be picked) while this box's loads, and its
+    // late reply must not land here.
+    setModels([]);
+    setCurrentModel(null);
     if (!session) return;
+    let cancelled = false;
     api
       .models(session)
       .then((r) => {
+        if (cancelled) return;
         setModels(r.models);
         setCurrentModel(r.current);
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [session]);
 
   // Which operator messages have a restore point. Refetched whenever the run settles.
@@ -221,12 +236,19 @@ function Thread() {
       setRefreshing(false);
     }
   }, [refresh]);
+  // Restore points belong to one box: clear them on a box switch so the previous box's revert
+  // buttons never show on this transcript.
+  useEffect(() => setRevertable(new Set()), [session]);
   useEffect(() => {
     if (!session || running) return;
+    let cancelled = false;
     api
       .revertPoints(session)
-      .then((r) => setRevertable(new Set(r.messages)))
+      .then((r) => !cancelled && setRevertable(new Set(r.messages)))
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [session, running]);
   const canRevertNow = !sleeping && !running;
 
@@ -616,7 +638,7 @@ function Thread() {
                   box={session}
                   runState={merged?.runState}
                   onNote={setNote}
-                  onPrefill={(text) => setPrefill({ text, nonce: Date.now() })}
+                  onPrefill={(text) => setPrefill({ text, nonce: Date.now(), box: session })}
                 />
               </View>
             ) : null}
@@ -735,7 +757,7 @@ function Thread() {
             key={session}
             session={session}
             draftKey={draftKeyForBox(session)}
-            prefill={prefill}
+            prefill={prefill?.box === session ? prefill : null}
             onSend={steer}
             running={running}
             sleeping={sleeping}
@@ -822,7 +844,7 @@ function Thread() {
                 label: "Quote into composer",
                 run: () => {
                   const quoted = (msgActions?.text ?? "").split("\n").map((l) => `> ${l}`).join("\n");
-                  setPrefill({ text: `${quoted}\n\n`, nonce: Date.now() });
+                  setPrefill({ text: `${quoted}\n\n`, nonce: Date.now(), box: session });
                 },
               },
               ...(msgActions?.revert

@@ -84,7 +84,8 @@ export default function Fleet() {
               </T>
             ) : null}
             {!snap && error ? (
-              <View style={{ alignItems: "flex-start" }}>
+              <View style={{ alignItems: "flex-start", gap: 8 }}>
+                <T variant="meta" tone="muted">{`Couldn't load the fleet — ${error}`}</T>
                 <Button title="Retry" variant="outline" small onPress={() => void refresh()} />
               </View>
             ) : null}

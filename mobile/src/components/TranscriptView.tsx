@@ -215,6 +215,7 @@ function RevertButton({ onConfirm }: { onConfirm: () => void }) {
       haptic="light"
       scaleTo={0.9}
       hitSlop={8}
+      accessibilityLabel="Revert to before this message"
       style={({ pressed }) => ({
         width: 28,
         height: 28,

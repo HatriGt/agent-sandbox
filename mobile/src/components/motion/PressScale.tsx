@@ -40,6 +40,8 @@ export function PressScale({ style, children, scaleTo = 0.97, haptic: kind, onPr
   const resolved = typeof style === "function" ? style(state) : style;
   return (
     <AnimatedPressable
+      // Every pressable reads as a button to screen readers unless the caller says otherwise.
+      accessibilityRole={onPress ? "button" : undefined}
       {...rest}
       onPressIn={(e: GestureResponderEvent) => {
         setPressed(true);

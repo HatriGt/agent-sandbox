@@ -117,19 +117,22 @@ export default function Activity() {
   const [audit, setAudit] = useState<AuditEventRow[] | null>(null);
   const [runs, setRuns] = useState<LedgerRow[] | null>(null);
   const [auditDone, setAuditDone] = useState(false);
+  const [auditErr, setAuditErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const [live, setLive] = useState<TimelineRow[]>([]);
 
   const loadAudit = useCallback(async (cursor?: { at: string; id: number }) => {
     setBusy(true);
+    setAuditErr(null);
     try {
       const r = await api.audit({ limit: PAGE, before: cursor?.at, beforeId: cursor?.id });
       setAudit((prev) => [...(cursor ? (prev ?? []) : []), ...r.events]);
       if (r.events.length < PAGE) setAuditDone(true);
-    } catch {
+    } catch (e) {
+      // Say so: a failed load used to read as "Nothing yet" / "none in the last 90 days".
       setAudit((prev) => prev ?? []);
-      setAuditDone(true);
+      setAuditErr(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -216,6 +219,12 @@ export default function Activity() {
                 <T variant="meta" tone="muted">
                   What happened as you: your actions, each run's start and finish, and what live machines did while this device was open. Audit kept 90 days.
                 </T>
+                {auditErr ? (
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                    <T variant="meta" tone="destructive" style={{ flex: 1 }}>{`Couldn't load your activity — ${auditErr}`}</T>
+                    <Button title="Retry" variant="outline" small loading={busy} onPress={() => void loadAudit(audit && audit.length > 0 ? { at: audit[audit.length - 1].at, id: audit[audit.length - 1].id } : undefined)} />
+                  </View>
+                ) : null}
                 {rows && rows.length > 0 ? (
                   <Segmented small value={filter} onChange={setFilter} options={ACTIVITY_FILTERS.map((f) => ({ value: f.value, label: `${f.label} ${counts[f.value]}` }))} />
                 ) : null}
@@ -228,7 +237,7 @@ export default function Activity() {
                   <CardSkeleton />
                   <CardSkeleton />
                 </View>
-              ) : rows.length === 0 ? (
+              ) : rows.length === 0 && auditErr ? null : rows.length === 0 ? (
                 <Card style={{ gap: 4 }}>
                   <T variant="body" weight="medium">
                     Nothing yet
@@ -246,7 +255,7 @@ export default function Activity() {
                 </Card>
               )
             }
-            ListFooterComponent={rows && rows.length > 0 && !auditDone && oldest ? <Button title="Show more" variant="ghost" small loading={busy} onPress={more} /> : null}
+            ListFooterComponent={rows && rows.length > 0 && !auditDone && !auditErr && oldest ? <Button title="Show more" variant="ghost" small loading={busy} onPress={more} /> : null}
           />
         )}
       </FadeIn>

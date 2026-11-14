@@ -120,8 +120,16 @@ export function Sheet({
     const remain = Math.max(0, screenH - position.current);
     const base = 120 + (remain / screenH) * 160;
     const duration = Math.max(90, Math.min(280, velocity > 0 ? base / (1 + velocity) : base));
-    Animated.timing(slide, { toValue: screenH, duration, easing: EASE_DRAWER, useNativeDriver: true }).start(finish);
+    // Only a completed exit unmounts: reopening mid-exit interrupts this timing with the open
+    // spring, and unmounting then would leave `visible` true with no sheet on screen.
+    Animated.timing(slide, { toValue: screenH, duration, easing: EASE_DRAWER, useNativeDriver: true }).start(({ finished }) => {
+      if (finished) finish();
+    });
   };
+  // The pan responder is created once; route its close through the latest render's dismiss so it
+  // calls the current onClose, not the one captured on first mount.
+  const dismissRef = useRef(dismiss);
+  dismissRef.current = dismiss;
 
   const snapBack = () => Animated.spring(slide, { toValue: 0, useNativeDriver: true, ...SPRING.snap }).start();
   const crossed = useRef(false);
@@ -142,7 +150,7 @@ export function Sheet({
         }
       },
       onPanResponderRelease: (_e, g) => {
-        if (g.dy > Math.min(90, sheetH.current * 0.25) || g.vy > 0.7) dismiss(true, Math.max(0, g.vy));
+        if (g.dy > Math.min(90, sheetH.current * 0.25) || g.vy > 0.7) dismissRef.current(true, Math.max(0, g.vy));
         else snapBack();
       },
       onPanResponderTerminate: snapBack,
