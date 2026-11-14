@@ -1051,7 +1051,10 @@ export function selectMemory(store: MemoryStore, repos: string[], task?: string,
   const visible = visibleNotes(store, repos);
   const core = visible.filter((n) => OPERATOR_KINDS.has(n.kind) || n.pinned).sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || a.at - b.at);
   // Area notes are served as pages; "For this task" is for the notes nobody filed under an area.
-  const rest = visible.filter((n) => !OPERATOR_KINDS.has(n.kind) && !n.pinned && !n.area);
+  // Pages are built from REPO notes only (areaIndex), so an operator-wide note with an area (a
+  // lesson about a skill, filed under infra/cf-btp) stays here; dropping it served it nowhere.
+  const global = new Set(store.global);
+  const rest = visible.filter((n) => !OPERATOR_KINDS.has(n.kind) && !n.pinned && (!n.area || global.has(n)));
   const areas = areaIndex(store, repos);
   let areaPages: AreaSummary[] = [];
   let areasMatched = false;

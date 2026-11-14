@@ -247,3 +247,17 @@ test("a note that names its repo files under it even when the box has no repo, o
   assert.equal(store.global.length, 2);
   assert.match(memoryToolScript(), /--repo\) /);
 });
+
+test("an operator-wide note filed under an area still reaches MEMORY.md (pages are built from repo notes only)", () => {
+  // Live 2026-11-14: an account's only note was an operator-scope lesson with area infra/cf-btp. It was
+  // dropped from "For this task" for having an area and never made a page for having no repo, so the
+  // box got no MEMORY.md (and so no archive) at all.
+  const store = emptyMemoryStore();
+  addManualNote(store, { kind: "lesson", text: "On the Linux sandbox the cf-btp-explorer skill's Windows path does not exist; call cf directly.", area: "infra/cf-btp" });
+  for (const repos of [[], REPO]) {
+    const md = renderMemoryMd(store, repos, "check the claims app logs");
+    assert.ok(md, `rendered for repos ${JSON.stringify(repos)}`);
+    assert.match(md, /cf-btp-explorer skill/);
+  }
+  assert.ok(renderMemoryArchive(store, []), "and the archive exists for memory search");
+});
