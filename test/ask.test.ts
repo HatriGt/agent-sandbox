@@ -138,6 +138,16 @@ test("gate: reading driver-lane state is still allowed", () => {
   );
 });
 
+test("gate: stderr redirects and arrows are not writes", () => {
+  assert.equal(bash("cat /workspace/.agent.log 2>/dev/null | tail -50").deny, false);
+  assert.equal(bash("ls /workspace/.agent.* 2>&1").deny, false);
+  assert.equal(bash("git log --format='%h -> %s' -5").deny, false);
+  assert.equal(bash("grep -rn '=>' src >/dev/null && echo yes").deny, false);
+  assert.equal(bash("echo x > /tmp/a").deny, true);
+  assert.equal(bash("echo x 2>/dev/null >> /workspace/.agent.question").deny, true);
+  assert.equal(bash("cat a >/dev/nullx").deny, true);
+});
+
 test("gate: hook settings must not be rewritten from the ask lane", () => {
   // Rewriting settings.json would disable the driver's ask-gate — the enforcement the whole
   // interactive Q&A loop depends on.

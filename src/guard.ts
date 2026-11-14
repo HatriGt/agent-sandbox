@@ -18,8 +18,15 @@ export interface GuardDecision {
   reason?: string;
 }
 
+/**
+ * Matched against ABSOLUTE paths (see absPath). `.claude` is control only as the box user's own
+ * (~/.claude: hooks, settings, skills; ~/.claude.json: MCP servers). A repo's `.claude/` under
+ * /workspace is inert — claude runs with `--setting-sources user`, so its settings and hooks are
+ * never loaded — and editing one (a slash command, an agent, the repo's settings) is ordinary work.
+ */
 const CONTROL_PATHS = [
-  /(^|\/)\.claude(\/|$)/, // hooks + settings that implement the pause/guard
+  /^(\/root|\/home\/[^/]+)?\/\.claude(\/|$)/, // hooks + settings that implement the pause/guard
+  /^(\/root|\/home\/[^/]+)?\/\.claude\.json$/, // Claude Code's user config (MCP servers)
   /(^|\/)\.agent-mcp\.json$/, // MCP server secrets
   /(^|\/)\.agent\.(log|task|run|done)$/, // the controller's channel (the question file is allowed)
   /(^|\/)\.git-credentials$/,
@@ -28,10 +35,13 @@ const CONTROL_PATHS = [
 
 const SECRET_NAMES = /(GH_TOKEN|GITHUB_TOKEN|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|\.git-credentials|\.agent-mcp\.json|AGENT_SYS_PROMPT)/;
 const NETWORK_TOOLS = /\b(curl|wget|nc|ncat|netcat|socat|scp|sftp|rsync|ssh|telnet|openssl\s+s_client|python3?\s+-c|node\s+-e|http\s)\b/;
-const ENV_DUMP = /\b(printenv|env|set|export\s*$|declare\s+-x|cat\s+\/proc\/(self|\d+)\/environ)\b/;
+// `set` dumps only as a bare command; as a word it is everywhere (`echo '{"op":"set"}' | curl localhost`).
+const ENV_DUMP = /\b(printenv|env|export\s*$|declare\s+-x|cat\s+\/proc\/(self|\d+)\/environ)\b|(^|[;&|(]\s*)set\s*(\||$)/;
 const PIPE_TO_NETWORK = /\|\s*(curl|wget|nc|ncat|socat|ssh|openssl)\b/;
 const DESTRUCTIVE_ROOT = /\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f?|-[a-zA-Z]*f[a-zA-Z]*r)\s+(\/|\/\*|\/root|\/usr|\/etc|\/var|~|\$HOME)(\s|$)/;
-const DISABLE_CONTROLS = /\b(claude\s+mcp\s+(add|remove)|chattr\s|chmod\s+[0-7]*\s+.*\.claude|crontab\s+-)/;
+// chmod on a control path is writesControlPath's job: the old `chmod [0-7]* .*\.claude` here matched
+// `chmod 755 build.sh && cat ~/.claude/skills/x/SKILL.md`. `crontab -l` only lists.
+const DISABLE_CONTROLS = /\b(claude\s+mcp\s+(add|add-json|remove)|chattr\s|crontab\s+(-[re]\b|[^-\s]))/;
 
 /**
  * Claude Code's auto-memory lives INSIDE ~/.claude (projects/<slug>/memory/*.md + MEMORY.md), and
@@ -39,13 +49,37 @@ const DISABLE_CONTROLS = /\b(claude\s+mcp\s+(add|remove)|chattr\s|chmod\s+[0-7]*
  * hooks and settings that implement the guard live elsewhere in the tree. Denying it taught agents
  * to announce "my memory is locked down" on every run. Markdown under memory/ is inert context.
  */
-const MEMORY_PATH = /(^|[/\s])[\w~./-]*\.claude\/projects\/[^/\s]+\/memory(\/[^\s]*)?/g;
+const MEMORY_PATH = /^\/(root|home\/[^/]+)\/\.claude\/projects\/[^/]+\/memory(\/|$)/;
 
-function touchesControlPath(s: string): boolean {
-  // Blank out memory paths first so a command touching BOTH memory and, say, settings.json is
-  // still judged on the settings.json part alone.
-  const rest = s.replace(MEMORY_PATH, " ");
-  return CONTROL_PATHS.some((re) => re.test(rest));
+/** Boxes run as root. */
+const HOME = "/root";
+/** Where the agent's commands start: the workdir is /workspace or a repo under it. */
+const WORKSPACE = "/workspace";
+
+/** A shell word or tool path as the absolute path it names: quotes peeled, ~/$HOME expanded, relative
+ *  resolved against cwd, `.`/`..` folded (so memory/../../settings.json is not "memory"). */
+function absPath(word: string, cwd: string): string {
+  let p = word.replace(/^["'(]+|["'),;]+$/g, "");
+  p = p.replace(/^(~|\$HOME|\$\{HOME\})(?=\/|$)/, HOME);
+  if (!p.startsWith("/")) p = cwd + "/" + p;
+  const out: string[] = [];
+  for (const part of p.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") out.pop();
+    else out.push(part);
+  }
+  return "/" + out.join("/");
+}
+
+function isControlPath(p: string, cwd: string): boolean {
+  const abs = absPath(p, cwd);
+  return !MEMORY_PATH.test(abs) && CONTROL_PATHS.some((re) => re.test(abs));
+}
+
+/** Does any word of s (or the value of a `--flag=path` / `of=path` word) name a control path? */
+function touchesControlPath(s: string, cwd?: string): boolean {
+  const dir = cwd || WORKSPACE;
+  return s.split(/\s+/).filter(Boolean).some((w) => [w, ...w.split("=").slice(1)].some((x) => x && isControlPath(x, dir)));
 }
 
 /** Commands that change or remove whatever path they are given. */
@@ -67,10 +101,14 @@ const MUTATE_DEST = /^(cp|install|ln|rsync)$/;
  */
 function writesControlPath(cmd: string): boolean {
   const vars: Record<string, string> = {};
+  let cwd = WORKSPACE;
   for (const raw of cmd.split(/\|\||&&|[;|\n]/)) {
-    const seg = raw.replace(/\$\{?(\w+)\}?/g, (m: string, n: string) => (n in vars ? vars[n] : m));
+    const seg = raw.replace(/\$\{?(\w+)\}?/g, (m: string, n: string) => (n === "HOME" ? m : n in vars ? vars[n] : m));
+    // Relative paths resolve against the directory the command has moved to (also inside `bash -c "cd ~ && …"`).
+    const cd = /(?:^|[\s"'(])(?:cd|pushd)(?:\s+([^\s;&|"')]+))?\s*["')]*\s*$/.exec(seg);
+    if (cd) cwd = cd[1] ? absPath(cd[1], cwd) : HOME;
     for (const m of seg.matchAll(/(?:^|[^<>&\d])\d*>{1,2}\|?\s*([^\s<>&|;]+)/g)) {
-      if (touchesControlPath(m[1])) return true;
+      if (touchesControlPath(m[1], cwd)) return true;
     }
     const words = seg.trim().split(/\s+/).filter(Boolean);
     while (words.length && /^\w+=/.test(words[0])) {
@@ -83,11 +121,11 @@ function writesControlPath(cmd: string): boolean {
     const name = words[0].split("/").pop() || "";
     const args = words.slice(1);
     const paths = args.filter((a) => !a.startsWith("-"));
-    if (MUTATE_ANY.test(name) && args.some((a) => touchesControlPath(a))) return true;
-    if (MUTATE_DEST.test(name) && paths.length && touchesControlPath(paths[paths.length - 1])) return true;
-    if ((name === "sed" || name === "perl") && args.some((a) => /^-\w*i/.test(a)) && args.some((a) => touchesControlPath(a))) return true;
-    if (name === "dd" && args.some((a) => a.startsWith("of=") && touchesControlPath(a.slice(3)))) return true;
-    if (name === "find" && /\s-(delete|exec\s+(rm|mv|chmod|truncate|tee))\b/.test(seg) && touchesControlPath(seg)) return true;
+    if (MUTATE_ANY.test(name) && args.some((a) => touchesControlPath(a, cwd))) return true;
+    if (MUTATE_DEST.test(name) && paths.length && touchesControlPath(paths[paths.length - 1], cwd)) return true;
+    if ((name === "sed" || name === "perl") && args.some((a) => /^-\w*i/.test(a)) && args.some((a) => touchesControlPath(a, cwd))) return true;
+    if (name === "dd" && args.some((a) => a.startsWith("of=") && touchesControlPath(a.slice(3), cwd))) return true;
+    if (name === "find" && /\s-(delete|exec\s+(rm|mv|chmod|truncate|tee))\b/.test(seg) && touchesControlPath(seg, cwd)) return true;
   }
   return false;
 }
@@ -96,7 +134,7 @@ export function guardDecision(tool: string, input: Record<string, unknown> | und
   const inp = input ?? {};
   if (tool === "Write" || tool === "Edit" || tool === "MultiEdit" || tool === "NotebookEdit") {
     const path = String(inp.file_path ?? inp.notebook_path ?? inp.path ?? "");
-    if (touchesControlPath(path)) {
+    if (path && isControlPath(path, WORKSPACE)) {
       return { deny: true, reason: `Refusing to modify ${path}: it is part of the sandbox's control plane (hooks, credentials, or the controller's channel). Continue the task without touching it.` };
     }
     return { deny: false };
@@ -146,7 +184,11 @@ export function guardNodeProgram(): string {
     `const MUTATE_ANY=${String(MUTATE_ANY)};`,
     `const MUTATE_DEST=${String(MUTATE_DEST)};`,
     `const MEMORY_PATH=${String(MEMORY_PATH)};`,
-    `function touchesControlPath(s){const rest=s.replace(MEMORY_PATH," ");return CONTROL_PATHS.some(re=>re.test(rest))}`,
+    `const HOME=${JSON.stringify(HOME)};`,
+    `const WORKSPACE=${JSON.stringify(WORKSPACE)};`,
+    absPath.toString(),
+    isControlPath.toString(),
+    touchesControlPath.toString(),
     writesControlPath.toString(),
   ].join("\n");
   return (
