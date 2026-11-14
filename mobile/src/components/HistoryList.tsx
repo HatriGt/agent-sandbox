@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, FlatList, View, type StyleProp, type ViewStyle } from "react-native";
+import { Alert, Animated, FlatList, View, type StyleProp, type ViewStyle } from "react-native";
 import { useRouter } from "expo-router";
 import { api, ledgerApi, type LedgerRow, type LedgerTotals, type RunDigest } from "@/lib/api";
 import { ago, durationWords, friendlyName } from "@/lib/format";
@@ -60,19 +60,30 @@ export function HistoryList({ header, contentContainerStyle }: { header: React.R
       const r = await ledgerApi({ limit: PAGE, before: rows[rows.length - 1].id });
       setRows((prev) => [...(prev ?? []), ...r.rows]);
       setMore(r.rows.length === PAGE);
-    } catch {
+    } catch (e) {
       // A failed page leaves the loaded ones alone; the button stays for another try.
+      Alert.alert("Could not load older runs", e instanceof Error ? e.message : String(e));
     } finally {
       setLoadingMore(false);
     }
   }, [rows]);
 
+  const rowsRef = useRef(rows);
+  rowsRef.current = rows;
   const forget = useCallback(async (id: number) => {
     try {
       await api.historyDelete(id);
+      const gone = rowsRef.current?.find((r) => r.id === id);
       setRows((prev) => (prev ?? []).filter((r) => r.id !== id));
-    } catch {
-      // Nothing removed — the row stays, which is the honest picture.
+      // The chips count the whole archive: take the forgotten run off its total too.
+      setTotals((t) => {
+        if (!t || !gone) return t;
+        const failed = gone.state === "failed";
+        return { ...t, runs: Math.max(0, t.runs - 1), failed: Math.max(0, t.failed - (failed ? 1 : 0)), done: Math.max(0, t.done - (failed ? 0 : 1)) };
+      });
+    } catch (e) {
+      // Nothing removed — the row stays, which is the honest picture; say why.
+      Alert.alert("Could not forget this run", e instanceof Error ? e.message : String(e));
     }
   }, []);
   const toggle = useCallback((id: number) => {

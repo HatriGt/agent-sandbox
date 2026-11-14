@@ -208,9 +208,12 @@ export function Composer({
     inputRef.current?.focus();
   };
 
+  // `busy` is state, so two taps before the re-render both read false: the ref closes that gap.
+  const sendingRef = useRef(false);
   const send = async () => {
     let t = text.trim();
-    if ((!t && !files.length && !skill) || busy) return;
+    if ((!t && !files.length && !skill) || busy || sendingRef.current) return;
+    sendingRef.current = true;
     Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     // Clear the box BEFORE the round-trip — the thread echoes the message optimistically, and a
@@ -236,6 +239,7 @@ export function Composer({
       setSkill(draft.skill);
       syncSendButton(draft.text, draft.files, draft.skill);
     } finally {
+      sendingRef.current = false;
       setBusy(false);
     }
   };

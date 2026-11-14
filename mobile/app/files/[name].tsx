@@ -1,9 +1,9 @@
 // Workspace browser + editor for one box (web: the explorer + code editor). Folders are derived from
 // /tree.json's flat paths; a text file opens in a plain monospace editor and saves via PUT /file.json.
 // Commit and push stay where they already live: the thread's Changes sheet.
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useNavigation } from "expo-router";
 import { api } from "@/lib/api";
 import { pathResolver } from "@/lib/code-refs";
 import { useTheme } from "@/theme/ThemeContext";
@@ -32,6 +32,21 @@ export default function Files() {
   const [loadingFile, setLoadingFile] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const navigation = useNavigation();
+  const dirty = !!open && open.text !== open.original;
+
+  // Leaving the screen (back button, Android back, swipe) with unsaved edits asks first, like Discard.
+  useEffect(() => {
+    navigation.setOptions({ gestureEnabled: !dirty });
+    if (!dirty) return;
+    return navigation.addListener("beforeRemove", (e) => {
+      e.preventDefault();
+      Alert.alert("Discard your changes?", `Your unsaved edits to ${open?.path.split("/").pop()} will be lost.`, [
+        { text: "Keep editing", style: "cancel" },
+        { text: "Discard", style: "destructive", onPress: () => navigation.dispatch(e.data.action) },
+      ]);
+    });
+  }, [navigation, dirty, open?.path]);
 
   useEffect(() => {
     api
@@ -76,21 +91,25 @@ export default function Files() {
     return [...[...folders].sort().map((d) => ({ name: d, path: prefix + d, folder: true })), ...out.sort((a, b) => a.name.localeCompare(b.name))];
   }, [files, dir, q]);
 
+  // Two quick taps: only the file tapped last opens, whichever answer arrives first.
+  const openSeq = useRef(0);
   const openFile = async (path: string, line?: number) => {
+    const seq = ++openSeq.current;
     setLoadingFile(path);
     setError(null);
     setSaved(false);
     try {
       const text = await api.fileText(session, path);
+      if (seq !== openSeq.current) return;
       if (text.length > MAX_EDIT || text.includes("\u0000")) {
         setError("That file is too large or not text — open it on the web.");
         return;
       }
       setOpen({ path, text, original: text, line });
     } catch (e) {
-      setError(msg(e));
+      if (seq === openSeq.current) setError(msg(e));
     } finally {
-      setLoadingFile(null);
+      if (seq === openSeq.current) setLoadingFile(null);
     }
   };
 
@@ -110,7 +129,6 @@ export default function Files() {
   };
 
   if (open) {
-    const dirty = open.text !== open.original;
     return (
       <SettingsScreen title={open.path.split("/").pop() ?? open.path}>
         <T variant="micro" mono tone="faint" numberOfLines={2}>
