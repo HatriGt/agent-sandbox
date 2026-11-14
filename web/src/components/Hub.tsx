@@ -63,6 +63,7 @@ import { DataTable, MetaLine, StatusDot, type Column } from "@/components/ui/dat
 import { describeEvent } from "@/lib/activity";
 import { titleOf, runDuration, tokensOf } from "@/lib/history-format";
 import { fmtTokens } from "@/components/thread/OutcomeCard";
+import { HubPulse } from "@/components/HubPulse";
 
 /**
  * The hub: what you see with no machine selected.
@@ -855,6 +856,7 @@ export function Hub({
           </div>
         </motion.div>
 
+        <HubPulse />
         {!loading && runs.length === 0 && getMe()?.kind === "user" && <GettingStarted onDismiss={() => setGsDismissed(true)} />}
         </div>
 
