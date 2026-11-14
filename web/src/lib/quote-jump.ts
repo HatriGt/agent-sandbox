@@ -39,13 +39,19 @@ export function jumpToQuote(root: HTMLElement | null, quote: QuoteRef): boolean 
   const range = (row && findText(row, needle)) || findText(root, needle);
   if (!range) {
     if (!row) return false;
-    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    centre(root, row.getBoundingClientRect());
     return true;
   }
-  const target = range.startContainer.parentElement;
-  target?.scrollIntoView({ behavior: "smooth", block: "center" });
-  flash(range, target);
+  centre(root, range.getBoundingClientRect());
+  flash(range, range.startContainer.parentElement);
   return true;
+}
+
+/** Scroll only the conversation (scrollIntoView would also nudge every scrollable ancestor). */
+function centre(root: HTMLElement, box: DOMRect) {
+  const view = root.getBoundingClientRect();
+  const top = root.scrollTop + box.top - view.top - (root.clientHeight - Math.min(box.height, root.clientHeight)) / 2;
+  root.scrollTo({ top: Math.max(0, top), behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 
 function norm(s: string): string {

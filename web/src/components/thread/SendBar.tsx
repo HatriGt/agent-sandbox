@@ -1,7 +1,7 @@
 import * as React from "react";
 import { pushSent, readDraft, readSent, writeDraft } from "@/lib/draft";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { ArrowUp, AtSign, Check as CheckIcon, Clock, ImagePlus, Loader2, MessageCircleQuestion, Quote, X } from "lucide-react";
+import { ArrowUp, AtSign, Check as CheckIcon, Clock, ImagePlus, Loader2, MessageCircleQuestion, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { ATTACHMENTS_DIR } from "@/lib/session-context";
@@ -24,6 +24,7 @@ import { VoiceButton, VoicePill } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
 import { asQuote } from "@/lib/sidechat";
 import { quoteLabel, type QuoteRef } from "@/lib/quote-jump";
+import { QUOTE_TOKEN } from "@/lib/inline-tokens";
 
 /**
  * The composer.
@@ -110,9 +111,10 @@ export function SendBar({
   // `label` is what the chip is called; `note` is what the agent is told about the picture (a browser
   // element's selector and markup). Neither is prose the person has to read or keep in their message.
   const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string; size: number; label?: string; note?: string }[]>([]);
-  // Passages quoted from the conversation ("Quote in reply"): pills above the text, not `> ` lines in
-  // it. They go out as markdown quotes ahead of the message; a click on one jumps back to the passage.
-  const [quotes, setQuotes] = React.useState<QuoteRef[]>([]);
+  // Passages quoted from the conversation ("Quote in reply"). Each sits in the text as a short
+  // `❝start of it…❞` tag drawn as a pill, like a skill; on send the tag becomes the whole passage as
+  // `> ` lines in its place. A click on the tag jumps back to the passage. Keyed by the tag's text.
+  const [quotes, setQuotes] = React.useState<(QuoteRef & { tag: string })[]>([]);
   // The composer outlives a thread switch (the Thread is not keyed per box): what belongs to the
   // previous thread — its pictures, its error, an open menu — must not ride along to the next one.
   const prevBox = React.useRef(boxName);
@@ -196,9 +198,15 @@ export function SendBar({
   React.useEffect(() => {
     if (!seed) return;
     const quote = seed.quote;
-    if (quote) setQuotes((prev) => (prev.some((q) => q.text === quote.text) ? prev : [...prev, { id: `${seed.n}`, text: quote.text, turn: quote.turn }]));
-    // A seed that is only a picture or a quote leaves the words being written alone.
-    if (seed.text || (!seed.image && !seed.quote)) setValue((prev) => (seed.inline ? `${prev && !/\s$/.test(prev) ? `${prev} ` : prev}${seed.text} ` : seed.append && prev.trim() ? `${prev.trimEnd()}\n\n${seed.text}` : seed.text));
+    if (quote) {
+      const tag = `❝${quoteLabel(quote.text.replace(/[❝❞]/g, ""), 32)}❞`;
+      setQuotes((prev) => [...prev.filter((q) => q.tag !== tag), { id: `${seed.n}`, text: quote.text, turn: quote.turn, tag }]);
+      // At the end of what is written, so "quote, then what I think of it" reads in order.
+      if (!value.includes(tag)) tags.insert(tag, value.length);
+      return;
+    }
+    // A seed that is only a picture leaves the words being written alone.
+    if (seed.text || !seed.image) setValue((prev) => (seed.inline ? `${prev && !/\s$/.test(prev) ? `${prev} ` : prev}${seed.text} ` : seed.append && prev.trim() ? `${prev.trimEnd()}\n\n${seed.text}` : seed.text));
     const image = seed.image;
     if (image) setImages((prev) => [...prev, { id: `${seed.n}-${prev.length}`, name: image.name, dataUrl: image.dataUrl, size: Math.round(image.dataUrl.length * 0.75), label: image.label, note: image.note }]);
     requestAnimationFrame(() => {
@@ -271,7 +279,7 @@ export function SendBar({
 
   const send = async () => {
     const text = value.trim();
-    if ((!text && !images.length && !quotes.length) || sending) return;
+    if ((!text && !images.length) || sending) return;
     if (readersInFlight.current > 0) {
       // A pasted image is still decoding; sending now would drop it. Retry (via the ref, so the
       // retry sees the state that includes the decoded image) once the reader lands.
@@ -279,8 +287,8 @@ export function SendBar({
       return;
     }
     const compact = isCompactCommand(text);
-    if (compact && (images.length || quotes.length)) {
-      toast.error("Send /compact on its own", { description: "Images and quotes go with a normal message — remove them, or send them after the compaction." });
+    if (compact && images.length) {
+      toast.error("Send /compact on its own", { description: "Images go with a normal message — remove them, or send them after the compaction." });
       return;
     }
     voice.stop();
@@ -291,7 +299,13 @@ export function SendBar({
     // The tags travel as written: the controller reads every `/skill` in the message, and each
     // `@path` is also spelled out as a full path so the agent opens the right file.
     let message = expandMentions(text).trim();
-    if (attachedQuotes.length) message = [...attachedQuotes.map((q) => asQuote(q.text)), message].filter(Boolean).join("\n\n");
+    // Each quote tag becomes its passage as `> ` lines, a paragraph of its own where the tag sat. A
+    // tag whose passage is gone (a recalled or reloaded draft) quotes what its label still shows.
+    message = message
+      .replace(QUOTE_TOKEN, (tag) => `\n\n${asQuote(attachedQuotes.find((q) => q.tag === tag)?.text ?? tag.slice(1, -1))}\n\n`)
+      .replace(/[ \t]*\n\n[ \t]*/g, "\n\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
     try {
       // Upload images first so the message can name their in-box paths.
       let imagesTail = "";
@@ -419,34 +433,6 @@ export function SendBar({
           {top}
           {/* Chip rows stay mounted through their own exit: the last chip used to vanish with the row. */}
           <AnimatePresence initial={false}>
-          {quotes.length > 0 && (
-            <ChipRow key="quotes" still={still} className="flex flex-wrap gap-1.5 px-2 pt-1.5">
-              <AnimatePresence initial={false} mode="popLayout">
-              {quotes.map((q) => (
-                <motion.span key={q.id} {...chipMotion(still)} className="bg-muted/60 inline-flex h-7 max-w-full items-center rounded-md border text-micro">
-                  <button
-                    type="button"
-                    onClick={() => onJumpToQuote?.(q)}
-                    title={q.text.length > 400 ? `${q.text.slice(0, 400)}…` : q.text}
-                    aria-label={`Show the quoted text in the conversation: ${quoteLabel(q.text)}`}
-                    className="text-muted-foreground hover:text-foreground flex h-full min-w-0 cursor-pointer items-center gap-1.5 pr-1 pl-2"
-                  >
-                    <Quote className="size-3 shrink-0" aria-hidden />
-                    <span className="truncate">{quoteLabel(q.text)}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setQuotes((prev) => prev.filter((x) => x.id !== q.id))}
-                    aria-label="Remove the quote"
-                    className="text-muted-foreground hover:text-foreground hover:bg-muted mr-1 grid size-5 shrink-0 cursor-pointer place-items-center rounded"
-                  >
-                    <X className="size-3" />
-                  </button>
-                </motion.span>
-              ))}
-              </AnimatePresence>
-            </ChipRow>
-          )}
           {images.length > 0 && (
             <ChipRow key="images" still={still} className="flex flex-wrap gap-2 px-2 pt-1.5">
               <AnimatePresence initial={false} mode="popLayout">
@@ -477,6 +463,15 @@ export function SendBar({
             id="send-input"
             className="px-2.5 pt-2 text-body"
             tokens={tags.tokens}
+            onClick={(e) => {
+              updateMention(value);
+              // A click inside a quote tag goes to the passage it stands for.
+              const t = e.currentTarget;
+              if (t.selectionStart !== t.selectionEnd) return;
+              const hit = tags.tokens.find((k) => k.kind === "quote" && t.selectionStart > k.start && t.selectionStart < k.end);
+              const q = hit && quotes.find((x) => x.tag === hit.name);
+              if (q) onJumpToQuote?.(q);
+            }}
             onKeyDown={(e) => {
               if (tags.onKeyDown(e)) {
                 setMention(null);
@@ -499,7 +494,6 @@ export function SendBar({
               }
             }}
             onKeyUp={() => updateMention(value)}
-            onClick={() => updateMention(value)}
             placeholder={
               sleeping
                 ? "Type ahead — sends once the sandbox is awake…"

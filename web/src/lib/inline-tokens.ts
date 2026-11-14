@@ -11,7 +11,8 @@
  * as an absolute path for the agent.
  */
 export interface InlineToken {
-  kind: "skill" | "file";
+  /** `quote` exists only in the composer: a `❝start of the passage…❞` stand-in for a quoted passage. */
+  kind: "skill" | "file" | "quote";
   /** Index of the `/` or `@`. */
   start: number;
   /** One past the last character of the tag. */
@@ -44,6 +45,14 @@ export function inlineTokens(text: string, skills: ReadonlySet<string> | null): 
     out.push({ kind: "file", start, end: start + 1 + name.length, name });
   }
   return out.sort((a, b) => a.start - b.start);
+}
+
+/** A quoted passage's stand-in in the composer text: `❝The limiter now keeps six…❞`. */
+export const QUOTE_TOKEN = /❝[^❝❞\n]{1,80}❞/g;
+
+/** The quote stand-ins in a composer's text. */
+export function quoteTokens(text: string): InlineToken[] {
+  return [...text.matchAll(QUOTE_TOKEN)].map((m) => ({ kind: "quote" as const, start: m.index, end: m.index + m[0].length, name: m[0] }));
 }
 
 /**

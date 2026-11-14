@@ -1374,6 +1374,10 @@
 .tag-pill-skill {
   --tag: color-mix(in oklch, var(--live) 16%, transparent);
 }
+/* A quoted passage's stand-in ("Quote in reply"); a click on it jumps to the passage. */
+.tag-pill-quote {
+  --tag: color-mix(in oklch, var(--foreground) 13%, transparent);
+}
 
 /* Composer depth: hairline plus soft elevation, and a top highlight that reads as a lit edge. */
 .composer-depth {

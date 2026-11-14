@@ -224,7 +224,7 @@ function PromptInputTextarea({
           >
             {splitTokens(value, tokens ?? []).map((part, i) =>
               "token" in part ? (
-                <span key={i} className={part.token.kind === "skill" ? "tag-pill tag-pill-skill" : "tag-pill tag-pill-file"}>
+                <span key={i} className={`tag-pill tag-pill-${part.token.kind}`}>
                   {part.text}
                 </span>
               ) : (

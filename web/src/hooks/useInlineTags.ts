@@ -1,7 +1,7 @@
 import * as React from "react";
 import { api } from "@/lib/api";
 import { useCached } from "@/lib/cache";
-import { inlineTokens, insertToken, removeToken, tokenEndingAt, type InlineToken } from "@/lib/inline-tokens";
+import { inlineTokens, insertToken, quoteTokens, removeToken, tokenEndingAt, type InlineToken } from "@/lib/inline-tokens";
 
 /**
  * Tags inside a composer's text. A skill or a file picked from a menu is written into the message
@@ -15,7 +15,7 @@ import { inlineTokens, insertToken, removeToken, tokenEndingAt, type InlineToken
 export function useInlineTags(value: string, setValue: (v: string) => void, el: () => HTMLTextAreaElement | null) {
   const skills = useCached("skills", (signal) => api.skills(signal));
   const names = React.useMemo(() => new Set((skills.data?.skills ?? []).filter((s) => s.enabled).map((s) => s.name)), [skills.data]);
-  const tokens = React.useMemo(() => inlineTokens(value, names), [value, names]);
+  const tokens = React.useMemo(() => withQuotes(value, inlineTokens(value, names)), [value, names]);
   const picked = React.useRef(new Set<string>());
 
   const place = (r: { value: string; caret: number }) => {
@@ -44,7 +44,7 @@ export function useInlineTags(value: string, setValue: (v: string) => void, el: 
 
   /** Is the caret resting at the end of a tag that a menu wrote? Then no menu should open for it. */
   const atPicked = (text: string, caret: number) => {
-    const t = tokenEndingAt(inlineTokens(text, names), caret);
+    const t = tokenEndingAt(withQuotes(text, inlineTokens(text, names)), caret);
     return !!t && picked.current.has(text.slice(t.start, t.end));
   };
 
@@ -63,4 +63,12 @@ export function useInlineTags(value: string, setValue: (v: string) => void, el: 
   const skillNames = React.useMemo(() => [...new Set(tokens.filter((t) => t.kind === "skill").map((t) => t.name))], [tokens]);
 
   return { tokens: tokens as InlineToken[], skillNames, insert, toggleSkill, atPicked, onKeyDown, reset: () => picked.current.clear() };
+}
+
+/** Quote stand-ins join the skill and file tags; a tag inside a quote's label is the quote's text. */
+function withQuotes(text: string, tags: InlineToken[]): InlineToken[] {
+  const quotes = quoteTokens(text);
+  if (!quotes.length) return tags;
+  const free = tags.filter((t) => !quotes.some((q) => t.start < q.end && t.end > q.start));
+  return [...free, ...quotes].sort((a, b) => a.start - b.start);
 }
