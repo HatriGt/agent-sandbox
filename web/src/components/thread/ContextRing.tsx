@@ -169,7 +169,7 @@ export function ContextRing({ status }: { status: ContextStatus }) {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="text-foreground block text-meta font-medium">{pending ? "Compaction on its way" : running ? "Compact after this turn" : "Compact now"}</span>
-                <span className="text-faint block truncate text-micro">Summarize the chat to free up space</span>
+                <span className="text-faint block text-micro leading-snug">Summarize this chat to free up context window</span>
               </span>
             </button>
           ) : (
