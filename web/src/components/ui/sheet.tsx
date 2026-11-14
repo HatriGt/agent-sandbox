@@ -19,8 +19,9 @@ function SheetContent({
   title,
   description,
   side = "right",
+  onCloseClick,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content> & { title: string; description?: string; side?: "right" | "left" | "bottom" }) {
+}: React.ComponentProps<typeof DialogPrimitive.Content> & { title: string; description?: string; side?: "right" | "left" | "bottom"; /** The ✕: preventDefault keeps the sheet open. */ onCloseClick?: (e: React.MouseEvent<HTMLButtonElement>) => void }) {
   const bottom = side === "bottom";
   return (
     <DialogPrimitive.Portal>
@@ -52,7 +53,7 @@ function SheetContent({
             <DialogPrimitive.Title className="text-foreground text-h3 font-semibold tracking-[-0.01em]">{title}</DialogPrimitive.Title>
             {description && <DialogPrimitive.Description className="text-muted-foreground mt-1 text-meta">{description}</DialogPrimitive.Description>}
           </div>
-          <DialogPrimitive.Close className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-8 shrink-0 cursor-pointer place-items-center rounded-md transition-colors" aria-label="Close">
+          <DialogPrimitive.Close className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-8 shrink-0 cursor-pointer place-items-center rounded-md transition-colors" aria-label="Close" onClick={onCloseClick}>
             <X className="size-4" />
           </DialogPrimitive.Close>
         </div>

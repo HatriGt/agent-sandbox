@@ -54,6 +54,10 @@ export function VizFullscreen({
         // Nearly opaque, unblurred scrim: nothing behind a 96vw card is worth seeing anyway.
         overlayClassName="bg-background/90 backdrop-blur-none"
         data-viz-fullscreen
+        // Esc on a chart with a pinned/highlighted value clears that first; the next Esc closes.
+        onEscapeKeyDown={(e) => {
+          if ((e.target as Element | null)?.closest?.("[data-viz-pinned]")) e.preventDefault();
+        }}
         onKeyDown={(e) => {
           if (ownsZoom || e.metaKey || e.ctrlKey || e.altKey) return;
           if (e.key === "+" || e.key === "=") zoomBy(STEP);

@@ -581,9 +581,20 @@ export function BrowserPane({
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [select, toggleSelect]);
+  // Tab goes to the page, so Esc hands it back: after Esc the next Tab / Shift+Tab leaves the pane.
+  const released = React.useRef(false);
   const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      // A second Esc falls through to whatever Esc does around the pane.
+      if (released.current) return;
+      e.preventDefault();
+      released.current = true;
+      return;
+    }
+    if (e.key === "Tab" && released.current) return;
+    released.current = false;
     if (!page || page.blank || select || e.ctrlKey || e.metaKey || e.altKey) return;
-    if (PAGE_KEYS.has(e.key) && e.key !== "Escape") {
+    if (PAGE_KEYS.has(e.key)) {
       e.preventDefault();
       flushTyped();
       const key = e.key;
@@ -746,7 +757,7 @@ export function BrowserPane({
         ref={stageRef}
         tabIndex={0}
         role="application"
-        aria-label={page && !page.blank ? `Page: ${page.title || page.url}. Click and type to use it.` : "Browser"}
+        aria-label={page && !page.blank ? `Page: ${page.title || page.url}. Click and type to use it; Esc then Tab to leave.` : "Browser"}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

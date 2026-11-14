@@ -127,6 +127,9 @@ export function useShellTabs({
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      // On a Mac, Option+[ ] W type characters (“ ‘ ∑): while typing, those keys belong to the text.
+      const t = e.target as HTMLElement | null;
+      if (isMac && t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (e.code === "KeyW") {
         if (!activeKey) return;
         e.preventDefault();

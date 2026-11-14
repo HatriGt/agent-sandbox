@@ -197,7 +197,8 @@ function useScrub(labels: string[]) {
   return {
     active,
     pinned: pinIdx,
-    focusProps: { tabIndex: 0, onKeyDown, onBlur: () => setHover(null), onMouseLeave: () => setHover(null) },
+    // Marks a chart that Esc should clear before it closes the fullscreen view around it.
+    focusProps: { tabIndex: 0, onKeyDown, onBlur: () => setHover(null), onMouseLeave: () => setHover(null), "data-viz-pinned": active !== null || undefined },
     setHover,
     togglePin,
   };
