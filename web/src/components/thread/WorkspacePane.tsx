@@ -97,7 +97,21 @@ const removeStore = (key: string) => {
   } catch {}
 };
 
-export function WorkspacePane({ session, changes, open, review, onClose, onSaved, repos, full = false, onToggleFull, onMention }: { session: string; changes: ChangedFile[]; open: OpenRequest | null; /** Bumped to switch the pane to the Review view (the whole run's diff). */ review?: number; onClose: () => void; onSaved: () => void; repos: Repo[]; full?: boolean; onToggleFull?: () => void; /** Put `@path` into the message being written. */ onMention?: (path: string) => void }) {
+/**
+ * Everything the pane holds (tabs, drafts, the tree, recent files, git status, in-flight loads) belongs
+ * to one box: a thread switch with the pane open starts it afresh for the new box instead of showing
+ * the old box's tabs, or autosaving a draft of the old box's file into the new one. The pane itself
+ * stays where it is; only its first appearance slides in.
+ */
+export function WorkspacePane(props: Omit<React.ComponentProps<typeof WorkspacePaneBody>, "enter">) {
+  const first = React.useRef(true);
+  React.useEffect(() => {
+    first.current = false;
+  }, []);
+  return <WorkspacePaneBody key={props.session} {...props} enter={first.current} />;
+}
+
+function WorkspacePaneBody({ session, changes, open, review, onClose, onSaved, repos, full = false, onToggleFull, onMention, enter = true }: { session: string; changes: ChangedFile[]; open: OpenRequest | null; /** Bumped to switch the pane to the Review view (the whole run's diff). */ review?: number; onClose: () => void; onSaved: () => void; repos: Repo[]; full?: boolean; onToggleFull?: () => void; /** Put `@path` into the message being written. */ onMention?: (path: string) => void; /** Slide in on mount (false when a thread switch remounts the pane in place). */ enter?: boolean }) {
   const [paths, setPaths] = React.useState<string[] | null>(null);
   const [treeErr, setTreeErr] = React.useState<string | null>(null);
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set(repos.map((r) => r.name)));
@@ -360,15 +374,20 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   const [git, setGit] = React.useState<GitStatus | null>(null);
   const [gitErr, setGitErr] = React.useState<string | null>(null);
   const activeRepoName = activeRepo?.name;
+  // Only the latest request lands: with two repos, a slow answer for the one just left must not
+  // put its branch and ahead/behind on the status bar under the one now active.
+  const gitSeq = React.useRef(0);
   const loadGit = React.useCallback(() => {
     if (!activeRepoName) return;
+    const seq = ++gitSeq.current;
     api
       .gitStatus(session, activeRepoName)
       .then((g) => {
+        if (seq !== gitSeq.current) return;
         setGit(g);
         setGitErr(null);
       })
-      .catch((e: unknown) => setGitErr(e instanceof Error ? e.message : String(e)));
+      .catch((e: unknown) => seq === gitSeq.current && setGitErr(e instanceof Error ? e.message : String(e)));
   }, [session, activeRepoName]);
   React.useEffect(loadGit, [loadGit, changes.length]);
 
@@ -431,7 +450,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   return (
     <motion.aside
       ref={paneRef}
-      initial={{ width: 0, opacity: 0 }}
+      initial={enter ? { width: 0, opacity: 0 } : false}
       animate={{ width: full || phone ? "100%" : width || "58%", opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
       transition={{ width: resizing ? { duration: 0 } : { duration: 0.28, ease: EASE }, opacity: { duration: 0.18 } }}
@@ -555,7 +574,19 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
                         autoFocus
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        onKeyDown={(e) => e.key === "Escape" && (setQuery(""), setFiltering(false))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Escape") {
+                            setQuery("");
+                            setFiltering(false);
+                          } else if (e.key === "Enter" && paths && query.trim()) {
+                            // The first match is drawn selected: Enter opens it.
+                            const first = fuzzyPaths(paths, query.trim().toLowerCase())[0]?.path;
+                            if (first) {
+                              openPath(first);
+                              setQuery("");
+                            }
+                          }
+                        }}
                         onBlur={() => !query && setFiltering(false)}
                         placeholder="Filter files"
                         aria-label="Filter files"
@@ -1594,7 +1625,8 @@ function SourceControl({ session, repo, status, err, reload: load, changes, acti
 
   const repoChanges = changes.filter((c) => !repo || c.path.startsWith(repo.name + "/"));
   const commit = async () => {
-    if (!repo || !message.trim()) return;
+    // ⌘Enter in the message box reaches here past the button's disabled state.
+    if (!repo || !message.trim() || busy !== null || repoChanges.length === 0) return;
     setBusy("commit");
     try {
       const r = await api.gitCommit(session, repo.name, message.trim());

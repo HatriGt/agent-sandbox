@@ -15,6 +15,14 @@ export function QuestionChoices({ box, question, className }: { box: string; que
   const choices = React.useMemo(() => questionChoices(parseQuestion(question)), [question]);
   const [sent, setSent] = React.useState<number | null>(null);
   const [done, setDone] = React.useState(false);
+  // A new question (or another box) in the same row starts unanswered, not stuck on the last tap.
+  const askedKey = `${box}\n${question}`;
+  const [shownKey, setShownKey] = React.useState(askedKey);
+  if (shownKey !== askedKey) {
+    setShownKey(askedKey);
+    setSent(null);
+    setDone(false);
+  }
   if (choices.length === 0) return null;
   const answer = async (i: number) => {
     if (sent != null) return;

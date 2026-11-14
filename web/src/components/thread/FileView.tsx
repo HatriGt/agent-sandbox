@@ -31,7 +31,15 @@ export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc,
   const image = isImage(tab.path);
   const md = isMarkdown(tab.path);
   // Accept / reject per hunk, as in Review all; a reject refreshes the changes list.
-  const review = useHunkReview(session, tab.path, diff, { onDiscarded: onSaved });
+  // A reject changes the file in the box: the copy held for the File view (and a saved draft, which
+  // equals it) is now stale, and editing it would autosave the rejected hunk straight back.
+  const review = useHunkReview(session, tab.path, diff, {
+    onDiscarded: () => {
+      setContent(null);
+      if (!latest.current.dirty) onDoc({ draft: undefined, saving: undefined });
+      onSaved();
+    },
+  });
 
   React.useEffect(() => {
     if (image) return;

@@ -123,9 +123,25 @@ type TipState = { x: number | string; y: number | string; text: string; lines?: 
 
 /** Shared tooltip bubble: one line, or a header plus a swatch row per series (crosshair read-out). */
 function Tip({ tip }: { tip: TipState | null }) {
+  // Keep the bubble inside the chart: the card clips (overflow-hidden), so a mark near an edge or a
+  // tall multi-series read-out near the top would lose half its text. Nudge in from the sides; flip
+  // below the point when there is no room above. Margins, so Tailwind's `translate` stays intact.
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    const host = el?.parentElement;
+    if (!el || !host) return;
+    el.style.marginLeft = el.style.marginTop = "";
+    const p = host.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const dx = r.left < p.left ? p.left - r.left : r.right > p.right ? p.right - r.right : 0;
+    if (dx) el.style.marginLeft = `${dx}px`;
+    if (r.top < p.top) el.style.marginTop = `${r.height + 12}px`;
+  });
   if (!tip) return null;
   return (
     <div
+      ref={ref}
       className="bg-popover text-popover-foreground pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border px-2 py-1 text-micro whitespace-nowrap shadow-e2"
       style={{ left: tip.x, top: typeof tip.y === "number" ? tip.y - 6 : `calc(${tip.y} - 6px)` }}
       role="status"
@@ -202,10 +218,17 @@ function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
   const nS = spec.series.length;
   const nL = spec.labels.length;
   const scrub = useScrub(spec.labels);
-  const max = Math.max(...spec.series.flatMap((s) => s.data.map((d) => Math.abs(d || 0))), 1);
+  // Negative values hang below a zero line instead of drawing as if positive; the scale is the
+  // data's own range (no floor of 1, which squashed all-fractional data into short stubs).
+  const vals = spec.series.flatMap((s) => s.data.map((d) => d || 0));
+  const pos = Math.max(0, ...vals);
+  const neg = Math.max(0, ...vals.map((v) => -v));
+  const max = pos + neg || 1;
   const plotH = 140;
   const labelH = 16;
   const H = plotH + labelH;
+  const zeroY = 18 + (pos / max) * (plotH - 18);
+  const barTop = (v: number) => (v >= 0 ? zeroY - (v / max) * (plotH - 18) : zeroY);
   const group = W / Math.max(nL, 1);
   const barW = Math.max(3, Math.min(28, (group - 8) / nS - 2));
   const showValues = nL * nS <= 16; // selective direct labels, never a number on every mark of a dense chart
@@ -215,7 +238,7 @@ function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
       ? null
       : {
           x: `${((a * group + group / 2) / W) * 100}%`,
-          y: `${((plotH - (Math.max(...spec.series.map((s) => Math.abs(s.data[a] || 0))) / max) * (plotH - 18)) / H) * 100}%`,
+          y: `${(Math.min(...spec.series.map((s) => barTop(s.data[a] || 0))) / H) * 100}%`,
           text: nS > 1 ? spec.labels[a] : `${spec.labels[a]}: ${fmt(spec.series[0].data[a], spec.unit)}`,
           lines: nS > 1 ? spec.series.map((s, si) => ({ color: seriesColor(slots[si]), text: `${s.name}: ${fmt(s.data[a], spec.unit)}` })) : undefined,
         };
@@ -235,7 +258,7 @@ function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
           <line key={f} x1={0} x2={W} y1={plotH - f * (plotH - 18)} y2={plotH - f * (plotH - 18)} stroke="var(--viz-grid)" strokeWidth={1} />
         ))}
         {a !== null && <rect x={a * group + 2} y={0} width={group - 4} height={plotH} rx={6} fill="var(--muted)" opacity={0.5} />}
-        <line x1={0} x2={W} y1={plotH} y2={plotH} stroke="var(--line-strong)" strokeWidth={1} />
+        <line x1={0} x2={W} y1={zeroY} y2={zeroY} stroke="var(--line-strong)" strokeWidth={1} />
         {spec.labels.map((label, li) => {
           const cx = li * group + group / 2;
           const total = nS * barW + (nS - 1) * 2;
@@ -246,7 +269,7 @@ function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
                 const v = s.data[li] || 0;
                 const h = (Math.abs(v) / max) * (plotH - 18);
                 const x = cx - total / 2 + si * (barW + 2);
-                const y = plotH - h;
+                const y = barTop(v);
                 const hh = Math.max(h, 1);
                 return (
                   <g key={s.name}>
@@ -262,13 +285,13 @@ function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
                         {
                           x, y, width: barW, height: hh,
                           ...geo(reduced, "x, y, width, height"),
-                          transformOrigin: `${x + barW / 2}px ${plotH}px`,
+                          transformOrigin: `${x + barW / 2}px ${zeroY}px`,
                           animationDelay: `${Math.min((li * nS + si) * 25, 300)}ms`,
                         } as React.CSSProperties
                       }
                     />
                     {showValues && (
-                      <text x={x + barW / 2} y={y - 4} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
+                      <text x={x + barW / 2} y={v < 0 ? Math.min(y + hh + 10, plotH - 2) : y - 4} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
                         {fmt(v, spec.unit)}
                       </text>
                     )}
@@ -294,7 +317,7 @@ function StackedBars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
   const scrub = useScrub(spec.labels);
   const nL = spec.labels.length;
   const totals = spec.labels.map((_, li) => spec.series.reduce((acc, s) => acc + (s.data[li] || 0), 0));
-  const max = Math.max(...totals, 1);
+  const max = Math.max(...totals, 0) || 1;
   const plotH = 140;
   const H = plotH + 16;
   const group = W / Math.max(nL, 1);
@@ -473,8 +496,10 @@ function Lines({ spec, slots, area }: { spec: ChartSpec; slots: number[]; area: 
           const d = s.data.map((v, i) => `${i ? "L" : "M"}${px(i)},${py(v)}`).join(" ");
           return (
             <g key={s.name}>
-              {area && <path d={`${d} L${px(s.data.length - 1)},${plotH} L${px(0)},${plotH} Z`} fill={seriesColor(slots[si])} opacity={0.12} />}
+              {area && <path d={`${d} L${px(s.data.length - 1)},${py(0)} L${px(0)},${py(0)} Z`} fill={seriesColor(slots[si])} opacity={0.12} />}
               <path d={d} fill="none" stroke={seriesColor(slots[si])} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={cn(!reduced && "viz-draw")} pathLength={1} />
+              {/* One category: a lone moveto strokes nothing, so mark the point itself. */}
+              {nL === 1 && <circle cx={px(0)} cy={py(s.data[0])} r={3} fill={seriesColor(slots[si])} />}
               {/* Direct end-label: name the line at its last point when few series (identity ≠ color alone). */}
               {spec.series.length <= 4 && spec.series.length >= 2 && (
                 <text x={px(s.data.length - 1) - 2} y={py(s.data[s.data.length - 1]) - 6} textAnchor="end" className="fill-muted-foreground" fontSize={10}>
@@ -519,7 +544,8 @@ function Lines({ spec, slots, area }: { spec: ChartSpec; slots: number[]; area: 
 function Donut({ spec }: { spec: ChartSpec }) {
   const [tip, setTip] = React.useState<TipState | null>(null);
   const data = spec.series[0].data;
-  const total = data.reduce((a, b) => a + b, 0) || 1;
+  const sum = data.reduce((a, b) => a + b, 0);
+  const total = sum || 1;
   const R = 56;
   const C = 2 * Math.PI * R;
   let acc = 0;
@@ -551,7 +577,7 @@ function Donut({ spec }: { spec: ChartSpec }) {
           return el;
         })}
         <text x={70} y={75} textAnchor="middle" className="fill-foreground" fontSize={18} fontWeight={600}>
-          {fmt(total, spec.unit)}
+          {fmt(sum, spec.unit)}
         </text>
       </svg>
       <div className="flex min-w-0 flex-col gap-1">
@@ -577,7 +603,10 @@ function Spark({ spec }: { spec: ChartSpec }) {
   const span = max - min || 1;
   const w = 240;
   const h = 40;
-  const d = data.map((v, i) => `${i ? "L" : "M"}${(i / (data.length - 1)) * (w - 4) + 2},${h - 4 - ((v - min) / span) * (h - 8)}`).join(" ");
+  // One point: a flat line across rather than NaN coordinates (i / 0).
+  const sx = (i: number) => (data.length === 1 ? (i ? w - 2 : 2) : (i / (data.length - 1)) * (w - 4) + 2);
+  const pts = data.length === 1 ? [data[0], data[0]] : data;
+  const d = pts.map((v, i) => `${i ? "L" : "M"}${sx(i)},${h - 4 - ((v - min) / span) * (h - 8)}`).join(" ");
   const last = data[data.length - 1];
   return (
     <div className="flex items-center gap-3">

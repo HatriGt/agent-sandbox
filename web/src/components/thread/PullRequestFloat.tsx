@@ -126,7 +126,7 @@ export function PullRequestFloat({ session, pulls }: { session: string; pulls: P
                 All {pulls.length} pull requests
               </button>
             )}
-            <Header info={info} v={v} url={url} session={session} repo={repo} number={number} onMerged={() => void load()} onClose={() => setOpen(false)} />
+            <Header key={url} info={info} v={v} url={url} session={session} repo={repo} number={number} onMerged={() => void load()} onClose={() => setOpen(false)} />
             <div className="px-2.5 pt-3 pb-2">
               <p className="text-foreground truncate text-meta font-medium" title={info?.title}>
                 {info?.title ?? <span className="bg-muted inline-block h-3 w-48 animate-pulse rounded align-middle" />}
@@ -320,7 +320,7 @@ function Header({ info, v, url, session, repo, number, onMerged, onClose }: { in
       {error && (
         <div role="alert" className="border-destructive/30 bg-destructive/8 mx-1.5 mt-1.5 rounded-lg border px-2.5 py-2">
           <p className="text-destructive text-micro font-medium">Merge failed</p>
-          <p className="text-foreground/80 mt-0.5 text-micro whitespace-pre-wrap">{error}</p>
+          <p className="text-foreground/80 mt-0.5 text-micro whitespace-pre-wrap [overflow-wrap:anywhere]">{error}</p>
           {policyBlocked && <PolicyRescue busy={busy} onAuto={() => void merge(triedMethod.current, true)} onAdmin={() => void merge(triedMethod.current, false, true)} />}
         </div>
       )}

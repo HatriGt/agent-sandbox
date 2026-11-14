@@ -327,7 +327,7 @@ function BlurSwap({ text, className }: { text: string; className?: string }) {
 
 /** "every 30s" → 30; null when the agent gave no interval. */
 function everySec(every: string | null): number | null {
-  const m = every?.match(/(d+(?:.d+)?)s*(ms|s|m|min|h)?/i);
+  const m = every?.match(/(\d+(?:\.\d+)?)\s*(ms|s|m|min|h)?/i);
   if (!m) return null;
   const n = Number(m[1]);
   const u = (m[2] ?? "s").toLowerCase();
@@ -383,10 +383,10 @@ function WatchLine({ watch, live, now, stopping, polling, onStop }: { watch: Wat
               <span>starting</span>
             )}
             {sec != null && (
-              <>
-                <span aria-hidden>·</span>
+              <span className="flex items-baseline gap-1" aria-hidden>
+                <span>·</span>
                 <BlurSwap text={fmtDuration(sec)} />
-              </>
+              </span>
             )}
           </span>
         </span>

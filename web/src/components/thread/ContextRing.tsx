@@ -212,7 +212,7 @@ function UsageBar({ health, breakdown }: { health: ContextHealth; breakdown: Con
       ) : (
         <div className={cn("h-full rounded-full transition-[width] duration-700 ease-out", fill(health))} style={{ width: `${Math.max(health.fraction * 100, 2)}%` }} />
       )}
-      {health.compactAt !== undefined && (
+      {health.compactAt !== undefined && health.compactAt < health.window && (
         <span className="bg-foreground/60 absolute -top-[3px] h-3.5 w-px rounded-full" style={{ left: w(health.compactAt) }} />
       )}
     </div>

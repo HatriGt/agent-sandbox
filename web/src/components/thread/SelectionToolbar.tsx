@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Check, Copy, MessageCircleQuestion, Quote } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import { toast } from "sonner";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { IconSwap } from "@/components/ui/icon-swap";
@@ -108,7 +109,14 @@ export function SelectionToolbar({
   };
   const copy = () => {
     if (!pill) return;
-    void navigator.clipboard?.writeText(pill.text).then(() => setCopied(true));
+    if (!navigator.clipboard) {
+      toast.error("Copy failed — the clipboard is not available here");
+      return;
+    }
+    navigator.clipboard.writeText(pill.text).then(
+      () => setCopied(true),
+      () => toast.error("Copy failed — the browser blocked clipboard access")
+    );
   };
 
   return (

@@ -5,12 +5,26 @@ import { VizFrame } from "./VizFrame";
 type TipState = { x: number; y: number; text: string };
 
 /** Same bubble as ChartBlock's tooltip: popover surface, hairline, e2 shadow, centered above the mark. */
-function Tip({ tip }: { tip: TipState | null }) {
+function Tip({ tip, gap = 6 }: { tip: TipState | null; gap?: number }) {
+  // Nudged back inside the host when a mark near the edge would push half the bubble out of the
+  // clipped card (margins, so Tailwind's `translate` centering stays intact).
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    const el = ref.current;
+    const host = el?.parentElement;
+    if (!el || !host) return;
+    el.style.marginLeft = "";
+    const p = host.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const dx = r.left < p.left ? p.left - r.left : r.right > p.right ? p.right - r.right : 0;
+    if (dx) el.style.marginLeft = `${dx}px`;
+  });
   if (!tip) return null;
   return (
     <div
+      ref={ref}
       className="bg-popover text-popover-foreground pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border px-2 py-1 text-micro whitespace-nowrap shadow-e2"
-      style={{ left: tip.x, top: tip.y - 6 }}
+      style={{ left: tip.x, top: tip.y - gap }}
       role="status"
       data-viz-tip
     >
@@ -178,9 +192,12 @@ export function HeatmapBlock({ map, source }: { map: Heatmap; source: string }) 
                         height: dense ? 14 : 26,
                       }}
                       onMouseEnter={(e) => {
-                        const host = e.currentTarget.closest(".relative")!.getBoundingClientRect();
+                        // The host scrolls sideways on wide grids: absolute positions are in its
+                        // scrolled content box, so add the scroll offset or the tip drifts left.
+                        const hostEl = e.currentTarget.closest(".relative") as HTMLElement;
+                        const host = hostEl.getBoundingClientRect();
                         const rect = e.currentTarget.getBoundingClientRect();
-                        setTip({ x: rect.left - host.left + rect.width / 2, y: rect.top - host.top, text: `${r} × ${c}: ${v}${map.unit ?? ""}` });
+                        setTip({ x: rect.left - host.left + hostEl.scrollLeft + rect.width / 2, y: rect.top - host.top + hostEl.scrollTop, text: `${r} × ${c}: ${v}${map.unit ?? ""}` });
                       }}
                       onMouseLeave={() => setTip(null)}
                     >
@@ -196,15 +213,7 @@ export function HeatmapBlock({ map, source }: { map: Heatmap; source: string }) 
             ))}
           </tbody>
         </table>
-        {tip && (
-          <div
-            className="bg-popover text-popover-foreground pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border px-2 py-1 text-micro whitespace-nowrap shadow-e2"
-            style={{ left: tip.x, top: tip.y - 4 }}
-            role="status"
-          >
-            {tip.text}
-          </div>
-        )}
+        <Tip tip={tip} gap={4} />
       </div>
     </VizFrame>
   );

@@ -1,10 +1,11 @@
 import * as React from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Laptop, LogOut, MonitorSmartphone, Smartphone } from "lucide-react";
+import { Laptop, LogOut, MonitorSmartphone, RotateCw, Smartphone } from "lucide-react";
 import { toast } from "sonner";
 import { api, type SessionRow } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { ArmButton } from "@/components/ui/arm-button";
+import { Button } from "@/components/ui/button";
 import { Swap } from "@/components/ui/swap";
 import { ListEmpty, ListSkeleton } from "@/components/ui/list-state";
 import { Panel, SettingsSection } from "@/components/ui/settings";
@@ -54,7 +55,19 @@ function describe(ua: string | null): { label: string; mobile: boolean } {
 /** Where you are signed in. Revoke a stolen or forgotten session without changing your password. */
 export function Sessions() {
   const [rows, setRows] = React.useState<SessionRow[] | null>(null);
-  const load = React.useCallback(() => api.sessions().then((r) => setRows(r.sessions)).catch(() => setRows([])), []);
+  // An access-token sign-in gets an empty list from the server; a failed request is an error, not "none".
+  const [error, setError] = React.useState<string | null>(null);
+  const load = React.useCallback(
+    () =>
+      api
+        .sessions()
+        .then((r) => {
+          setRows(r.sessions);
+          setError(null);
+        })
+        .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e))),
+    []
+  );
   React.useEffect(() => void load(), [load]);
   const revoke = async (s: SessionRow) => {
     try {
@@ -80,7 +93,7 @@ export function Sessions() {
   // This device first, then most recently active.
   const sorted = React.useMemo(() => (rows ?? []).slice().sort((a, b) => Number(b.current) - Number(a.current) || Date.parse(b.lastSeenAt ?? "") - Date.parse(a.lastSeenAt ?? "")), [rows]);
   const others = sorted.filter((s) => !s.current);
-  const state = rows === null ? "loading" : rows.length === 0 ? "empty" : "list";
+  const state = rows === null ? (error ? "error" : "loading") : rows.length === 0 ? "empty" : "list";
   return (
     <SettingsSection
       id="sess"
@@ -99,7 +112,19 @@ export function Sessions() {
     >
       <Panel>
         <Swap state={state}>
-          {state === "loading" ? (
+          {state === "error" ? (
+            <ListEmpty
+              icon={MonitorSmartphone}
+              title="Could not load your devices"
+              line={error}
+              action={
+                <Button size="sm" variant="outline" onClick={() => void load()}>
+                  <RotateCw />
+                  Retry
+                </Button>
+              }
+            />
+          ) : state === "loading" ? (
             <ListSkeleton rows={2} />
           ) : state === "empty" ? (
             <ListEmpty icon={MonitorSmartphone} title="No browser sessions" line="You are signed in with an access token, so there is nothing to sign out here." />

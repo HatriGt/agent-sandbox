@@ -3,6 +3,7 @@ import { Loader2, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { api, type RepoSetupProfile, type RepoSetupsResponse } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { ArmButton } from "@/components/ui/arm-button";
 import { SettingsSection } from "@/components/ui/settings";
 import { Bar } from "@/components/thread/Skeletons";
 import { Swap } from "@/components/ui/swap";
@@ -103,9 +104,7 @@ function SetupRow({ repo, profile: p, onChange }: { repo: string; profile: RepoS
       <Button size="xs" variant="ghost" onClick={() => setEditing(true)} disabled={busy} aria-label={`Edit setup for ${repo}`}>
         <Pencil className="size-3.5" />
       </Button>
-      <Button size="xs" variant="ghost" onClick={() => void reset()} disabled={busy} aria-label={`Reset setup for ${repo}`} title="Forget and re-detect on the next run">
-        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
-      </Button>
+      <ArmButton size="icon-xs" variant="ghost" icon={<RotateCcw className="size-3.5" />} label={`Reset setup for ${repo}`} armedLabel="Forget and re-detect?" onConfirm={reset} disabled={busy} />
     </div>
   );
 }

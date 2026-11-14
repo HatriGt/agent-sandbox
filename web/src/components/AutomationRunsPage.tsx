@@ -39,14 +39,17 @@ export function AutomationRunsPage({ id, onBack, onOpenBox }: { id: string; onBa
     void load();
   }, [load]);
   // A running box finishes without us; keep the receipts moving while something is in flight.
+  // Depend on the stable `refresh`, not the `useCached` result (a new object each render, which
+  // restarted the interval on every render).
+  const refreshTriggers = triggers.refresh;
   React.useEffect(() => {
     const live = (a?.active ?? 0) > 0;
     const t = window.setInterval(() => {
       void load();
-      void triggers.refresh();
+      void refreshTriggers();
     }, live ? 10_000 : 60_000);
     return () => window.clearInterval(t);
-  }, [a?.active, load, triggers]);
+  }, [a?.active, load, refreshTriggers]);
 
   const act = async (kind: "run" | "test") => {
     setBusy(kind);

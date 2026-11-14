@@ -250,6 +250,7 @@ export function ServerSheet({
   const def = React.useMemo(() => toDef(d), [d]);
   const { command, args } = commandOf(d);
   const glyphHint = `${d.name} ${d.type === "stdio" ? d.commandLine : d.url}`;
+  const unsaved = dirty || (mode === "json" && jsonText !== JSON.stringify(def, null, 2));
 
   const switchMode = (m: "fields" | "json") => {
     if (m === mode) return;
@@ -339,6 +340,13 @@ export function ServerSheet({
       description={initial ? "Changes reach every sandbox on its next run or turn." : "A set of tools every sandbox agent gets, from its next run."}
       className="w-[min(34rem,100vw)] p-0 sm:w-[min(34rem,calc(100vw-1rem))] [&>div:first-child]:px-6 [&>div:first-child]:pt-6"
       onKeyDown={onKey}
+      // Esc or a stray click on the backdrop asks before throwing away edits (Cancel / ✕ are deliberate).
+      onEscapeKeyDown={(e) => {
+        if (unsaved && !window.confirm("Discard your unsaved changes?")) e.preventDefault();
+      }}
+      onInteractOutside={(e) => {
+        if (unsaved && !window.confirm("Discard your unsaved changes?")) e.preventDefault();
+      }}
     >
       <form
         className="flex h-full flex-col"

@@ -34,6 +34,20 @@ export function TabStrip({ group, state, focused, dirty, dispatch, onClose }: { 
     </CM.Item>
   );
   const many = (which: "others" | "right" | "all" | "saved") => menuPath !== null && dispatch({ type: "closeMany", group, which, path: menuPath, dirty });
+  // Roving focus, as a tablist reads: the active tab is the one tab stop; ←/→ (wrapping), Home and
+  // End move between tabs, Enter or Space opens the focused one.
+  const onTabKey = (e: React.KeyboardEvent<HTMLDivElement>, i: number, path: string) => {
+    if (e.target !== e.currentTarget) return; // the close button handles its own keys
+    const n = state.tabs.length;
+    const to = e.key === "ArrowRight" ? (i + 1) % n : e.key === "ArrowLeft" ? (i - 1 + n) % n : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : -1;
+    if (to >= 0) {
+      e.preventDefault();
+      e.currentTarget.parentElement?.querySelector<HTMLElement>(`[data-tab="${CSS.escape(state.tabs[to].path)}"]`)?.focus();
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      dispatch({ type: "activate", group, path });
+    }
+  };
   return (
     <CM.Root onOpenChange={(o) => !o && setMenuPath(null)}>
       <CM.Trigger asChild>
@@ -66,6 +80,8 @@ export function TabStrip({ group, state, focused, dirty, dispatch, onClose }: { 
                 key={t.path}
                 role="tab"
                 aria-selected={on}
+                tabIndex={on ? 0 : -1}
+                onKeyDown={(e) => onTabKey(e, i, t.path)}
                 data-tab={t.path}
                 data-preview={t.preview || undefined}
                 draggable
@@ -74,7 +90,7 @@ export function TabStrip({ group, state, focused, dirty, dispatch, onClose }: { 
                 onDoubleClick={() => dispatch({ type: "pin", path: t.path })}
                 onMouseDown={(e) => e.button === 1 && e.preventDefault()}
                 onAuxClick={(e) => e.button === 1 && onClose(t.path)}
-                className={cn("group relative flex h-full shrink-0 cursor-pointer items-center gap-1.5 border-r pr-1 pl-3 text-meta transition-colors select-none", on ? (focused ? "text-foreground" : "text-foreground/75") : "text-muted-foreground hover:text-foreground hover:bg-muted/50")}
+                className={cn("group relative flex h-full shrink-0 cursor-pointer items-center gap-1.5 border-r pr-1 pl-3 text-meta outline-none transition-colors select-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset", on ? (focused ? "text-foreground" : "text-foreground/75") : "text-muted-foreground hover:text-foreground hover:bg-muted/50")}
                 title={t.path}
               >
                 {dropAt === i && <span className="bg-live absolute inset-y-1.5 -left-px z-10 w-0.5 rounded-full" aria-hidden />}

@@ -217,7 +217,7 @@ export function VerifyRow({ value, onChange }: { value: VerifySpec | null; onCha
       <div className="pb-1 pl-[4.5rem]">
         <input
           value={text}
-          onChange={(e) => onChange(e.target.value ? { mode, text: e.target.value } : null)}
+          onChange={(e) => onChange(e.target.value || mode !== "command" ? { mode, text: e.target.value } : null)}
           placeholder={mode === "command" ? "npm test" : "what must be true when it's done"}
           aria-label={mode === "command" ? "Verification command" : "Verification criterion"}
           className={cn(

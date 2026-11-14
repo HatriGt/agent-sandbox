@@ -1244,7 +1244,7 @@ export function Thread({
             {!sleeping && !loadingTrace && artifacts.length > 0 && runState !== "running" && pendingReplies.length === 0 && <ProducedFiles session={box.name} files={artifacts} />}
 
             {/* MCP servers the install left out of this box: the agent is running without them. */}
-            {!sleeping && !loadingTrace && !!snap?.mcpNotes?.length && (
+            {!sleeping && !loadingTrace && !!snap?.mcpNotes?.length && !!mcpNotesText(snap.mcpNotes) && (
               <p className="text-muted-foreground enter text-micro" role="status">
                 {mcpNotesText(snap.mcpNotes)}
               </p>

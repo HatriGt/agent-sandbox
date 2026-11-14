@@ -123,11 +123,17 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
             <div role="alert" className="border-destructive/30 bg-destructive/8 mb-4 rounded-xl border px-4 py-3">
               <p className="text-destructive text-meta font-medium">{pr ? "Couldn't refresh this pull request — showing the last loaded state" : "Couldn't load this pull request"}</p>
               <p className="text-foreground/80 mt-1 text-micro whitespace-pre-wrap">{error}</p>
+              {!pr && (
+                <button type="button" onClick={() => void load()} className="text-foreground mt-2 cursor-pointer text-micro font-medium underline-offset-2 hover:underline">
+                  Try again
+                </button>
+              )}
             </div>
           ) : null}
 
           <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em] break-words">
-            {pr?.title ?? <Bar className="inline-block h-6 w-80 max-w-full align-middle" />}
+            {/* A failed first load has nothing to wait for — no shimmer forever under the error. */}
+            {pr?.title ?? (error ? "Pull request" : <Bar className="inline-block h-6 w-80 max-w-full align-middle" />)}
             <span className="text-faint ml-2.5 font-normal tracking-normal">#{number}</span>
           </h1>
 

@@ -68,7 +68,7 @@ export function WakingCard({ awake, startedAt, error, onRetry }: { awake: boolea
         </AnimatePresence>
         {error && <span className="text-muted-foreground min-w-0 truncate text-micro">{error} Sending a message retries.</span>}
         {!awake && !error && (
-          <span className="text-faint shrink-0 text-micro tabular-nums" aria-label={`elapsed ${elapsed}s`}>
+          <span className="text-faint shrink-0 text-micro tabular-nums" aria-hidden>
             {elapsed}s
           </span>
         )}

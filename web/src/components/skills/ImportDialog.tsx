@@ -279,6 +279,8 @@ function GitHubStep({ existing, onClose, onImported, onEditOne, preset }: { exis
 
   // Exactly one picked → fetch and show what it will become.
   React.useEffect(() => {
+    // A new selection drops the previous preview's (or import's) error.
+    if (found) setErr(null);
     if (!found || pickedCount !== 1) {
       setPreview(null);
       return;

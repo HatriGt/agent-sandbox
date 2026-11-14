@@ -97,7 +97,11 @@ export function ImportHarness({ onCancel, onImported }: { onCancel: () => void; 
             <FileUp className="text-muted-foreground size-5" />
             <span className="text-foreground text-meta">Choose an exported .harness.json</span>
             <span className="text-faint text-micro">Checked for version, size and anything shaped like a secret.</span>
-            <input type="file" accept="application/json,.json" className="sr-only" onChange={(e) => void onFile(e.target.files?.[0])} />
+            <input type="file" accept="application/json,.json" className="sr-only" onChange={(e) => {
+                void onFile(e.target.files?.[0]);
+                // Reset so picking the same file again (after a fix, or a failed preview) fires onChange.
+                e.target.value = "";
+              }} />
           </label>
         ) : (
           <form

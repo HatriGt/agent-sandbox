@@ -442,6 +442,7 @@ function PlaybookActions({ w, onRun, onEdit, onDelete, onAutomate }: { w: Workfl
         size={armed ? "xs" : "icon-xs"}
         onClick={() => (armed ? onDelete() : setArmed(true))}
         onBlur={() => setArmed(false)}
+        onKeyDown={(e) => e.key === "Escape" && setArmed(false)}
         aria-label={`Delete ${w.name}`}
         title="Delete"
       >
