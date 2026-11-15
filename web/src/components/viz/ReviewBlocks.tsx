@@ -2,55 +2,52 @@ import * as React from "react";
 import { AlertOctagon, AlertTriangle, Info, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { severityOf, sortFindings, type Finding, type Severity } from "@/lib/viz-extra";
-import { VizFrame } from "./VizFrame";
+import { count, TallyItem, VizFrame, VIZ_FOOTER } from "./VizFrame";
+import { Pill, type Tone } from "./tone";
 import { RollNumber, useRowEntrance } from "./motion";
 
-const SEVERITY: Record<Severity, { icon: React.ReactNode; tone: string; word: string }> = {
-  high: { icon: <AlertOctagon className="size-3" strokeWidth={2.5} />, tone: "bg-destructive/12 text-destructive", word: "high" },
-  medium: { icon: <AlertTriangle className="size-3" strokeWidth={2.5} />, tone: "bg-warn/25 text-warn-text", word: "medium" },
-  low: { icon: <Info className="size-3" strokeWidth={2.5} />, tone: "bg-muted text-muted-foreground", word: "low" },
-  info: { icon: <MessageSquare className="size-3" strokeWidth={2.5} />, tone: "bg-live/12 text-live", word: "info" },
+const SEVERITY: Record<Severity, { icon: React.ReactNode; tone: Tone; hue: string; word: string }> = {
+  high: { icon: <AlertOctagon className="size-3" strokeWidth={2.25} />, tone: "fail", hue: "var(--destructive)", word: "high" },
+  medium: { icon: <AlertTriangle className="size-3" strokeWidth={2.25} />, tone: "warn", hue: "var(--warn)", word: "medium" },
+  low: { icon: <Info className="size-3" strokeWidth={2.25} />, tone: "neutral", hue: "var(--faint)", word: "low" },
+  info: { icon: <MessageSquare className="size-3" strokeWidth={2.25} />, tone: "live", hue: "var(--live)", word: "info" },
 };
 
 /**
- * ```findings (and severity-column tables) → a review list ranked by severity. Each row: a pill
- * carrying both a glyph and the severity WORD (never colour alone), a mono `where` chip, the
- * finding. The footer tallies per severity so the shape of the review reads at a glance.
+ * ```findings (and severity-column tables) → a review list ranked by severity. Each row: a
+ * hue-tinted pill carrying both a glyph and the severity WORD (never colour alone), a mono `where`
+ * chip, the finding. The footer tallies per severity so the shape of the review reads at a glance.
  */
 export function FindingsBlock({ findings, source }: { findings: Finding[]; source: string }) {
   const rows = React.useMemo(() => sortFindings(findings), [findings]);
   const tally = (["high", "medium", "low", "info"] as const).map((s) => [s, rows.filter((f) => f.severity === s).length] as const).filter(([, n]) => n > 0);
   const entrance = useRowEntrance(rows.map((f) => `${f.severity}|${f.where ?? ""}|${f.text}`));
   return (
-    <VizFrame title={`${rows.length} finding${rows.length === 1 ? "" : "s"}`} source={source}>
+    <VizFrame title={count(rows.length, "finding")} source={source}>
       <ul className="m-0 list-none p-0" aria-label="findings by severity">
         {rows.map((f, i) => {
           const s = SEVERITY[f.severity];
           const key = `${f.severity}|${f.where ?? ""}|${f.text}`;
+          const e = entrance(key);
           return (
-            <li key={key} className={cn("flex items-start gap-3 px-4 py-2 text-body", i > 0 && "border-t", entrance(key).className)} style={entrance(key).style}>
-              <span className={cn("mt-0.5 inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-1.5 text-micro font-semibold", s.tone)} data-severity={f.severity}>
+            <li key={key} className={cn("flex items-start gap-3 px-4 py-2.5 text-body", i > 0 && "border-border/60 border-t", e.className)} style={e.style}>
+              <Pill tone={s.tone} className="mt-0.5 w-[4.75rem] justify-center font-semibold" data-severity={f.severity}>
                 <span className="viz-mark grid place-items-center" aria-hidden>
                   {s.icon}
                 </span>
                 {s.word}
-              </span>
-              <span className="min-w-0 flex-1 leading-relaxed">
-                {f.where && <code className="bg-muted text-muted-foreground mr-2 rounded px-1.5 py-0.5 font-mono text-micro [overflow-wrap:anywhere]">{f.where}</code>}
+              </Pill>
+              <span className="min-w-0 flex-1 leading-relaxed text-pretty">
+                {f.where && <code className="bg-muted text-muted-foreground mr-2 rounded-md px-1.5 py-0.5 font-mono text-micro [overflow-wrap:anywhere]">{f.where}</code>}
                 <span className={cn(f.severity === "info" ? "text-muted-foreground" : "text-foreground")}>{f.text}</span>
               </span>
             </li>
           );
         })}
       </ul>
-      <div className="text-muted-foreground flex items-center gap-3 border-t px-4 py-1.5 text-micro">
-        {tally.map(([s, n], i) => (
-          <React.Fragment key={s}>
-            {i > 0 && <span className="opacity-40">·</span>}
-            <span className="tabular-nums">
-              <RollNumber text={String(n)} /> {SEVERITY[s].word}
-            </span>
-          </React.Fragment>
+      <div className={VIZ_FOOTER}>
+        {tally.map(([s, n]) => (
+          <TallyItem key={s} hue={SEVERITY[s].hue} n={<RollNumber text={String(n)} />} word={SEVERITY[s].word} />
         ))}
       </div>
     </VizFrame>

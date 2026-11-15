@@ -1,9 +1,10 @@
 import * as React from "react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { BarChart3, Table2 } from "lucide-react";
+import { IconSwap } from "./motion";
 import { cn } from "@/lib/utils";
 import type { ChartSpec } from "@/lib/viz";
-import { VizFrame, seriesColor } from "./VizFrame";
+import { VIZ_ICON_BUTTON, VizFrame, seriesColor } from "./VizFrame";
 import { DataTable } from "./DataTable";
 
 /**
@@ -50,9 +51,9 @@ export function ChartBlock({
       onClick={() => setView((v) => (v === "chart" ? "table" : "chart"))}
       aria-label={view === "chart" ? "Show as table" : "Show as chart"}
       aria-pressed={view === "table"}
-      className="text-muted-foreground hover:text-foreground grid size-6 cursor-pointer place-items-center rounded-md opacity-60 group-hover/viz:opacity-100 focus-visible:opacity-100"
+      className={cn(VIZ_ICON_BUTTON, view === "table" && "text-foreground bg-muted")}
     >
-      {view === "chart" ? <Table2 className="size-3.5" /> : <BarChart3 className="size-3.5" />}
+      <IconSwap on={view === "table"} offIcon={<Table2 className="size-3.5" strokeWidth={1.75} />} onIcon={<BarChart3 className="size-3.5" strokeWidth={1.75} />} />
     </button>
   );
   const headerActions =
@@ -96,12 +97,12 @@ export function ChartBlock({
                   aria-label={`${off ? "Show" : "Hide"} series ${s.name}`}
                   data-series={s.name}
                   className={cn(
-                    "hover:bg-muted/60 inline-flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-micro transition-opacity duration-150",
-                    off ? "text-faint line-through opacity-60" : "text-muted-foreground"
+                    "viz-press hover:bg-muted/60 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-micro outline-none transition-[opacity,color,background-color] duration-150 ease-(--viz-ease) focus-visible:ring-2 focus-visible:ring-ring/60",
+                    off ? "text-faint line-through opacity-60" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
                   {/* Hidden = hollow ring + strikethrough: state is never carried by color alone. */}
-                  <span aria-hidden className="size-2 rounded-full border-2" style={{ borderColor: seriesColor(i), background: off ? "transparent" : seriesColor(i) }} />
+                  <span aria-hidden className="size-2 rounded-full border-2 transition-[background-color] duration-150 ease-(--viz-ease)" style={{ borderColor: seriesColor(i), background: off ? "transparent" : seriesColor(i) }} />
                   {s.name}
                 </button>
               );
@@ -131,18 +132,22 @@ function Tip({ tip }: { tip: TipState | null }) {
     const el = ref.current;
     const host = el?.parentElement;
     if (!el || !host) return;
-    el.style.marginLeft = el.style.marginTop = "";
+    el.style.marginLeft = el.style.marginTop = el.style.transformOrigin = "";
     const p = host.getBoundingClientRect();
     const r = el.getBoundingClientRect();
     const dx = r.left < p.left ? p.left - r.left : r.right > p.right ? p.right - r.right : 0;
     if (dx) el.style.marginLeft = `${dx}px`;
-    if (r.top < p.top) el.style.marginTop = `${r.height + 12}px`;
+    // Flipped below the point: grow from the top edge, the side nearest the point.
+    if (r.top < p.top) {
+      el.style.marginTop = `${r.height + 12}px`;
+      el.style.transformOrigin = "top center";
+    }
   });
   if (!tip) return null;
   return (
     <div
       ref={ref}
-      className="bg-popover text-popover-foreground pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border px-2 py-1 text-micro whitespace-nowrap shadow-e2"
+      className="viz-tip bg-popover text-popover-foreground pointer-events-none absolute z-10 origin-bottom -translate-x-1/2 -translate-y-full rounded-md border px-2 py-1 text-micro whitespace-nowrap tabular-nums shadow-e2"
       style={{ left: tip.x, top: typeof tip.y === "number" ? tip.y - 6 : `calc(${tip.y} - 6px)` }}
       role="status"
       data-viz-tip
@@ -162,6 +167,8 @@ function Tip({ tip }: { tip: TipState | null }) {
 const EASE = "cubic-bezier(0.2, 0, 0, 1)";
 const geo = (reduced: boolean, props: string): React.CSSProperties =>
   reduced ? {} : { transition: props.split(",").map((p) => `${p.trim()} 250ms ${EASE}`).join(", ") };
+/** Pointer-tracking marks (hover band, crosshair): 60ms linear, so they follow the hand without lag or overshoot. */
+const track = (reduced: boolean, prop: string): React.CSSProperties => (reduced ? {} : { transition: `${prop} 60ms linear` });
 
 /**
  * Category scrub shared by bars and lines: hover band or ←/→ picks a category; Enter/click pins it
@@ -258,7 +265,7 @@ function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
         {[0.25, 0.5, 0.75].map((f) => (
           <line key={f} x1={0} x2={W} y1={plotH - f * (plotH - 18)} y2={plotH - f * (plotH - 18)} stroke="var(--viz-grid)" strokeWidth={1} />
         ))}
-        {a !== null && <rect x={a * group + 2} y={0} width={group - 4} height={plotH} rx={6} fill="var(--muted)" opacity={0.5} />}
+        {a !== null && <rect x={a * group + 2} y={0} width={group - 4} height={plotH} rx={6} fill="var(--muted)" opacity={0.5} style={{ x: a * group + 2, ...track(reduced, "x") } as React.CSSProperties} />}
         <line x1={0} x2={W} y1={zeroY} y2={zeroY} stroke="var(--line-strong)" strokeWidth={1} />
         {spec.labels.map((label, li) => {
           const cx = li * group + group / 2;
@@ -348,7 +355,7 @@ function StackedBars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
         {[0.25, 0.5, 0.75].map((f) => (
           <line key={f} x1={0} x2={W} y1={plotH - f * (plotH - 18)} y2={plotH - f * (plotH - 18)} stroke="var(--viz-grid)" strokeWidth={1} />
         ))}
-        {a !== null && <rect x={a * group + 2} y={0} width={group - 4} height={plotH} rx={6} fill="var(--muted)" opacity={0.5} />}
+        {a !== null && <rect x={a * group + 2} y={0} width={group - 4} height={plotH} rx={6} fill="var(--muted)" opacity={0.5} style={{ x: a * group + 2, ...track(reduced, "x") } as React.CSSProperties} />}
         <line x1={0} x2={W} y1={plotH} y2={plotH} stroke="var(--line-strong)" strokeWidth={1} />
         {spec.labels.map((label, li) => {
           const x = li * group + (group - barW) / 2;
@@ -512,7 +519,7 @@ function Lines({ spec, slots, area }: { spec: ChartSpec; slots: number[]; area: 
         })}
         {a !== null && (
           <g aria-hidden pointerEvents="none">
-            <line x1={px(a)} x2={px(a)} y1={4} y2={plotH} stroke="var(--line-strong)" strokeWidth={1} strokeDasharray="3 3" />
+            <line x1={0} x2={0} y1={4} y2={plotH} stroke="var(--line-strong)" strokeWidth={1} strokeDasharray="3 3" style={{ transform: `translateX(${px(a)}px)`, ...track(reduced, "transform") }} />
             {spec.series.map((s, si) =>
               typeof s.data[a] === "number" ? (
                 <circle
@@ -523,7 +530,7 @@ function Lines({ spec, slots, area }: { spec: ChartSpec; slots: number[]; area: 
                   fill={seriesColor(slots[si])}
                   stroke="var(--card)"
                   strokeWidth={2}
-                  style={{ cx: px(a), cy: py(s.data[a]), ...geo(reduced, "cx, cy") } as React.CSSProperties}
+                  style={{ cx: px(a), cy: py(s.data[a]), ...(reduced ? {} : { transition: `cx 60ms linear, cy 150ms ${EASE}` }) } as React.CSSProperties}
                 />
               ) : null
             )}

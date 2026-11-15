@@ -1,7 +1,9 @@
 import * as React from "react";
 import { AlertTriangle, ArrowRight, ArrowUpRight, Book, Check, CircleDot, Copy, Eye, EyeOff, File, Folder, GitCommitHorizontal, GitPullRequest, Link2, Link as LinkIcon, Minus, TrendingDown, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { VizFrame } from "./VizFrame";
+import { count, VizFrame } from "./VizFrame";
+import { IconSwap, useRowEntrance } from "./motion";
+import { Pill, toneStyle, type Tone } from "./tone";
 import type { CommandLine, Comparison, CronSpec, EnvVar, FileEntry, IniSection, JwtDecoded, LinkItem, StackTrace, UrlParts } from "@/lib/viz-auto-types";
 
 /**
@@ -25,12 +27,20 @@ function CopyIcon({ text, label = "Copy" }: { text: string; label?: string }) {
         }
       }}
       aria-label={label}
-      className="text-muted-foreground hover:text-foreground grid size-6 shrink-0 cursor-pointer place-items-center rounded-md opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-60"
+      // Quiet until its row is hovered; the copy glyph cross-fades to a check (both stay mounted).
+      className={cn(
+        "viz-press text-muted-foreground hover:text-foreground hover:bg-muted/70 grid size-7 shrink-0 cursor-pointer place-items-center rounded-md outline-none transition-[opacity,color,background-color] duration-150 ease-(--viz-ease) focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/60 [@media(hover:none)]:opacity-60",
+        done ? "opacity-100" : "opacity-0 group-hover/row:opacity-100"
+      )}
     >
-      {done ? <Check className="pop-in text-ok size-3.5" /> : <Copy className="size-3.5" />}
+      <IconSwap on={done} offIcon={<Copy className="size-3.5" strokeWidth={1.75} />} onIcon={<Check className="text-ok size-3.5" strokeWidth={2.25} />} />
     </button>
   );
 }
+
+/** A worded header action ("Copy all", "3 secrets masked"): always visible, 0.96 press, colour on hover. */
+const HEADER_TEXT_BUTTON =
+  "viz-press text-muted-foreground hover:text-foreground hover:bg-muted/70 mr-1 flex h-6 cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-micro outline-none transition-[color,background-color] duration-150 ease-(--viz-ease) focus-visible:ring-2 focus-visible:ring-ring/60";
 
 // ---------------------------------------------------------------- env
 
@@ -41,29 +51,29 @@ export function EnvBlock({ vars, source }: { vars: EnvVar[]; source: string }) {
   const toggleAll = () => setShown(allShown ? new Set() : new Set(vars.filter((v) => v.secret).map((v) => v.key)));
   return (
     <VizFrame
-      title={`env · ${vars.length} ${vars.length === 1 ? "variable" : "variables"}`}
+      title={`env · ${count(vars.length, "variable")}`}
       source={source}
       rawLanguage="bash"
       actions={
         secrets > 0 && (
-          <button type="button" onClick={toggleAll} className="text-muted-foreground hover:text-foreground mr-1 flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-micro">
-            {allShown ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+          <button type="button" onClick={toggleAll} aria-pressed={allShown} className={HEADER_TEXT_BUTTON}>
+            <IconSwap on={allShown} offIcon={<Eye className="size-3" strokeWidth={1.75} />} onIcon={<EyeOff className="size-3" strokeWidth={1.75} />} />
             {allShown ? "Hide secrets" : `${secrets} ${secrets === 1 ? "secret" : "secrets"} masked`}
           </button>
         )
       }
     >
-      <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-5 px-4 py-2">
+      <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-5 px-4 py-1.5">
         {vars.map((v) => {
           const visible = !v.secret || shown.has(v.key);
           return (
             <div key={v.key} className="group/row contents">
-              <dt className="text-foreground flex items-center py-1 font-mono text-code font-medium">{v.key}</dt>
-              <dd className="m-0 flex min-w-0 items-center gap-1.5 py-1">
-                <span className={cn("min-w-0 truncate font-mono text-code", visible ? "text-muted-foreground" : "text-faint tracking-[0.2em]")}>{visible ? v.value || "∅" : "••••••••"}</span>
+              <dt className="text-foreground flex items-center py-0.5 font-mono text-code font-medium">{v.key}</dt>
+              <dd className="m-0 flex min-w-0 items-center gap-1 py-0.5">
+                <span key={visible ? "v" : "m"} className={cn("viz-fade min-w-0 truncate font-mono text-code", visible ? "text-muted-foreground" : "text-faint tracking-[0.2em]")}>{visible ? v.value || "∅" : "••••••••"}</span>
                 {v.secret && (
-                  <button type="button" onClick={() => setShown((s) => new Set(visible ? [...s].filter((k) => k !== v.key) : [...s, v.key]))} aria-label={visible ? "Hide value" : "Reveal value"} className="text-muted-foreground hover:text-foreground grid size-6 shrink-0 cursor-pointer place-items-center rounded-md">
-                    {visible ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                  <button type="button" onClick={() => setShown((s) => new Set(visible ? [...s].filter((k) => k !== v.key) : [...s, v.key]))} aria-label={visible ? "Hide value" : "Reveal value"} className="viz-press text-muted-foreground hover:text-foreground hover:bg-muted/70 grid size-7 shrink-0 cursor-pointer place-items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+                    <IconSwap on={visible} offIcon={<Eye className="size-3.5" strokeWidth={1.75} />} onIcon={<EyeOff className="size-3.5" strokeWidth={1.75} />} />
                   </button>
                 )}
                 <CopyIcon text={v.value} label={`Copy ${v.key}`} />
@@ -93,25 +103,30 @@ export function StackTraceBlock({ trace, source }: { trace: StackTrace; source: 
     } else rows.push({ kind: "frame", i });
   }
   const folded = trace.frames.filter((f) => f.vendor).length;
+  // Frames revealed by "N framework frames" fade in (staggered); the first paint uses the shared entrance.
+  const entrance = useRowEntrance(rows.map((r) => (r.kind === "fold" ? `fold${r.from}` : `f${r.i}`)));
   return (
     <VizFrame title={`${trace.language === "js" ? "JavaScript" : trace.language === "py" ? "Python" : trace.language === "java" ? "Java" : trace.language === "go" ? "Go" : trace.language === "rust" ? "Rust" : ""} stack trace · ${trace.frames.length} ${trace.frames.length === 1 ? "frame" : "frames"}`.trim()} source={source}>
-      <div className="border-destructive/30 bg-destructive/6 border-l-2 px-4 py-2.5">
-        <p className="text-destructive m-0 flex items-start gap-2 text-meta font-medium">
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-          <span className="min-w-0 break-words">{trace.message}</span>
+      {/* The callout's recipe: a few percent of the hue as ground, a small round glyph, no side bar. */}
+      <div className="px-4 py-2.5" style={{ background: "color-mix(in oklab, var(--destructive) 6%, transparent)" }}>
+        <p className="text-destructive m-0 flex items-start gap-2.5 text-meta font-medium">
+          <span className="viz-tone mt-px grid size-5 shrink-0 place-items-center rounded-full" style={toneStyle("fail")} aria-hidden>
+            <AlertTriangle className="size-3" strokeWidth={2} />
+          </span>
+          <span className="min-w-0 break-words text-pretty">{trace.message}</span>
         </p>
       </div>
       <ol className="m-0 list-none p-0 font-mono text-code">
         {rows.map((r, k) =>
           r.kind === "fold" ? (
-            <li key={k} className="border-t">
-              <button type="button" onClick={() => setVendors(true)} className="text-faint hover:text-muted-foreground flex w-full cursor-pointer items-center gap-2 px-4 py-1 text-left text-micro">
+            <li key={k} className={cn("border-border/60 border-t", entrance(`fold${r.from}`).className)} style={entrance(`fold${r.from}`).style}>
+              <button type="button" onClick={() => setVendors(true)} className="no-press text-faint hover:text-muted-foreground hover:bg-muted/50 flex w-full cursor-pointer items-center gap-2 px-4 py-1.5 text-left text-micro transition-[color,background-color] duration-150 ease-(--viz-ease) outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset">
                 <span className="opacity-60">⋯</span>
                 {r.to - r.from} framework {r.to - r.from === 1 ? "frame" : "frames"}
               </button>
             </li>
           ) : (
-            <li key={k} className={cn("flex items-baseline gap-3 border-t px-4 py-1", r.i === firstApp && "bg-warn/10", trace.frames[r.i].vendor && "text-faint")}>
+            <li key={k} className={cn("border-border/60 flex items-baseline gap-3 border-t px-4 py-1", r.i === firstApp && "bg-warn/10", trace.frames[r.i].vendor && "text-faint", entrance(`f${r.i}`).className)} style={entrance(`f${r.i}`).style}>
               <span className="text-faint w-5 shrink-0 text-right tabular-nums">{r.i + 1}</span>
               <span className={cn("min-w-0 truncate", trace.frames[r.i].vendor ? "" : "text-foreground font-medium")}>{trace.frames[r.i].fn ?? "<anonymous>"}</span>
               {trace.frames[r.i].file && (
@@ -126,7 +141,7 @@ export function StackTraceBlock({ trace, source }: { trace: StackTrace; source: 
         )}
       </ol>
       {vendors && folded > 0 && (
-        <button type="button" onClick={() => setVendors(false)} className="text-faint hover:text-muted-foreground w-full cursor-pointer border-t px-4 py-1 text-left text-micro">
+        <button type="button" onClick={() => setVendors(false)} className="no-press viz-fade text-faint hover:text-muted-foreground hover:bg-muted/50 w-full cursor-pointer border-t px-4 py-1.5 text-left text-micro transition-[color,background-color] duration-150 ease-(--viz-ease) outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset">
           Hide framework frames
         </button>
       )}
@@ -149,26 +164,30 @@ export function FileListBlock({ entries, source }: { entries: FileEntry[]; sourc
   const sorted = [...entries].sort((a, b) => (a.kind === "dir" ? 0 : 1) - (b.kind === "dir" ? 0 : 1));
   const max = Math.max(...entries.map((e) => e.bytes ?? 0), 1);
   const total = entries.reduce((n, e) => n + (e.kind === "file" ? e.bytes ?? 0 : 0), 0);
+  const entrance = useRowEntrance(sorted.map((e) => e.name));
   return (
-    <VizFrame title={`${entries.length} ${entries.length === 1 ? "entry" : "entries"}`} source={source}>
+    <VizFrame title={count(entries.length, "entry", "entries")} source={source}>
       <ul className="m-0 list-none p-0">
-        {sorted.map((e, i) => (
-          <li key={e.name} className={cn("flex items-center gap-3 px-4 py-1.5 text-meta", i > 0 && "border-t")}>
+        {sorted.map((e, i) => {
+          const ent = entrance(e.name);
+          return (
+          <li key={e.name} className={cn("flex items-center gap-3 px-4 py-1.5 text-meta", i > 0 && "border-border/60 border-t", ent.className)} style={ent.style}>
             {e.kind === "dir" ? <Folder className="text-live size-3.5 shrink-0" aria-label="folder" /> : e.kind === "link" ? <Link2 className="text-muted-foreground size-3.5 shrink-0" aria-label="link" /> : <File className="text-muted-foreground size-3.5 shrink-0" aria-hidden />}
             <span className={cn("min-w-0 flex-1 truncate font-mono text-code", e.kind === "dir" ? "text-foreground font-medium" : "text-foreground")}>{e.name}</span>
             {e.modified && <span className="text-faint hidden shrink-0 text-micro sm:inline">{e.modified}</span>}
             <span className="flex w-28 shrink-0 items-center justify-end gap-2">
               {e.bytes != null && e.kind !== "dir" && (
                 <span className="bg-muted h-1 w-10 overflow-hidden rounded-full" aria-hidden>
-                  <span className="bg-live/70 block h-full rounded-full" style={{ width: `${Math.max(4, (e.bytes / max) * 100)}%` }} />
+                  <span className={cn("viz-tween-w bg-live/70 block h-full origin-left rounded-full", ent.first && "viz-grow-x")} style={{ width: `${Math.max(4, (e.bytes / max) * 100)}%`, ...ent.style }} />
                 </span>
               )}
               <span className="text-muted-foreground text-micro tabular-nums">{e.bytes != null ? humanBytes(e.bytes) : e.sizeText ?? ""}</span>
             </span>
           </li>
-        ))}
+          );
+        })}
       </ul>
-      {total > 0 && <p className="text-faint m-0 border-t px-4 py-1.5 text-right text-micro tabular-nums">{humanBytes(total)} in files</p>}
+      {total > 0 && <p className="text-muted-foreground m-0 border-t px-4 py-1.5 text-right text-micro tabular-nums">{humanBytes(total)} in files</p>}
     </VizFrame>
   );
 }
@@ -176,27 +195,31 @@ export function FileListBlock({ entries, source }: { entries: FileEntry[]; sourc
 // ---------------------------------------------------------------- links
 
 const LINK_ICON: Record<LinkItem["kind"], React.ReactNode> = {
-  pr: <GitPullRequest className="size-3.5" />,
-  issue: <CircleDot className="size-3.5" />,
-  commit: <GitCommitHorizontal className="size-3.5" />,
-  repo: <Book className="size-3.5" />,
-  doc: <Book className="size-3.5" />,
-  other: <LinkIcon className="size-3.5" />,
+  pr: <GitPullRequest className="size-3.5" strokeWidth={1.75} />,
+  issue: <CircleDot className="size-3.5" strokeWidth={1.75} />,
+  commit: <GitCommitHorizontal className="size-3.5" strokeWidth={1.75} />,
+  repo: <Book className="size-3.5" strokeWidth={1.75} />,
+  doc: <Book className="size-3.5" strokeWidth={1.75} />,
+  other: <LinkIcon className="size-3.5" strokeWidth={1.75} />,
 };
 
+const LINK_TONE: Record<LinkItem["kind"], Tone> = { pr: "ok", issue: "warn", commit: "live", repo: "neutral", doc: "neutral", other: "neutral" };
+
+/** Link cards sit 6px inside the frame with 6px corners (concentric); the icon tile sits 4px inside the card. */
 export function LinksBlock({ links, source }: { links: LinkItem[]; source: string }) {
+  const entrance = useRowEntrance(links.map((l) => l.url));
   return (
-    <VizFrame title={`${links.length} ${links.length === 1 ? "link" : "links"}`} source={source}>
-      <ul className="m-0 grid list-none gap-1.5 p-2 sm:grid-cols-2">
+    <VizFrame title={count(links.length, "link")} source={source}>
+      <ul className="m-0 grid list-none gap-1.5 p-1.5 sm:grid-cols-2">
         {links.map((l) => (
-          <li key={l.url} className="min-w-0">
-            <a href={l.url} target="_blank" rel="noopener noreferrer" className="group/link hover:bg-muted hover:border-line-strong flex min-w-0 items-center gap-2.5 rounded-lg border px-3 py-2 transition-colors">
-              <span className={cn("grid size-7 shrink-0 place-items-center rounded-md", l.kind === "pr" ? "bg-ok/12 text-ok" : l.kind === "issue" ? "bg-warn/25 text-warn-text" : l.kind === "commit" ? "bg-live/12 text-live" : "bg-muted text-muted-foreground")}>{LINK_ICON[l.kind]}</span>
+          <li key={l.url} className={cn("min-w-0", entrance(l.url).className)} style={entrance(l.url).style}>
+            <a href={l.url} target="_blank" rel="noopener noreferrer" className="group/link viz-press hover:bg-muted/60 hover:border-line-strong flex min-w-0 items-center gap-2.5 rounded-md border p-1 pr-3 outline-none transition-[background-color,border-color] duration-150 ease-(--viz-ease) focus-visible:ring-2 focus-visible:ring-ring/60">
+              <span className="viz-tone grid size-8 shrink-0 place-items-center rounded-[4px]" style={toneStyle(LINK_TONE[l.kind])}>{LINK_ICON[l.kind]}</span>
               <span className="min-w-0 flex-1">
                 <span className="text-foreground block truncate text-meta font-medium">{l.label ?? l.ref ?? l.url.replace(/^https?:\/\//, "")}</span>
                 <span className="text-faint block truncate text-micro">{l.ref && l.label ? `${l.ref} · ` : ""}{l.host}</span>
               </span>
-              <ArrowUpRight className="text-muted-foreground size-3.5 shrink-0 opacity-0 transition-opacity group-hover/link:opacity-100" aria-hidden />
+              <ArrowUpRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-0.5 translate-y-0.5 opacity-0 transition-[opacity,translate] duration-150 ease-(--viz-ease) group-hover/link:translate-0 group-hover/link:opacity-100 group-focus-visible/link:translate-0 group-focus-visible/link:opacity-100" strokeWidth={1.75} aria-hidden />
             </a>
           </li>
         ))}
@@ -220,14 +243,16 @@ export function CommandBlock({ commands, source }: { commands: CommandLine[]; so
   };
   return (
     <VizFrame
-      title={`${commands.length} ${commands.length === 1 ? "command" : "commands"}`}
+      title={count(commands.length, "command")}
       source={source}
       rawLanguage="bash"
       actions={
         commands.length > 1 && (
-          <button type="button" onClick={copyAll} className="text-muted-foreground hover:text-foreground mr-1 flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-micro">
-            {all ? <Check className="text-ok size-3" /> : <Copy className="size-3" />}
-            {all ? "Copied" : "Copy all"}
+          <button type="button" onClick={copyAll} className={HEADER_TEXT_BUTTON}>
+            <IconSwap on={all} offIcon={<Copy className="size-3" strokeWidth={1.75} />} onIcon={<Check className="text-ok size-3" strokeWidth={2.25} />} />
+            <span key={all ? "y" : "n"} className="viz-fade">
+              {all ? "Copied" : "Copy all"}
+            </span>
           </button>
         )
       }
@@ -259,6 +284,7 @@ function fmt(n: number, unit?: string): string {
 }
 
 export function ComparisonBlock({ rows, source }: { rows: Comparison[]; source: string }) {
+  const entrance = useRowEntrance(rows.map((r, i) => `${i}|${r.label}`));
   return (
     <VizFrame title="Before → after" source={source}>
       <ul className="m-0 list-none p-0">
@@ -267,24 +293,26 @@ export function ComparisonBlock({ rows, source }: { rows: Comparison[]; source: 
           const delta = numeric ? r.afterNum! - r.beforeNum! : 0;
           const pct = numeric && r.beforeNum ? (delta / Math.abs(r.beforeNum)) * 100 : null;
           const improved = r.betterWhen ? (r.betterWhen === "lower" ? delta < 0 : delta > 0) : null;
-          const tone = !numeric || delta === 0 ? "text-muted-foreground bg-muted" : improved === null ? "text-live bg-live/12" : improved ? "text-ok bg-ok/12" : "text-destructive bg-destructive/12";
+          const tone: Tone = !numeric || delta === 0 ? "neutral" : improved === null ? "live" : improved ? "ok" : "fail";
           const max = numeric ? Math.max(Math.abs(r.beforeNum!), Math.abs(r.afterNum!), 1e-9) : 1;
+          const ent = entrance(`${i}|${r.label}`);
+          const grow = cn("viz-tween-w block h-full origin-left rounded-full", ent.first && "viz-grow-x");
           return (
-            <li key={i} className={cn("flex flex-col gap-1.5 px-4 py-2.5", i > 0 && "border-t")}>
+            <li key={i} className={cn("flex flex-col gap-1.5 px-4 py-2.5", i > 0 && "border-border/60 border-t", ent.className)} style={ent.style}>
               <div className="flex items-center gap-3">
                 <span className="text-foreground min-w-0 flex-1 truncate text-meta font-medium">{r.label}</span>
                 <span className="text-muted-foreground text-meta tabular-nums">{numeric ? fmt(r.beforeNum!, r.unit) : r.before}</span>
                 <ArrowRight className="text-faint size-3.5 shrink-0" aria-hidden />
                 <span className="text-foreground text-meta font-semibold tabular-nums">{numeric ? fmt(r.afterNum!, r.unit) : r.after}</span>
-                <span className={cn("inline-flex w-16 items-center justify-center gap-1 rounded-md px-1.5 py-0.5 text-micro font-medium tabular-nums", tone)}>
-                  {numeric && delta !== 0 ? delta < 0 ? <TrendingDown className="size-3" /> : <TrendingUp className="size-3" /> : <Minus className="size-3" />}
+                <Pill tone={tone} round={false} className="w-16 justify-center">
+                  {numeric && delta !== 0 ? delta < 0 ? <TrendingDown className="size-3" strokeWidth={2} aria-hidden /> : <TrendingUp className="size-3" strokeWidth={2} aria-hidden /> : <Minus className="size-3" strokeWidth={2} aria-hidden />}
                   {pct != null ? `${pct > 0 ? "+" : ""}${Math.round(pct)}%` : numeric ? fmt(delta, r.unit) : "—"}
-                </span>
+                </Pill>
               </div>
               {numeric && (
                 <span className="flex flex-col gap-0.5" aria-hidden>
-                  <span className="bg-muted h-0.75 w-full overflow-hidden rounded-full"><span className="bg-faint/50 block h-full rounded-full" style={{ width: `${(Math.abs(r.beforeNum!) / max) * 100}%` }} /></span>
-                  <span className="bg-muted h-0.75 w-full overflow-hidden rounded-full"><span className={cn("block h-full rounded-full", improved === false ? "bg-destructive/70" : "bg-live")} style={{ width: `${(Math.abs(r.afterNum!) / max) * 100}%` }} /></span>
+                  <span className="bg-muted h-0.75 w-full overflow-hidden rounded-full"><span className={cn(grow, "bg-faint/50")} style={{ width: `${(Math.abs(r.beforeNum!) / max) * 100}%`, ...ent.style }} /></span>
+                  <span className="bg-muted h-0.75 w-full overflow-hidden rounded-full"><span className={cn(grow, improved === false ? "bg-destructive/70" : "bg-live")} style={{ width: `${(Math.abs(r.afterNum!) / max) * 100}%`, ...ent.style }} /></span>
                 </span>
               )}
             </li>
@@ -302,8 +330,8 @@ export function CronBlock({ specs, source }: { specs: CronSpec[]; source: string
     <VizFrame title={`${specs.length === 1 ? "Schedule" : `${specs.length} schedules`}`} source={source}>
       <ul className="m-0 list-none p-0">
         {specs.map((s, i) => (
-          <li key={i} className={cn("px-4 py-3", i > 0 && "border-t")}>
-            <p className="text-foreground m-0 text-body font-medium">{s.description}</p>
+          <li key={i} className={cn("px-4 py-3", i > 0 && "border-border/60 border-t")}>
+            <p className="text-foreground m-0 text-body font-medium text-balance">{s.description}</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {s.expr.startsWith("@") ? (
                 <span className="bg-muted rounded-md px-2 py-1 font-mono text-code">{s.expr}</span>
@@ -335,7 +363,7 @@ export function UrlBlock({ url, source }: { url: UrlParts; source: string }) {
         {segs.map((s, i) => (
           <React.Fragment key={i}>
             <span className="text-faint">/</span>
-            <span className="bg-muted text-foreground rounded px-1.5 py-0.5">{decodeURIComponent(s)}</span>
+            <span className="bg-muted text-foreground rounded-[4px] px-1.5 py-0.5">{decodeURIComponent(s)}</span>
           </React.Fragment>
         ))}
         {url.hash && <span className="text-live">#{url.hash}</span>}
@@ -377,9 +405,9 @@ export function JwtBlock({ jwt, source }: { jwt: JwtDecoded; source: string }) {
       source={source}
       actions={
         left != null && (
-          <span className={cn("mr-1 rounded-md px-1.5 py-0.5 text-micro font-medium", jwt.expired ? "bg-destructive/12 text-destructive" : "bg-ok/12 text-ok")}>
+          <Pill tone={jwt.expired ? "fail" : "ok"} className="mr-1">
             {jwt.expired ? `expired ${rel(left)} ago` : `expires in ${rel(left)}`}
-          </span>
+          </Pill>
         )
       }
     >
@@ -407,7 +435,7 @@ export function JwtBlock({ jwt, source }: { jwt: JwtDecoded; source: string }) {
 
 export function IniBlock({ sections, source }: { sections: IniSection[]; source: string }) {
   return (
-    <VizFrame title={`${sections.length} ${sections.length === 1 ? "section" : "sections"}`} source={source} rawLanguage="ini">
+    <VizFrame title={count(sections.length, "section")} source={source} rawLanguage="ini">
       {sections.map((s, i) => (
         <div key={s.name ?? i} className={cn(i > 0 && "border-t")}>
           {s.name && <p className="text-foreground m-0 px-4 pt-2.5 font-mono text-code font-semibold">[{s.name}]</p>}

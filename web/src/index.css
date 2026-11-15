@@ -668,6 +668,11 @@
   .prose-agent li + li {
     margin-top: 0.25rem;
   }
+  /* Visual blocks (.not-prose cards) space their own rows: the prose list rhythm pushed every
+     second link card / hairline row 4px down. Same layer, so a utility on the li still wins. */
+  .prose-agent .not-prose li + li {
+    margin-top: 0;
+  }
   .prose-agent li > p {
     margin: 0.25rem 0;
   }
@@ -1408,24 +1413,23 @@
    width; a state mark pops in when it flips; the active step's soft pulse is the ONLY loop and
    only exists while something is active. All collapse under the global reduced-motion rule. */
 .viz-row-new {
-  animation: rise-in 0.22s cubic-bezier(0.2, 0, 0, 1) both;
-  animation-delay: calc(var(--i, 0) * 30ms);
+  animation: viz-rise 0.22s var(--viz-ease) backwards;
+  animation-delay: calc(min(var(--i, 0), 8) * var(--viz-step));
 }
 .viz-tween-w {
-  transition: width 0.22s cubic-bezier(0.2, 0, 0, 1);
+  transition: width 0.22s var(--viz-ease);
 }
+/* A state glyph that appears or flips (✓ ✗ ⚠): the icon-swap grammar on mount — it sharpens out of
+   a small blur at quarter size, never from scale(0). */
 @keyframes viz-mark {
   from {
     opacity: 0;
-    transform: scale(0.4) rotate(-12deg);
-  }
-  to {
-    opacity: 1;
-    transform: none;
+    scale: 0.25;
+    filter: blur(4px);
   }
 }
 .viz-mark {
-  animation: viz-mark 0.24s cubic-bezier(0.2, 0, 0, 1) both;
+  animation: viz-mark 0.2s var(--viz-ease) backwards;
 }
 .viz-pulse {
   animation: breathe 1.8s ease-in-out infinite;
@@ -1434,6 +1438,220 @@
   .viz-pulse {
     animation: none;
   }
+}
+
+/* ───────── Visual blocks: one motion vocabulary (components/viz/**, docs/output-visualizers.md)
+   Every block uses the same curve, the same three durations and the same stagger step, so no block
+   reads as written on a different day. Hover/sort/filter = colour/opacity only, ≤150ms. A block
+   arriving, a fold, fullscreen, raw ⇄ visual = 150–250ms ease-out. Entrances never start below
+   scale(0.96) or more than 6px away; exits are faster and softer than enters. Nothing below is
+   needed to SEE content: under reduced motion every animation ends on frame one and movement
+   (translate/scale) is dropped, opacity/colour stay. */
+:root {
+  --viz-ease: cubic-bezier(0.2, 0, 0, 1);
+  --viz-step: 32ms;
+}
+
+/* First-paint entrance of a block's rows: fade + 4px lift, 32ms apart, capped at 10 steps. It moves
+   `translate`, not `transform`, and fills backwards only, so a row's own transform (the table's
+   FLIP reorder) is never pinned by a finished entrance. */
+@keyframes viz-rise {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+}
+.viz-in {
+  animation: viz-rise 0.24s var(--viz-ease) backwards;
+  animation-delay: calc(min(var(--i, 0), 10) * var(--viz-step));
+}
+/* A row that comes back (a filter cleared): opacity only, quick — it was already seen once. */
+@keyframes viz-fade {
+  from {
+    opacity: 0;
+  }
+}
+.viz-fade {
+  animation: viz-fade var(--dur-fast) var(--viz-ease) backwards;
+}
+
+/* Raw ⇄ visual, mermaid shimmer → drawing, skeleton → block: a cross-fade through a 2px blur, no
+   travel. The outgoing view leaves at once (exit faster than enter). */
+@keyframes viz-swap {
+  from {
+    opacity: 0;
+    filter: blur(2px);
+  }
+}
+.viz-swap {
+  animation: viz-swap 0.2s var(--viz-ease) backwards;
+}
+
+/* A visual block landing in the transcript: fade + 4px lift on the frame, once. */
+@keyframes viz-frame-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+}
+.viz-frame-in {
+  animation: viz-frame-in var(--dur-base) var(--viz-ease) backwards;
+}
+
+/* Header utility controls (copy, raw, maximize, fold-all): quiet until the card is engaged. With a
+   fine pointer they rest at 0 and slide 2px in over 150ms on hover/focus; on touch they stay shown.
+   A pressed toggle (aria-pressed) stays visible: it is state, not a utility. */
+.viz-ctl {
+  transition-property: opacity, translate, color, background-color, scale;
+  transition-duration: var(--dur-fast);
+  transition-timing-function: var(--viz-ease);
+}
+@media (hover: hover) and (pointer: fine) {
+  .viz-ctl:not([aria-pressed="true"]) {
+    opacity: 0;
+    translate: 2px 0;
+  }
+  .group\/viz:hover .viz-ctl,
+  .group\/viz:focus-within .viz-ctl {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+/* Press feedback for small pressable controls in a block (icon buttons, chips): 0.96, same as
+   ui/button's surface press. Full-width rows tint instead of scaling. */
+.viz-press:not(:disabled):active {
+  scale: 0.96;
+  transform: none;
+}
+:root[data-motion="reduced"] .viz-press:active {
+  scale: none;
+}
+
+/* Icon state cross-fade (copy → check, eye → eye-off, chart ⇄ table): both icons stay in the DOM in
+   one grid cell; the outgoing one shrinks to a quarter into a 4px blur while the other sharpens in.
+   A transition, so a rapid toggle reverses mid-way instead of restarting. */
+.viz-ix {
+  display: inline-grid;
+  place-items: center;
+}
+.viz-ix > * {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--dur-fast) var(--viz-ease),
+    scale var(--dur-fast) var(--viz-ease),
+    filter var(--dur-fast) var(--viz-ease);
+}
+.viz-ix > [data-off] {
+  opacity: 0;
+  scale: 0.25;
+  filter: blur(4px);
+}
+:root[data-motion="reduced"] .viz-ix > [data-off] {
+  scale: 1;
+  filter: none;
+}
+
+/* A check / cross drawn with its stroke on first mount (lucide paths are < 24 units long). */
+@keyframes viz-check-draw {
+  from {
+    stroke-dashoffset: 24;
+  }
+}
+.viz-check path,
+.viz-check polyline {
+  stroke-dasharray: 24;
+  animation: viz-check-draw 0.28s var(--viz-ease) backwards;
+  animation-delay: calc(min(var(--i, 0), 10) * var(--viz-step) + 60ms);
+}
+
+/* A rail or connector drawing downward once (timeline, steps, layers): scaleY from the top. */
+@keyframes viz-rail {
+  from {
+    scale: 1 0;
+  }
+}
+.viz-rail {
+  transform-origin: top;
+  animation: viz-rail var(--dur-slow) var(--viz-ease) backwards;
+  animation-delay: calc(min(var(--i, 0), 10) * var(--viz-step) + 80ms);
+}
+/* A magnitude bar growing from its anchor once (table cells, diffstat, file sizes). */
+@keyframes viz-grow-x {
+  from {
+    scale: 0 1;
+  }
+}
+.viz-grow-x {
+  animation: viz-grow-x var(--dur-slow) var(--viz-ease) backwards;
+  animation-delay: calc(min(var(--i, 0), 10) * var(--viz-step) + 60ms);
+}
+:root[data-motion="reduced"] {
+  .viz-grow-x,
+  .viz-rail {
+    animation: none;
+  }
+}
+
+/* Fold / expand: grid rows 0fr → 1fr plus opacity on a wrapper — interruptible (a transition, not
+   a keyframe) and no height measuring. `data-fresh` marks a fold the reader opened, so a fold that
+   is open on first paint does not animate with the block's own entrance. */
+.viz-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--dur-base) var(--viz-ease),
+    opacity var(--dur-fast) var(--viz-ease);
+}
+.viz-fold > * {
+  min-height: 0;
+  overflow: hidden;
+}
+.viz-fold[data-open] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.viz-fold[data-open][data-fresh] {
+  @starting-style {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+
+/* Chart tooltips: 125ms out of the side the pointer is on (origin set inline), from 0.96. */
+@keyframes viz-tip-in {
+  from {
+    opacity: 0;
+    scale: 0.96;
+  }
+}
+.viz-tip {
+  animation: viz-tip-in 125ms var(--viz-ease) backwards;
+}
+
+/* Hue-tinted pill (severity, status, delta, semver jump): the callout recipe at chip size — a few
+   percent of the hue over the card, a hairline in the same hue, ink in the hue's text token. */
+@layer components {
+  .viz-tone {
+    color: var(--tone-ink, var(--tone));
+    background-color: color-mix(in oklab, var(--tone) 9%, transparent);
+    border: 1px solid color-mix(in oklab, var(--tone) 24%, transparent);
+  }
+}
+
+/* Search rows inside blocks: quiet until focused (icon and ground warm up on focus-within). */
+.viz-search {
+  transition: background-color var(--dur-fast) var(--viz-ease);
+}
+.viz-search:focus-within {
+  background-color: color-mix(in oklab, var(--muted) 45%, transparent);
+}
+.viz-search > svg {
+  transition: color var(--dur-fast) var(--viz-ease);
+}
+.viz-search:focus-within > svg {
+  color: var(--muted-foreground);
 }
 
 /* Live log view (components/viz/LiveLog.tsx): rows dissolve under the counter strip instead of
@@ -1446,10 +1664,10 @@
     background-color: transparent;
   }
 }
+/* Opacity only: a tail that appends every second should not make the eye chase sliding rows. */
 @keyframes live-row-in {
   from {
     opacity: 0;
-    transform: translateY(-6px);
   }
 }
 .live-row-new {

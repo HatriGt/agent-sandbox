@@ -1,12 +1,47 @@
 import * as React from "react";
-import { ArrowUp, ChevronsUpDown, Pin, Search } from "lucide-react";
+import { motion } from "motion/react";
+import { ArrowUp, ChevronsUpDown, Pin } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { cellNumber, csvField } from "@/lib/viz";
 import { columnGrip, MIN_COL, shapeKey, useColumnWidths } from "@/lib/column-widths";
-import { VizFrame } from "./VizFrame";
+import { useReducedMotion } from "@/lib/motion-pref";
+import { count, VizEmpty, VizFrame, VizSearch } from "./VizFrame";
 import { ChartBlock } from "./ChartBlock";
+import { FIRST_CAP } from "./motion";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import type { ChartSpec } from "@/lib/viz";
+
+/** Rows glide to their new place on sort / pin / filter up to this many; past it they jump (FLIP cost). */
+const FLIP_CAP = 60;
+/** Row reorder: a critically damped spring (no bounce), interruptible by the next sort. */
+const REORDER = { type: "spring", duration: 0.3, bounce: 0 } as const;
+
+type RowIn = "first" | "new" | "back";
+
+/**
+ * How each row entered, fixed per mounted row so a re-render never restarts it: rows on first paint
+ * rise in a capped stagger, rows that stream in later rise as a batch, a row that returns when a
+ * filter clears only fades (it was already seen). A row that leaves the filter is forgotten, so its
+ * return counts as "back".
+ */
+function useTableEntrance(visible: number[]) {
+  const map = React.useRef(new Map<number, { kind: RowIn; i: number }>());
+  const everSeen = React.useRef(new Set<number>());
+  const mounted = React.useRef(false);
+  const live = new Set(visible);
+  for (const k of [...map.current.keys()]) if (!live.has(k)) map.current.delete(k);
+  let batch = 0;
+  visible.forEach((k, idx) => {
+    if (map.current.has(k)) return;
+    const kind: RowIn = !mounted.current ? "first" : everSeen.current.has(k) ? "back" : "new";
+    map.current.set(k, { kind, i: kind === "first" ? Math.min(idx, FIRST_CAP) : batch++ });
+    everSeen.current.add(k);
+  });
+  React.useEffect(() => {
+    mounted.current = true;
+  }, []);
+  return (k: number) => map.current.get(k) ?? { kind: "back" as RowIn, i: 0 };
+}
 
 /**
  * Every markdown table (and ```csv / ```tsv fence) renders through this: sortable headers,
@@ -94,6 +129,9 @@ export function DataTable({
   const widthOf = (c: number) => cols.width(String(c)) ?? cols.floor(String(c)) ?? MIN_COL;
   const minWidth = shaped ? head.reduce<number>((s, _, c) => s + widthOf(c), 0) : undefined;
   const edges = useScrollEdges();
+  const reduced = useReducedMotion();
+  const entrance = useTableEntrance(order);
+  const flip = !reduced && order.length <= FLIP_CAP;
 
   // A small table with one label column and a few numeric ones is also a bar chart: offer the
   // switch, never force it (the table stays the default — it is what the agent wrote).
@@ -129,11 +167,15 @@ export function DataTable({
   const textWrap = shaped ? "whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap";
   // The sticky first column paints its own background, so hover and pinned tints live in one
   // variable the row and its first cell both read; a mixed opaque colour covers scrolled content.
-  const rowTint = "[--row-bg:var(--card)] hover:[--row-bg:color-mix(in_oklab,var(--muted)_50%,var(--card))] focus-visible:[--row-bg:color-mix(in_oklab,var(--muted)_60%,var(--card))] data-pinned:[--row-bg:color-mix(in_oklab,var(--muted)_40%,var(--card))]";
+  // A pinned row keeps a faint live-hue ground (persistent, not a hover look-alike); hover deepens it.
+  const rowTint =
+    "[--row-bg:var(--card)] hover:[--row-bg:color-mix(in_oklab,var(--muted)_50%,var(--card))] focus-visible:[--row-bg:color-mix(in_oklab,var(--muted)_60%,var(--card))] data-pinned:[--row-bg:color-mix(in_oklab,var(--live)_6%,var(--card))] data-pinned:hover:[--row-bg:color-mix(in_oklab,var(--live)_9%,var(--card))] active:[--row-bg:color-mix(in_oklab,var(--muted)_70%,var(--card))]";
   const stickyCell = "sticky left-0 z-[1] in-data-scrolled-start:shadow-[inset_-1px_0_0_var(--border),8px_0_12px_-8px_color-mix(in_oklab,var(--foreground)_18%,transparent)]";
+  // The sticky header always has its hairline; the 1px drop only shows once rows scroll under it.
+  const headShadow = "transition-[box-shadow] duration-150 in-data-scrolled-top:shadow-[0_1px_0_var(--border),0_2px_3px_-2px_color-mix(in_oklab,var(--foreground)_14%,transparent)]";
 
   return (
-    <VizFrame title={title ?? `${texts.length} ${texts.length === 1 ? "row" : "rows"}`} source={csv}
+    <VizFrame title={title ?? count(texts.length, "row")} source={csv}
       rawLanguage="text"
       actions={
         actions || chart ? (
@@ -165,7 +207,7 @@ export function DataTable({
                       key={c}
                       scope="col"
                       aria-sort={on ? (on === 1 ? "ascending" : "descending") : "none"}
-                      className={cn("group/th bg-card relative border-b text-left align-bottom", cellPad, numeric[c] && "text-right", c === 0 && stickyCell, c === 0 && "z-20")}
+                      className={cn("group/th bg-card relative border-b text-left align-bottom", cellPad, headShadow, numeric[c] && "text-right", c === 0 && stickyCell, c === 0 && "z-20")}
                     >
                       <button
                         type="button"
@@ -181,15 +223,25 @@ export function DataTable({
                           )
                         }
                         className={cn(
-                          "group/sort -mx-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-micro font-medium tracking-[0.05em] uppercase whitespace-nowrap transition-colors duration-150",
+                          "group/sort viz-press -mx-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-micro font-medium tracking-[0.05em] uppercase whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
                           on ? "text-foreground" : "text-muted-foreground hover:text-foreground",
                           numeric[c] && "flex-row-reverse"
                         )}
                       >
                         {h}
+                        {/* Both glyphs stay mounted and cross-fade through a blur; the arrow turns for direction. */}
                         <span className="relative inline-grid size-3 shrink-0 place-items-center" aria-hidden>
-                          <ChevronsUpDown className={cn("absolute size-3 transition-[opacity,scale] duration-200 ease-(--ease-out-quint)", on ? "scale-75 opacity-0" : "opacity-0 group-hover/sort:opacity-60 group-focus-visible/sort:opacity-60")} />
-                          <ArrowUp className={cn("absolute size-3 transition-[opacity,rotate,scale] duration-200 ease-(--ease-out-quint)", on ? "opacity-100" : "scale-75 opacity-0", on === -1 && "rotate-180")} />
+                          <ChevronsUpDown
+                            strokeWidth={1.75}
+                            className={cn(
+                              "absolute size-3 transition-[opacity,scale,filter] duration-150 ease-(--viz-ease)",
+                              on ? "scale-25 opacity-0 blur-[4px]" : "opacity-0 group-hover/sort:opacity-60 group-focus-visible/sort:opacity-60"
+                            )}
+                          />
+                          <ArrowUp
+                            strokeWidth={2}
+                            className={cn("absolute size-3 transition-[opacity,rotate,scale,filter] duration-150 ease-(--viz-ease)", on ? "opacity-100" : "scale-25 opacity-0 blur-[4px]", on === -1 && "rotate-180")}
+                          />
                         </span>
                       </button>
                       <span {...columnGrip(String(c), label, cols, "group-last/th:right-0")} />
@@ -202,8 +254,8 @@ export function DataTable({
             <tbody className="[&>tr:last-child>td]:border-b-0">
               {order.length === 0 && (
                 <tr>
-                  <td colSpan={span} className="text-faint px-3 py-3 text-center text-micro">
-                    No rows match “{query}”
+                  <td colSpan={span} className="p-0">
+                    <VizEmpty onClear={() => setQuery("")}>No rows match “{query}”</VizEmpty>
                   </td>
                 </tr>
               )}
@@ -211,9 +263,15 @@ export function DataTable({
                 const key = rowKey(texts[ri]);
                 const pinned = pins.includes(key);
                 const togglePin = () => setPins((p) => (p.includes(key) ? p.filter((k) => k !== key) : [...p, key]));
+                const ent = entrance(ri);
+                // Bars grow once, on the row's first mount; a row returning from a filter shows its bar as is.
+                const grow = ent.kind !== "back";
                 return (
-                  <tr
+                  <motion.tr
                     key={ri}
+                    layout={flip ? "position" : false}
+                    transition={REORDER}
+                    style={{ "--i": ent.i } as React.CSSProperties}
                     tabIndex={0}
                     aria-selected={pinned}
                     data-pinned={pinned || undefined}
@@ -230,10 +288,14 @@ export function DataTable({
                         togglePin();
                       }
                     }}
-                    className={cn("bg-(--row-bg) cursor-pointer outline-none transition-[background-color] duration-[120ms]", rowTint)}
+                    className={cn(
+                      "bg-(--row-bg) no-press cursor-pointer outline-none transition-[background-color] duration-150 ease-(--viz-ease) focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset",
+                      rowTint,
+                      ent.kind === "first" ? "viz-in" : ent.kind === "new" ? "viz-row-new" : "viz-fade"
+                    )}
                   >
                     {rows[ri].map((cell, c) => {
-                      const sticky = c === 0 && cn(stickyCell, "bg-(--row-bg)");
+                      const sticky = c === 0 && cn(stickyCell, "bg-(--row-bg) transition-[background-color] duration-150 ease-(--viz-ease)");
                       if (!numeric[c]) {
                         // Support-matrix cells: a lone ✓ / ✗ / yes / no wears the functional hue
                         // (still the glyph/word itself, never color alone).
@@ -241,7 +303,7 @@ export function DataTable({
                         const tone = ["✓", "✔", "yes"].includes(t) ? "text-ok" : ["✗", "✘", "no", "×"].includes(t) ? "text-destructive" : ["—", "-", "n/a"].includes(t) ? "text-faint" : "";
                         return (
                           <td key={c} className={cn(hairline, cellPad, "align-top", textWrap, tone, tone && "text-center font-medium", sticky)}>
-                            {c === 0 && pinned && <Pin className="text-muted-foreground mr-1 inline size-3 -translate-y-px" aria-label="pinned" />}
+                            {c === 0 && pinned && <Pin className="viz-mark text-live mr-1 inline size-3 -translate-y-px" strokeWidth={2} aria-label="pinned" />}
                             {cell}
                           </td>
                         );
@@ -254,7 +316,9 @@ export function DataTable({
                           {frac > 0 && (
                             <span
                               aria-hidden
-                              className="absolute right-3 bottom-1.5 h-0.5 rounded-full opacity-30"
+                              // Grows from its right anchor once (first mount of the row); a new
+                              // maximum while streaming tweens the width instead of re-growing.
+                              className={cn("viz-tween-w absolute right-3 bottom-1.5 h-0.5 origin-right rounded-full opacity-30", grow && "viz-grow-x")}
                               style={{ width: `${Math.max(4, frac * 56)}px`, background: "var(--viz-1)" }}
                             />
                           )}
@@ -263,7 +327,7 @@ export function DataTable({
                       );
                     })}
                     {shaped && <td className={cn(hairline, "p-0")} />}
-                  </tr>
+                  </motion.tr>
                 );
               })}
             </tbody>
@@ -271,21 +335,13 @@ export function DataTable({
         </div>
       </div>
       {texts.length > 8 && (
-        <div className="flex items-center gap-2 border-t px-3 py-1.5">
-          <Search className="text-faint size-3.5 shrink-0" aria-hidden />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-            placeholder="Filter rows"
-            aria-label="Filter rows"
-            className="text-foreground placeholder:text-faint min-w-0 flex-1 bg-transparent text-meta outline-none"
-          />
-          <span className="text-faint shrink-0 text-micro tabular-nums" aria-live="polite">
-            {texts.length} rows{order.length !== texts.length && ` · ${order.length} shown`}
-          </span>
-        </div>
+        <VizSearch
+          className="border-t"
+          value={query}
+          onChange={setQuery}
+          placeholder="Filter rows"
+          count={order.length !== texts.length ? `${order.length} of ${texts.length}` : count(texts.length, "row")}
+        />
       )}
     </VizFrame>
   );
@@ -307,6 +363,7 @@ function useScrollEdges() {
       const max = el.scrollWidth - el.clientWidth;
       wrap.toggleAttribute("data-scrolled-start", el.scrollLeft > 0.5);
       wrap.toggleAttribute("data-scrolled-end", el.scrollLeft < max - 0.5);
+      wrap.toggleAttribute("data-scrolled-top", el.scrollTop > 0.5);
     };
     update();
     el.addEventListener("scroll", update, { passive: true });

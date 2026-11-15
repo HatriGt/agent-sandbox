@@ -12,13 +12,17 @@ import { cn } from "@/lib/utils";
 
 /** Rows past this many in one new batch appear instantly. */
 const STAGGER_CAP = 8;
+/** First-paint stagger steps (index.css `.viz-in` caps its delay at the same 10). */
+export const FIRST_CAP = 10;
 
-type Entrance = { className: string; style?: React.CSSProperties };
+export type Entrance = { className: string; style?: React.CSSProperties; first?: boolean };
 
 /**
- * Entrance classes per row key. Rows present on the block's first render keep the existing
- * one-shot `stagger-item` draw-in; rows that arrive later (streaming) get `viz-row-new`, a
- * fade + lift staggered 30 ms within their batch, capped at {@link STAGGER_CAP} rows.
+ * Entrance classes per row key. Rows present on the block's first render get the one-shot
+ * `viz-in` (fade + 4px lift, 32 ms apart, capped at {@link FIRST_CAP}); rows that arrive later
+ * (streaming) get `viz-row-new`, the same rise staggered within their batch, capped at
+ * {@link STAGGER_CAP}. The class a key gets never changes, so a re-render cannot restart it.
+ * `first` is true for rows drawn on first paint (callers chain a mark draw / bar grow off it).
  */
 export function useRowEntrance(keys: readonly string[]): (key: string) => Entrance {
   const seen = React.useRef(new Map<string, Entrance>());
@@ -28,7 +32,7 @@ export function useRowEntrance(keys: readonly string[]): (key: string) => Entran
     const k = keys[idx];
     if (seen.current.has(k)) continue;
     if (!mounted.current) {
-      seen.current.set(k, { className: "stagger-item", style: { "--i": Math.min(idx, 12) } as React.CSSProperties });
+      seen.current.set(k, { className: "viz-in", style: { "--i": Math.min(idx, FIRST_CAP) } as React.CSSProperties, first: true });
     } else {
       const n = batch++;
       seen.current.set(k, n < STAGGER_CAP ? { className: "viz-row-new", style: { "--i": n } as React.CSSProperties } : { className: "" });
@@ -38,6 +42,23 @@ export function useRowEntrance(keys: readonly string[]): (key: string) => Entran
     mounted.current = true;
   }, []);
   return (key) => seen.current.get(key) ?? { className: "" };
+}
+
+/**
+ * Two icons in one cell, cross-faded on `on` (index.css `.viz-ix`): the outgoing one shrinks into a
+ * blur while the other sharpens in. Both stay mounted, so a quick double toggle reverses smoothly.
+ */
+export function IconSwap({ on, offIcon, onIcon, className }: { on: boolean; offIcon: React.ReactNode; onIcon: React.ReactNode; className?: string }) {
+  return (
+    <span className={cn("viz-ix", className)} aria-hidden>
+      <span data-off={on || undefined} className="grid place-items-center">
+        {offIcon}
+      </span>
+      <span data-off={!on || undefined} className="grid place-items-center">
+        {onIcon}
+      </span>
+    </span>
+  );
 }
 
 const NUM = /^(.*?)(-?\d[\d,]*(?:\.\d+)?)(.*)$/s;

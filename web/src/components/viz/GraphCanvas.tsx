@@ -86,7 +86,7 @@ function GraphNode({ data }: NodeProps<Node<NodeData>>) {
   const { name, kind, state, pinned, dir } = data;
   const [target, source] = dir === "LR" ? [Position.Left, Position.Right] : [Position.Top, Position.Bottom];
   const tone = cn(
-    "transition-[opacity,border-color,background-color] duration-150 motion-reduce:transition-none",
+    "transition-[opacity,border-color,background-color] duration-150 ease-(--viz-ease)",
     state === "dim" && "opacity-35",
     state === "focus" ? "border-foreground bg-card" : "border-line-strong bg-card",
     pinned && "ring-foreground/25 ring-2"
@@ -143,7 +143,7 @@ function GraphEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, tar
           stroke: state === "on" ? "var(--foreground)" : "var(--muted-foreground)",
           strokeWidth: state === "on" ? 2 : 1.25,
           opacity: state === "dim" ? 0.25 : state === "on" ? 1 : 0.7,
-          transition: "opacity 150ms, stroke 150ms",
+          transition: "opacity 150ms cubic-bezier(0.2, 0, 0, 1), stroke 150ms cubic-bezier(0.2, 0, 0, 1)",
         }}
       />
       {data?.label && (

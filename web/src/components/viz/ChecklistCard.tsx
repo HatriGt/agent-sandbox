@@ -1,40 +1,49 @@
 import * as React from "react";
-import { Check, Circle } from "lucide-react";
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { RollNumber, useRowEntrance } from "./motion";
 
 /**
  * GFM task lists (`- [x] done / - [ ] todo`) auto-upgrade to this: a quiet card with a progress
- * line ("3 of 5") and drawn check/pending glyphs instead of dead disabled checkboxes. Nested
- * content inside an item renders untouched.
+ * line ("3 of 5 done") and drawn check/pending marks instead of dead disabled checkboxes. A done
+ * item's check draws its stroke once on first paint (or when it flips to done while streaming);
+ * nested content inside an item renders untouched.
  */
 export function ChecklistCard({ items }: { items: { checked: boolean; content: React.ReactNode }[] }) {
   const done = items.filter((i) => i.checked).length;
   const entrance = useRowEntrance(items.map((_, i) => String(i)));
   return (
-    <div className="bg-card not-prose my-3 rounded-xl border">
-      <div className="flex h-8 items-center gap-2 border-b px-3">
-        <span className="text-muted-foreground text-micro font-medium tabular-nums">
+    <div className="viz-frame-in bg-card not-prose my-3 overflow-hidden rounded-xl border">
+      <div className="flex h-8 items-center gap-3 border-b px-3">
+        <span className="text-muted-foreground shrink-0 text-micro font-medium tabular-nums">
           <RollNumber text={String(done)} /> of {items.length} done
         </span>
-        <span className="bg-muted h-1 min-w-0 flex-1 overflow-hidden rounded-full" role="progressbar" aria-valuenow={done} aria-valuemin={0} aria-valuemax={items.length}>
-          <span
-            className="bg-ok block h-full rounded-full viz-tween-w"
-            style={{ width: `${items.length ? (done / items.length) * 100 : 0}%` }}
-          />
+        <span className="bg-muted h-1 min-w-0 flex-1 overflow-hidden rounded-full" role="progressbar" aria-valuenow={done} aria-valuemin={0} aria-valuemax={items.length} aria-label="done">
+          <span className="bg-ok block h-full rounded-full viz-tween-w" style={{ width: `${items.length ? (done / items.length) * 100 : 0}%` }} />
         </span>
       </div>
-      <ul className="flex list-none flex-col gap-1 px-3 py-2">
-        {items.map((item, i) => (
-          <li key={i} className={cn("flex items-start gap-2 text-meta", entrance(String(i)).className)} style={entrance(String(i)).style}>
-            {item.checked ? (
-              <Check className="viz-mark text-ok mt-0.5 size-3.5 shrink-0" aria-label="done" />
-            ) : (
-              <Circle className="text-faint mt-0.5 size-3.5 shrink-0" aria-label="pending" />
-            )}
-            <span className={cn("min-w-0", item.checked && "text-muted-foreground")}>{item.content}</span>
-          </li>
-        ))}
+      <ul className="m-0 flex list-none flex-col p-0">
+        {items.map((item, i) => {
+          const e = entrance(String(i));
+          return (
+            <li key={i} className={cn("border-border/60 flex items-start gap-2.5 px-3 py-2 text-meta not-first:border-t", e.className)} style={e.style}>
+              {/* Keyed by state: a flip to done mounts a fresh mark, so its check draws once. */}
+              <span
+                key={item.checked ? "done" : "todo"}
+                className={cn(
+                  "mt-px grid size-4 shrink-0 place-items-center rounded-full",
+                  item.checked ? "viz-tone text-ok" : "border-line-strong border border-dashed"
+                )}
+                style={item.checked ? ({ "--tone": "var(--ok)", ...e.style } as React.CSSProperties) : undefined}
+                aria-label={item.checked ? "done" : "pending"}
+                role="img"
+              >
+                {item.checked && <Check className="viz-check size-2.5" strokeWidth={3} aria-hidden />}
+              </span>
+              <span className={cn("min-w-0 text-pretty", item.checked ? "text-muted-foreground" : "text-foreground")}>{item.content}</span>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

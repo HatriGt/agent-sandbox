@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Minus, Plus, Scan } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
 
 /**
  * True inside a VizFrame's fullscreen dialog. Renderers that own their zoom (the xyflow graph)
@@ -41,13 +42,17 @@ export function VizFullscreen({
     if (open) setView(FIT);
   }, [open]);
   const zoomBy = React.useCallback((f: number) => setView((v) => ({ ...v, scale: Math.min(MAX, Math.max(MIN, v.scale * f)) })), []);
-  const btn = "text-muted-foreground hover:text-foreground hover:bg-muted grid size-8 cursor-pointer place-items-center rounded-md transition-colors disabled:cursor-default disabled:opacity-40";
+  const btn = "viz-press text-muted-foreground hover:text-foreground hover:bg-muted grid size-8 cursor-pointer place-items-center rounded-md disabled:cursor-default disabled:opacity-40";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         title={title}
-        // Fade only: a scale-in makes canvases (xyflow, mermaid) measure a shrunken box mid-animation.
-        className="h-[92dvh] max-h-[92dvh] w-[96vw] max-w-none sm:w-[96vw] data-[state=open]:zoom-in-100 data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:zoom-out-100"
+        // Opens from 0.98 + fade, no travel; closes softer (back to 0.98). Blocks that own their zoom
+        // (the xyflow canvas) fade only: a scale-in makes them fit-view a shrunken box mid-animation.
+        className={cn(
+          "h-[92dvh] max-h-[92dvh] w-[96vw] max-w-none sm:w-[96vw] data-[state=open]:slide-in-from-bottom-0",
+          ownsZoom ? "data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100" : "data-[state=open]:zoom-in-98 data-[state=closed]:zoom-out-98"
+        )}
         bodyClassName="flex overflow-hidden px-3 pb-3"
         // Chrome repaints a backdrop-filter layer whenever the page under it changes, and the
         // transcript re-renders on every 3s poll, so the blur flickered behind the canvas.

@@ -23,7 +23,7 @@ function Tip({ tip, gap = 6 }: { tip: TipState | null; gap?: number }) {
   return (
     <div
       ref={ref}
-      className="bg-popover text-popover-foreground pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border px-2 py-1 text-micro whitespace-nowrap shadow-e2"
+      className="viz-tip bg-popover text-popover-foreground pointer-events-none absolute z-10 origin-bottom -translate-x-1/2 -translate-y-full rounded-md border px-2 py-1 text-micro whitespace-nowrap tabular-nums shadow-e2"
       style={{ left: tip.x, top: tip.y - gap }}
       role="status"
       data-viz-tip
@@ -74,7 +74,7 @@ export function SpansBlock({ spans, unit, source }: { spans: Span[]; unit?: stri
               key={i}
               tabIndex={0}
               aria-label={`${s.label}: ${s.start} to ${s.end}${unit ?? ""}, ${dur}${unit ?? ""}`}
-              className="hover:bg-muted/40 focus-visible:bg-muted/60 -mx-1 flex items-center gap-3 rounded-md px-1 outline-none"
+              className="hover:bg-muted/40 focus-visible:bg-muted/60 -mx-1 flex items-center gap-3 rounded-md px-1 outline-none transition-[background-color] duration-150 ease-(--viz-ease)"
               {...tipHandlers(setTip, `${s.label}: ${s.start}–${s.end}${unit ?? ""} · ${dur}${unit ?? ""}`, "[data-tip-mark]")}
             >
               <span className="text-foreground w-36 min-w-0 shrink-0 truncate text-meta">{s.label}</span>
@@ -113,8 +113,9 @@ export function SpansBlock({ spans, unit, source }: { spans: Span[]; unit?: stri
 export function FunnelBlock({ stages, source }: { stages: { label: string; value: number }[]; source: string }) {
   const top = stages[0]?.value || 1;
   const [tip, setTip] = React.useState<TipState | null>(null);
+  const last = stages[stages.length - 1];
   return (
-    <VizFrame source={source}>
+    <VizFrame title={stages.length > 1 ? `${stages.length} stages · ${pct(last.value, top)} convert` : "1 stage"} source={source}>
       <div className="relative flex flex-col gap-1 px-4 py-3" onMouseLeave={() => setTip(null)}>
         {stages.map((s, i) => {
           const frac = Math.min(1, s.value / top);
@@ -123,7 +124,7 @@ export function FunnelBlock({ stages, source }: { stages: { label: string; value
               key={i}
               tabIndex={0}
               aria-label={`${s.label}: ${s.value.toLocaleString()}, ${pct(s.value, top)} of first stage${i > 0 ? `, ${pct(s.value, stages[i - 1].value)} of previous` : ""}`}
-              className="hover:bg-muted/40 focus-visible:bg-muted/60 -mx-1 flex items-center gap-3 rounded-md px-1 outline-none"
+              className="hover:bg-muted/40 focus-visible:bg-muted/60 -mx-1 flex items-center gap-3 rounded-md px-1 outline-none transition-[background-color] duration-150 ease-(--viz-ease)"
               {...tipHandlers(
                 setTip,
                 `${s.label}: ${s.value.toLocaleString()} · ${pct(s.value, top)} of ${stages[0].label}${i > 0 ? ` · ${pct(s.value, stages[i - 1].value)} from ${stages[i - 1].label}` : ""}`,
@@ -134,8 +135,8 @@ export function FunnelBlock({ stages, source }: { stages: { label: string; value
               <div className="flex h-6 min-w-0 flex-1 justify-center">
                 <span
                   data-tip-mark
-                  className="h-full rounded-[4px]"
-                  style={{ width: `${Math.max(frac * 100, 1.5)}%`, background: "var(--viz-1)", opacity: 0.45 + 0.55 * frac }}
+                  className="viz-grow-x viz-tween-w h-full rounded-[4px]"
+                  style={{ width: `${Math.max(frac * 100, 1.5)}%`, background: "var(--viz-1)", opacity: 0.45 + 0.55 * frac, "--i": Math.min(i, 10) } as React.CSSProperties}
                 />
               </div>
               <span className="text-muted-foreground w-24 shrink-0 text-right text-micro tabular-nums">
@@ -187,7 +188,7 @@ export function HeatmapBlock({ map, source }: { map: Heatmap; source: string }) 
                       key={c}
                       className="rounded-[4px] text-center"
                       style={{
-                        background: `color-mix(in oklch, var(--viz-1) ${Math.round(8 + t * 80)}%, var(--card))`,
+                        background: `color-mix(in oklab, var(--viz-1) ${Math.round(8 + t * 80)}%, var(--card))`,
                         minWidth: dense ? 14 : 34,
                         height: dense ? 14 : 26,
                       }}

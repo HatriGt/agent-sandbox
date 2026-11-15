@@ -1,9 +1,10 @@
 import * as React from "react";
-import { ChevronRight, ChevronsDownUp, ChevronsUpDown, Search } from "lucide-react";
+import { ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FileMark } from "@/lib/fileIcon";
 import type { TreeNode } from "@/lib/viz";
-import { VizFrame } from "./VizFrame";
+import { VIZ_ICON_BUTTON, VizEmpty, VizFrame, VizSearch } from "./VizFrame";
+import { IconSwap } from "./motion";
 
 type Fold = { base: "auto" | "all" | "none"; over: Record<string, boolean> };
 
@@ -58,39 +59,23 @@ export function TreeBlock({ roots, source }: { roots: TreeNode[]; source: string
             onClick={() => setFold({ base: allOpen ? "none" : "all", over: {} })}
             aria-label={allOpen ? "Collapse all" : "Expand all"}
             title={allOpen ? "Collapse all" : "Expand all"}
-            className="text-muted-foreground hover:text-foreground grid size-6 cursor-pointer place-items-center rounded-md opacity-60 group-hover/viz:opacity-100 focus-visible:opacity-100"
+            className={VIZ_ICON_BUTTON}
           >
-            {allOpen ? <ChevronsDownUp className="size-3.5" /> : <ChevronsUpDown className="size-3.5" />}
+            <IconSwap on={allOpen} offIcon={<ChevronsUpDown className="size-3.5" strokeWidth={1.75} />} onIcon={<ChevronsDownUp className="size-3.5" strokeWidth={1.75} />} />
           </button>
         )
       }
     >
       {count > 8 && (
-        <label className="flex items-center gap-2 border-b px-3 py-1.5">
-          <Search className="text-faint size-3.5 shrink-0" aria-hidden />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-            placeholder="Filter by path"
-            aria-label="Filter by path"
-            className="text-foreground placeholder:text-faint min-w-0 flex-1 bg-transparent text-meta outline-none"
-          />
-          {keep && (
-            <span className="text-faint shrink-0 text-micro tabular-nums" aria-live="polite">
-              {keep.size} shown
-            </span>
-          )}
-        </label>
+        <VizSearch className="border-b" value={query} onChange={setQuery} placeholder="Filter by path" count={keep ? `${keep.size} shown` : undefined} />
       )}
       <TreeCtx.Provider value={ctx}>
-        <div className="max-h-96 overflow-auto px-2 py-1.5 font-mono text-micro" role="tree">
+        <div className={cn("max-h-96 overflow-auto px-2 py-1.5 font-mono text-micro", keep && keep.size === 0 && "hidden")} role="tree">
           {roots.map((n, i) => (
             <Node key={`${i}:${n.name}`} node={n} depth={0} parent="" />
           ))}
-          {keep && keep.size === 0 && <div className="text-faint px-1.5 py-1 font-sans">Nothing matches “{query}”</div>}
         </div>
+        {keep && keep.size === 0 && <VizEmpty onClear={() => setQuery("")}>Nothing matches “{query}”</VizEmpty>}
       </TreeCtx.Provider>
     </VizFrame>
   );
@@ -112,6 +97,8 @@ function Node({ node, depth, parent }: { node: TreeNode; depth: number; parent: 
   const stored = fold.over[path] ?? (fold.base === "all" ? true : fold.base === "none" ? false : depth < 2);
   // While filtering, ancestors of matches open so the match is visible.
   const open = keep ? true : stored;
+  // Opened by the reader (a click, a key, expand-all), not by the default depth: the group unfolds.
+  const fresh = !keep && (path in fold.over || fold.base !== "auto");
   const setOpen = (v: boolean) => setFold((f) => ({ ...f, over: { ...f.over, [path]: v } }));
   const name = node.name.replace(/\/$/, "");
   return (
@@ -127,26 +114,29 @@ function Node({ node, depth, parent }: { node: TreeNode; depth: number; parent: 
         }}
         data-tree-path={path}
         className={cn(
-          "flex w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-          isDir ? "hover:bg-muted/60 cursor-pointer" : "cursor-default"
+          "no-press flex w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-left outline-none transition-[background-color] duration-150 ease-(--viz-ease) focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset",
+          isDir ? "hover:bg-muted/60 active:bg-muted cursor-pointer" : "cursor-default"
         )}
         style={{ paddingLeft: `${depth * 16 + 6}px` }}
       >
         {isDir ? (
-          <ChevronRight className={cn("text-muted-foreground size-3 shrink-0 transition-transform duration-150 motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
+          <ChevronRight className={cn("text-muted-foreground size-3 shrink-0 transition-[rotate] duration-150 ease-(--viz-ease)", open && "rotate-90")} aria-hidden />
         ) : (
           <span className="w-3 shrink-0" aria-hidden />
         )}
         <FileMark path={isDir ? name + "/" : name} />
         <span className="text-foreground truncate">{name}</span>
         {node.note && <span className="text-faint ml-2 truncate">{node.note}</span>}
-        {isDir && !open && <span className="text-faint ml-1">({node.children.length})</span>}
+        {isDir && !open && <span className="viz-fade text-faint ml-1 tabular-nums">({node.children.length})</span>}
       </button>
+      {/* Closing unmounts at once (exits are instant); opening unfolds rows 0fr → 1fr + fade (index.css .viz-fold). */}
       {isDir && open && (
-        <div role="group">
-          {node.children.map((c, i) => (
-            <Node key={`${i}:${c.name}`} node={c} depth={depth + 1} parent={path} />
-          ))}
+        <div className="viz-fold" data-open data-fresh={fresh || undefined}>
+          <div role="group">
+            {node.children.map((c, i) => (
+              <Node key={`${i}:${c.name}`} node={c} depth={depth + 1} parent={path} />
+            ))}
+          </div>
         </div>
       )}
     </div>

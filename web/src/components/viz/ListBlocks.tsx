@@ -4,6 +4,8 @@ import { cn } from "@/lib/utils";
 import { nodeText } from "@/lib/viz";
 import type { Definition, StatusItem } from "@/lib/viz-auto-types";
 import { RollNumber, useRowEntrance } from "./motion";
+import { toneStyle, type Tone } from "./tone";
+import { TallyItem, VIZ_FOOTER } from "./VizFrame";
 
 /**
  * Upgrades for ORDINARY markdown lists — no fence, no cooperation from the agent. A list whose
@@ -27,52 +29,55 @@ export function listItemTexts(children: React.ReactNode): string[] | null {
 }
 
 export function DefinitionListBlock({ items }: { items: Definition[] }) {
+  const entrance = useRowEntrance(items.map((d) => d.term));
   return (
-    <dl className="not-prose my-3 grid grid-cols-[minmax(6rem,max-content)_1fr] gap-x-6 gap-y-2.5 rounded-xl border px-4 py-3 @max-[26rem]:grid-cols-1 @max-[26rem]:gap-y-0.5">
-      {items.map((d) => (
-        <div key={d.term} className="contents">
-          <dt className="text-foreground text-body font-medium">{d.term}</dt>
-          <dd className="text-muted-foreground m-0 min-w-0 text-body leading-relaxed @max-[26rem]:mb-2 @max-[26rem]:last:mb-0">{d.detail}</dd>
-        </div>
-      ))}
+    <dl className="viz-frame-in bg-card not-prose my-3 grid grid-cols-[minmax(6rem,max-content)_1fr] overflow-hidden rounded-xl border @max-[26rem]:grid-cols-1">
+      {items.map((d, i) => {
+        const e = entrance(d.term);
+        // Each pair is one row with a shared hairline above it; the term column stays aligned.
+        const row = cn("px-4 py-2.5", i > 0 && "border-border/60 border-t", e.className);
+        return (
+          <div key={d.term} className="contents">
+            <dt className={cn(row, "text-foreground text-body font-medium @max-[26rem]:pb-0")} style={e.style}>{d.term}</dt>
+            <dd className={cn(row, "text-muted-foreground m-0 min-w-0 text-body leading-relaxed text-pretty @max-[26rem]:border-t-0 @max-[26rem]:pt-0.5 @min-[26rem]:pl-0")} style={e.style}>{d.detail}</dd>
+          </div>
+        );
+      })}
     </dl>
   );
 }
 
-const STATE: Record<StatusItem["state"], { icon: React.ReactNode; tone: string; word: string }> = {
-  ok: { icon: <Check className="size-3" strokeWidth={3} />, tone: "bg-ok/12 text-ok", word: "ok" },
-  fail: { icon: <X className="size-3" strokeWidth={3} />, tone: "bg-destructive/12 text-destructive", word: "failed" },
-  warn: { icon: <AlertTriangle className="size-3" strokeWidth={2.5} />, tone: "bg-warn/25 text-warn-text", word: "warning" },
-  pending: { icon: <Clock className="size-3" strokeWidth={2.5} />, tone: "bg-muted text-muted-foreground", word: "pending" },
-  info: { icon: <Info className="size-3" strokeWidth={2.5} />, tone: "bg-live/12 text-live", word: "info" },
+const STATE: Record<StatusItem["state"], { icon: React.ReactNode; tone: Tone; hue: string; word: string }> = {
+  ok: { icon: <Check className="viz-check size-3" strokeWidth={2.75} />, tone: "ok", hue: "var(--ok)", word: "ok" },
+  fail: { icon: <X className="viz-check size-3" strokeWidth={2.75} />, tone: "fail", hue: "var(--destructive)", word: "failed" },
+  warn: { icon: <AlertTriangle className="viz-mark size-3" strokeWidth={2.25} />, tone: "warn", hue: "var(--warn)", word: "warning" },
+  pending: { icon: <Clock className="viz-mark size-3" strokeWidth={2.25} />, tone: "neutral", hue: "var(--faint)", word: "pending" },
+  info: { icon: <Info className="viz-mark size-3" strokeWidth={2.25} />, tone: "live", hue: "var(--live)", word: "info" },
 };
 
 export function StatusListBlock({ items }: { items: StatusItem[] }) {
   const tally = (["ok", "fail", "warn", "pending"] as const).map((s) => [s, items.filter((i) => i.state === s).length] as const).filter(([, n]) => n > 0);
   const entrance = useRowEntrance(items.map((_, i) => String(i)));
   return (
-    <div className="not-prose my-3 overflow-hidden rounded-xl border">
+    <div className="viz-frame-in bg-card not-prose my-3 overflow-hidden rounded-xl border">
       <ul className="m-0 list-none p-0">
         {items.map((it, i) => {
           const s = STATE[it.state];
+          const e = entrance(String(i));
           return (
-            <li key={i} className={cn("flex items-start gap-3 px-4 py-2 text-body", i > 0 && "border-t", entrance(String(i)).className)} style={entrance(String(i)).style}>
-              <span className={cn("mt-0.5 grid size-5 shrink-0 place-items-center rounded-full", s.tone)} aria-label={s.word}>
-                <span key={it.state} className="viz-mark grid place-items-center">{s.icon}</span>
+            <li key={i} className={cn("flex items-start gap-3 px-4 py-2 text-body", i > 0 && "border-border/60 border-t", e.className)} style={e.style}>
+              {/* Keyed by state: a flip mounts a fresh glyph, so it draws / sharpens in once. */}
+              <span key={it.state} className="viz-tone mt-0.5 grid size-5 shrink-0 place-items-center rounded-full" style={toneStyle(s.tone)} aria-label={s.word} role="img">
+                {s.icon}
               </span>
-              <span className={cn("min-w-0 leading-relaxed", it.state === "pending" ? "text-muted-foreground" : "text-foreground")}>{it.text}</span>
+              <span className={cn("min-w-0 leading-relaxed text-pretty", it.state === "pending" ? "text-muted-foreground" : "text-foreground")}>{it.text}</span>
             </li>
           );
         })}
       </ul>
-      <div className="text-muted-foreground flex items-center gap-3 border-t px-4 py-1.5 text-micro">
-        {tally.map(([s, n], i) => (
-          <React.Fragment key={s}>
-            {i > 0 && <span className="opacity-40">·</span>}
-            <span className="tabular-nums">
-              <RollNumber text={String(n)} /> {STATE[s].word}
-            </span>
-          </React.Fragment>
+      <div className={VIZ_FOOTER}>
+        {tally.map(([s, n]) => (
+          <TallyItem key={s} hue={STATE[s].hue} n={<RollNumber text={String(n)} />} word={STATE[s].word} />
         ))}
       </div>
     </div>

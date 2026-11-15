@@ -98,9 +98,9 @@ export function LiveCopyRow({ spec }: { spec: string }) {
           type="button"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          className="hover:text-foreground flex min-w-0 cursor-pointer items-center gap-1 rounded-md px-1 py-0.5"
+          className="viz-press hover:text-foreground hover:bg-muted/60 flex min-h-7 min-w-0 cursor-pointer items-center gap-1 rounded-md px-1.5 outline-none transition-[color,background-color] duration-150 ease-(--viz-ease) focus-visible:ring-2 focus-visible:ring-ring/60"
         >
-          <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+          <ChevronRight className={cn("size-3.5 shrink-0 transition-[rotate] duration-150 ease-(--viz-ease)", open && "rotate-90")} aria-hidden />
           {isLast && working && slot.run === registry.lastRun && <span aria-hidden className="bg-live breathe size-1.5 shrink-0 rounded-full" />}
           <span className="truncate">
             <span className="text-foreground/80 font-medium">{slot.title}</span>
@@ -108,12 +108,12 @@ export function LiveCopyRow({ spec }: { spec: string }) {
             {!writing && <span className="text-faint tabular-nums"> · {isLast ? "last " : ""}{clock(at)}</span>}
           </span>
         </button>
-        <button type="button" onClick={jump} className="hover:text-foreground flex shrink-0 cursor-pointer items-center gap-0.5 rounded-md px-1 py-0.5">
+        <button type="button" onClick={jump} className="viz-press hover:text-foreground hover:bg-muted/60 flex min-h-7 shrink-0 cursor-pointer items-center gap-0.5 rounded-md px-1.5 outline-none transition-[color,background-color] duration-150 ease-(--viz-ease) focus-visible:ring-2 focus-visible:ring-ring/60">
           <ArrowUp className="size-3" aria-hidden /> view
         </button>
       </div>
       {open && (
-        <pre className="enter bg-muted/40 text-muted-foreground mt-1 overflow-x-auto rounded-md border px-3 py-2 font-mono text-code whitespace-pre">{v.body}</pre>
+        <pre className="viz-frame-in bg-muted/40 text-muted-foreground mt-1 overflow-x-auto rounded-md border px-3 py-2 font-mono text-code whitespace-pre">{v.body}</pre>
       )}
     </div>
   );

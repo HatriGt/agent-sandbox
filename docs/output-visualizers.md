@@ -30,7 +30,7 @@ away — the beautifier is presentation, never authority.
 |---|---|
 | GFM table | Sortable data table: numeric columns detected, right-aligned tabular figures, magnitude bars, copy-as-CSV; lone ✓/✗/yes/no/n-a cells toned (support matrices) |
 | Task list `- [x]` | Checklist card with "3 of 5 done" progress line |
-| `> [!NOTE]` / TIP / IMPORTANT / WARNING / CAUTION blockquote | Callout card with icon + named kind |
+| `> [!NOTE]` / TIP / IMPORTANT / WARNING / CAUTION blockquote | Callout aside: tinted ground in the kind's hue, a round glyph, the kind word leading the first sentence |
 | ```json fence (object/array; multi-line or a long one-liner) | Collapsible JSON explorer, typed value colors, raw toggle |
 | ```diff / ```patch | Syntax-highlighted diff (shiki) |
 | Bare fence that looks like `tree` output (`├──`/`└──`) | Collapsible tree with file icons |
@@ -123,7 +123,7 @@ away — the beautifier is presentation, never authority.
   (schedules, request waterfalls).
 - **````heatmap```** — JSON `{rows, cols, values[[…]], unit?}`. Sequential single-hue grid.
 - **````note``` / ````tip``` / ````important``` / ````warn``` / ````caution``` /
-  ````success``` / ````error```** — markdown body. Callout card (same as `> [!NOTE]` quotes).
+  ````success``` / ````error```** — markdown body. Callout aside (same as `> [!NOTE]` quotes).
 - **````compare```** — options for a decision, side by side. `## Name` starts an option;
   `(recommended)` or `★` marks the single pick (accent ring + "Recommended" badge). `+` pro, `-` con,
   `~` or a plain line is a muted note. 2–6 options; text before the first `##`, 1 or 7+ options, or
@@ -252,7 +252,7 @@ POSTs `/interrupt.json` (kills the turn, keeps the session; exit 253). After tha
 
 **Smoothness.** The live log follows its tail with a short eased glide, not a jump, and skips the glide under reduced motion or when far behind. Rows fade out under the counter strip, and a status-mix bar (2xx/3xx/4xx/5xx) resizes smoothly as calls arrive. A 5xx or error row that arrives while you watch gets one red wash that fades. Earlier runs of a command that runs again later (each poll of a watch) fold to one line (`PollRow`), so only the newest run keeps the full view. HTML comments such as the watch marker never render as prose. The Watching pill and the Working line share one row.
 
-**Reference pass (2026-10-01).** Patterns borrowed from Rare UI (animated counter), Cult UI (rolling number, dynamic island), Emil Kowalski's rules and Vercel/Linear log feeds: counters are per-digit odometers (`Odometer` in `viz/motion.tsx`, CSS-content digits so the DOM text stays the real value); new rows enter with a 6px lift over 180 ms ease-out, transform and opacity only; status badges only transition colour; the "N new" chip jumps instantly (a deliberate action) while auto-follow glides; the Watching pill morphs its width with a layout spring, rolls its update count, blur-crossfades the elapsed time, says "fetching…" with a slow shimmer while a poll is in flight, and carries a hairline sweep that fills linearly over the poll interval as the next-poll clock; Stop presses to 0.97.
+**Reference pass (2026-10-01).** Patterns borrowed from Rare UI (animated counter), Cult UI (rolling number, dynamic island), Emil Kowalski's rules and Vercel/Linear log feeds: counters are per-digit odometers (`Odometer` in `viz/motion.tsx`, CSS-content digits so the DOM text stays the real value); live-log tail rows fade in (opacity only since 2026-11-15: a feed that keeps appending should not make the eye chase sliding rows); status badges only transition colour; the "N new" chip jumps instantly (a deliberate action) while auto-follow glides; the Watching pill morphs its width with a layout spring, rolls its update count, blur-crossfades the elapsed time, says "fetching…" with a slow shimmer while a poll is in flight, and carries a hairline sweep that fills linearly over the poll interval as the next-poll clock; Stop presses to 0.97.
 
 
 ## Design rules (for anyone adding or touching a visualizer)
@@ -269,17 +269,36 @@ and the console's own `web/DESIGN.md` — which always wins on tokens and voice.
 3. **One axis, thin marks, recessive grid** (`--viz-grid` hairlines), 4px-capped rounded
    data-ends anchored to the baseline, 2px gaps between adjacent fills, selective direct labels
    (never a number on every mark of a dense chart), a legend whenever ≥ 2 series.
-4. **Motion is one-shot and precise**: draw-in ≤ 600ms on `cubic-bezier(0.2, 0, 0, 1)`, never
-   looped, never re-triggered by streaming re-renders; `prefers-reduced-motion` renders static
-   (the global rule zeroes durations — keep animations in CSS classes so it applies).
+4. **Motion is one-shot and precise**: draw-in ≤ 600ms on `cubic-bezier(0.2, 0, 0, 1)`
+   (`--viz-ease`), never looped, never re-triggered by streaming re-renders; `prefers-reduced-motion`
+   renders static (the global rule zeroes durations — keep animations in CSS classes so it applies).
+   One vocabulary (index.css, "viz motion vocabulary"): rows rise 4px + fade (`viz-in` on first
+   paint, `viz-row-new` for streamed rows; 32ms stagger capped at 10 / 8); marks draw their stroke
+   once (`viz-check`) or sharpen from 0.25 + 4px blur (`viz-mark`); bars grow once on first paint
+   (`viz-grow-x`, `viz-rail` for timeline rails) and afterwards only tween width; folds open
+   0fr → 1fr + fade (`viz-fold`) and close instantly (unmount); chevrons rotate; icon state changes
+   cross-fade with both icons mounted (`IconSwap`); raw ⇄ visual cross-fades through 2px blur
+   (`viz-swap`); tooltips appear once from 0.96 at the side nearest the point (`viz-tip`, 125ms) and
+   then track; hover bands and crosshairs follow at 60ms linear. Hover/sort/filter feedback is
+   ≤ 150ms colour/opacity; keyboard actions never animate; nothing animates `transition: all`;
+   keyframes animate `translate`/`scale` (not `transform`) with `backwards` fill so motion's FLIP
+   (DataTable reorders, ≤ 60 rows) and Tailwind translates are never overridden.
 5. **Cards are quiet**: `bg-card` + hairline border (one elevation cue — border or shadow, never
    both), `rounded-xl`, an 8-height header strip with title, copy, the raw toggle, and a maximize
    button (`VizFrame`) that opens the block in a ~96vw×92vh dialog with zoom (buttons, `+`/`-`/`0`,
-   Ctrl/⌘+wheel, drag to pan; graphs use their own interactive canvas). Concentric radii: inner = outer − padding.
+   Ctrl/⌘+wheel, drag to pan; graphs use their own interactive canvas). Concentric radii: inner = outer − padding
+   (inset surfaces — stat tiles, link cards, compare columns, layer bands — sit 6px in with 6px corners).
+   Header controls are 28px (`VIZ_ICON_BUTTON`), quiet until the card is hovered/focused on a fine
+   pointer, press to 0.96. Chips share one recipe (`viz/tone.tsx` `Pill`, `.viz-tone`): a few percent
+   of the hue as ground, a same-hue hairline, the hue's text token as ink — the callout at chip size,
+   never a saturated fill or a side bar. List rows divide with `border-border/60` hairlines; definition
+   panels (kv, env, jwt, ini) do not. One empty state (`VizEmpty`), one filter row (`VizSearch`), one
+   header counter style (`count()` → "5 requests").
 6. **Hover layer by default**: per-mark tooltips with hit targets bigger than the mark
    (transparent ≥ 8px circles over 2px lines).
-7. **Numbers**: `tabular-nums` only where columns must align (tables, deltas); hero values in
-   stat tiles stay proportional.
+7. **Numbers**: `tabular-nums` on every number that sits in a column or changes in place —
+   tables, deltas, counters, and stat-tile values (they roll on live updates; proportional figures
+   made the tile row jitter mid-roll).
 8. **Charts are pure SVG + tokens; diagrams use libraries.** Charts, bars and tiles stay hand-drawn
    SVG (zero bundle cost, live theme following). Diagrams use `@xyflow/react` + `@dagrejs/dagre`
    (graphs) and `mermaid` (sequence and every other mermaid kind) — always lazy-loaded into their

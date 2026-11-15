@@ -1,9 +1,17 @@
 import * as React from "react";
-import { Check, Copy, Code2, Maximize2 } from "lucide-react";
+import { Check, Copy, Code2, Maximize2, Search, SearchX, Shapes } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import { LiveSlotBadge, LiveSlotContext, useLiveSlotTitle } from "./live-blocks";
+import { IconSwap } from "./motion";
 import { VizFullscreen, VizFullscreenContext, VizFullscreenGate } from "./viz-fullscreen";
+
+/**
+ * A quiet 28px icon button for a block's header (copy, raw, maximize, fold-all, chart ⇄ table):
+ * hidden until the card is hovered or focused on a fine pointer, 0.96 press, colour on hover.
+ */
+export const VIZ_ICON_BUTTON =
+  "viz-ctl viz-press text-muted-foreground hover:text-foreground hover:bg-muted/70 grid size-7 shrink-0 cursor-pointer place-items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60";
 
 /** Fixed categorical slot → CSS var. Never cycles: callers cap series at 8 upstream. */
 export function seriesColor(i: number): string {
@@ -17,19 +25,107 @@ const SKELETON_TITLE: Record<string, string> = {
 };
 
 /**
+ * When the last skeleton left the page. A frame that mounts within a beat of it is that skeleton's
+ * block arriving: the frame is already on screen (same border, same header), so only its body
+ * cross-fades in instead of the whole card rising again — a fill-in, not a jump.
+ */
+let skeletonGoneAt = -Infinity;
+const fromSkeleton = () => performance.now() - skeletonGoneAt < 120;
+
+/**
  * Placeholder for a visual fence that is streaming in but has nothing drawable yet. Same frame
  * and header as the finished block, so the swap to the real block is a fill-in, not a jump.
  */
 export function VizSkeleton({ language }: { language: string }) {
   const tall = language === "chart" || language === "heatmap" || language === "graph" || language === "dag" || language === "sequence";
+  React.useEffect(
+    () => () => {
+      skeletonGoneAt = performance.now();
+    },
+    []
+  );
   return (
-    <div className="bg-card not-prose enter my-3 overflow-hidden rounded-xl border" aria-busy="true" data-viz-skeleton={language}>
+    <div className="bg-card not-prose viz-swap my-3 overflow-hidden rounded-xl border" aria-busy="true" data-viz-skeleton={language}>
       <div className="flex h-8 items-center border-b px-3">
         <span className="shimmer-text text-micro font-medium">{SKELETON_TITLE[language] ?? "Drawing"}…</span>
       </div>
       <VizShimmer tall={tall} />
     </div>
   );
+}
+
+/**
+ * The filter row every searchable block shares (table, tree, log): hairline under the header, the
+ * icon and ground stay faint until the input is focused, an optional counter on the right.
+ */
+export function VizSearch({
+  value,
+  onChange,
+  placeholder,
+  count,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  /** "12 of 40" style counter, shown on the right (polite live region). */
+  count?: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <label className={cn("viz-search flex cursor-text items-center gap-2 px-3 py-1.5", className)}>
+      <Search className="text-faint size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && onChange("")}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        className="text-foreground placeholder:text-faint min-w-0 flex-1 bg-transparent text-meta outline-none [&::-webkit-search-cancel-button]:hidden"
+      />
+      {count != null && (
+        <span className="text-faint shrink-0 text-micro tabular-nums" aria-live="polite">
+          {count}
+        </span>
+      )}
+    </label>
+  );
+}
+
+/** The one empty state of the family: a small round glyph, one quiet line, an optional way out. */
+export function VizEmpty({ children, onClear }: { children: React.ReactNode; onClear?: () => void }) {
+  return (
+    <div className="viz-fade flex flex-col items-center gap-1.5 px-4 py-6 text-center" role="status">
+      <span className="bg-muted text-faint grid size-7 place-items-center rounded-full" aria-hidden>
+        <SearchX className="size-3.5" strokeWidth={1.75} />
+      </span>
+      <span className="text-muted-foreground text-micro text-pretty">{children}</span>
+      {onClear && (
+        <button type="button" onClick={onClear} className="viz-press text-foreground hover:bg-muted -mb-1 cursor-pointer rounded-md px-2 py-1 text-micro font-medium">
+          Clear filter
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The footer strip a block tallies in ("2 high · 1 low", "407 KB in files"): hairline, micro, tabular. */
+export const VIZ_FOOTER = "text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-1.5 text-micro tabular-nums";
+
+/** A tally entry: a 6px dot in the tone's hue + the count + the word (never the hue alone). */
+export function TallyItem({ hue, n, word }: { hue: string; n: React.ReactNode; word: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span aria-hidden className="size-1.5 rounded-full" style={{ background: hue }} />
+      <span className="text-foreground font-medium">{n}</span> {word}
+    </span>
+  );
+}
+
+/** A block's "N things" header counter: number tabular, unit pluralised. */
+export function count(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
 }
 
 /** Shimmer body for a block still drawing: the skeleton's body, and mermaid's while it renders. */
@@ -79,6 +175,10 @@ export function VizFrame({
   ownsZoom?: boolean;
 }) {
   const [raw, setRaw] = React.useState(false);
+  // Raw ⇄ visual only cross-fades once the reader has toggled; first paint is the frame's entrance.
+  const [toggled, setToggled] = React.useState(false);
+  // Arriving in place of a skeleton: the card is already there, so only the body fades in.
+  const [filling] = React.useState(fromSkeleton);
   // A live slot (a block the agent keeps re-emitting) names itself and shows its update age.
   const slot = React.useContext(LiveSlotContext);
   const slotTitle = useLiveSlotTitle();
@@ -93,7 +193,6 @@ export function VizFrame({
   }, [full, gate]);
   // Already inside a fullscreen dialog (a nested card): no second maximize.
   const inFullscreen = React.useContext(VizFullscreenContext);
-  const quiet = "text-muted-foreground hover:text-foreground grid size-6 cursor-pointer place-items-center rounded-md opacity-60 group-hover/viz:opacity-100 focus-visible:opacity-100";
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(source);
@@ -104,42 +203,44 @@ export function VizFrame({
     }
   };
   return (
-    <div className={cn("group/viz bg-card not-prose enter my-3 overflow-hidden rounded-xl border", className)} data-live-slot={slot ?? undefined}>
-      <div className="flex h-8 items-center gap-1 border-b px-3">
-        <span className="text-muted-foreground min-w-0 flex-1 truncate text-micro font-medium">{title ?? slotTitle}</span>
+    <div className={cn("group/viz bg-card not-prose my-3 overflow-hidden rounded-xl border", !filling && "viz-frame-in", className)} data-live-slot={slot ?? undefined}>
+      <div className="flex h-8 items-center gap-0.5 border-b pr-1 pl-3">
+        <span className="text-muted-foreground min-w-0 flex-1 truncate text-micro font-medium tabular-nums">{title ?? slotTitle}</span>
         <LiveSlotBadge />
         {actions}
-        {/* Utility controls stay quiet until the card is engaged — same reveal as code blocks. */}
-        <button type="button" onClick={copy} aria-label="Copy source" className={quiet}>
-          {copied ? <Check className="pop-in size-3.5 text-ok" /> : <Copy className="size-3.5" />}
+        {/* Utility controls stay quiet until the card is engaged (index.css .viz-ctl). */}
+        <button type="button" onClick={copy} aria-label={copied ? "Copied" : "Copy source"} className={VIZ_ICON_BUTTON}>
+          <IconSwap on={copied} offIcon={<Copy className="size-3.5" strokeWidth={1.75} />} onIcon={<Check className="text-ok size-3.5" strokeWidth={2.25} />} />
         </button>
         <button
           type="button"
-          onClick={() => setRaw((r) => !r)}
+          onClick={() => {
+            setToggled(true);
+            setRaw((r) => !r);
+          }}
           aria-label={raw ? "Show visualization" : "Show raw text"}
           aria-pressed={raw}
-          className={cn(
-            "grid size-6 cursor-pointer place-items-center rounded-md",
-            raw ? "text-foreground bg-muted opacity-100" : "text-muted-foreground hover:text-foreground opacity-60 group-hover/viz:opacity-100 focus-visible:opacity-100"
-          )}
+          className={cn(VIZ_ICON_BUTTON, raw && "text-foreground bg-muted")}
         >
-          <Code2 className="size-3.5" />
+          <IconSwap on={raw} offIcon={<Code2 className="size-3.5" strokeWidth={1.75} />} onIcon={<Shapes className="size-3.5" strokeWidth={1.75} />} />
         </button>
         {!inFullscreen && (
-          <button type="button" onClick={() => setFull(true)} aria-label="Open fullscreen" className={quiet} data-viz-maximize>
-            <Maximize2 className="size-3.5" />
+          <button type="button" onClick={() => setFull(true)} aria-label="Open fullscreen" className={VIZ_ICON_BUTTON} data-viz-maximize>
+            <Maximize2 className="size-3.5" strokeWidth={1.75} />
           </button>
         )}
       </div>
-      {/* Keyed wrapper: toggling raw ↔ rendered cross-fades instead of hard-swapping. */}
+      {/* Keyed wrapper: raw ⇄ rendered cross-fades through a 2px blur (the old view leaves at once). */}
       {raw ? (
-        <div key="raw" className="enter">
+        <div key="raw" className="viz-swap">
           <CodeBlock className="my-0 rounded-none border-0">
             <CodeBlockCode code={source} language={rawLanguage} />
           </CodeBlock>
         </div>
       ) : (
-        <div key="viz" className="enter">{children}</div>
+        <div key="viz" className={cn((toggled || filling) && "viz-swap")}>
+          {children}
+        </div>
       )}
       {full && (
         <VizFullscreen open={full} onOpenChange={setFull} title={title ?? slotTitle ?? "Visualization"} ownsZoom={ownsZoom}>

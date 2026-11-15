@@ -40,7 +40,7 @@ function Counter({ label, value, tone, title }: { label: string; value: string; 
   return (
     <span className="flex min-w-0 flex-col" title={title}>
       <span className="label text-faint">{label}</span>
-      <Odometer text={value} className={cn("text-meta font-semibold transition-colors duration-200", tone)} />
+      <Odometer text={value} className={cn("text-meta font-semibold transition-[color] duration-150 ease-(--viz-ease)", tone)} />
     </span>
   );
 }
@@ -64,7 +64,7 @@ function Row({ row, entrance }: { row: LiveRow; entrance: { className: string; s
           <span className="text-foreground min-w-0 flex-1 truncate font-mono text-code" title={row.text}>
             {h.path}
           </span>
-          <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-micro font-semibold tabular-nums transition-colors duration-200", statusTone(h.status))}>{h.status}</span>
+          <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-micro font-semibold tabular-nums transition-[color,background-color,border-color] duration-150 ease-(--viz-ease)", statusTone(h.status))}>{h.status}</span>
           <span className="text-faint w-14 shrink-0 text-right font-mono text-micro tabular-nums">{h.ms !== undefined ? formatMs(h.ms) : ""}</span>
         </>
       ) : (
@@ -218,7 +218,7 @@ export function LiveLogView({ state, live, className }: { state: LiveLogState; l
           <button
             type="button"
             onClick={toBottom}
-            className="pop-in bg-foreground text-background hover:bg-foreground/85 absolute bottom-2 transition-colors left-1/2 flex -translate-x-1/2 cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-micro font-medium shadow-md"
+            className="viz-tip viz-press bg-foreground text-background hover:bg-foreground/85 absolute bottom-2 left-1/2 flex origin-bottom -translate-x-1/2 cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-micro font-medium tabular-nums shadow-md transition-[background-color] duration-150"
           >
             <ArrowDown className="size-3" aria-hidden />
             {unseen} new

@@ -1,44 +1,45 @@
 import * as React from "react";
 import { resolvedReduced } from "@/lib/motion-pref";
-import { Check, CornerDownRight, Search, X } from "lucide-react";
+import { Check, CornerDownRight, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { HttpCall, LogLine, LogLevel, TestReport } from "@/lib/viz-extra";
-import { VizFrame } from "./VizFrame";
+import { count, VizEmpty, VizFrame, VizSearch } from "./VizFrame";
+import { RollNumber, useRowEntrance } from "./motion";
+import { Pill, type Tone } from "./tone";
 
-/** ```http → request list: method chip, path in mono, status toned by class, timing on the right. */
+const METHOD_TONE: Record<string, Tone> = { GET: "live", DELETE: "fail", POST: "ok", PUT: "ok", PATCH: "ok" };
+
+function statusTone(status: number): Tone {
+  return status < 300 ? "ok" : status < 400 ? "live" : status < 500 ? "warn" : "fail";
+}
+
+/** ```http → request list: method chip, path in mono, status chip toned by class, timing on the right. */
 export function HttpBlock({ calls, source }: { calls: HttpCall[]; source: string }) {
+  const entrance = useRowEntrance(calls.map((c, i) => `${i}|${c.method}|${c.url}`));
   return (
-    <VizFrame title={`${calls.length} ${calls.length === 1 ? "request" : "requests"}`} source={source}>
-      <div className="max-h-80 overflow-auto px-3 py-1.5">
-        {calls.map((c, i) => (
-          <div key={i} className="border-border/50 stagger-item flex items-center gap-2.5 border-b py-1.5 last:border-0" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
-            <span
-              className={cn(
-                "w-14 shrink-0 rounded-md border px-1 py-0.5 text-center font-mono text-micro font-semibold",
-                c.method === "GET" && "text-live border-live/40",
-                c.method === "DELETE" && "text-destructive border-destructive/40",
-                (c.method === "POST" || c.method === "PUT" || c.method === "PATCH") && "text-ok border-ok/40",
-                !["GET", "DELETE", "POST", "PUT", "PATCH"].includes(c.method) && "text-muted-foreground"
-              )}
-            >
-              {c.method}
-            </span>
-            <span className="text-foreground min-w-0 flex-1 truncate font-mono text-micro" title={c.url}>{c.url}</span>
-            {c.status !== undefined && (
-              <span
-                className={cn(
-                  "shrink-0 text-micro font-medium tabular-nums",
-                  c.status < 300 ? "text-ok" : c.status < 400 ? "text-live" : c.status < 500 ? "text-attention-text" : "text-destructive"
-                )}
-              >
-                {c.status}
-                {c.statusText ? ` ${c.statusText}` : ""}
+    <VizFrame title={count(calls.length, "request")} source={source}>
+      <ul className="m-0 max-h-80 list-none overflow-auto p-0">
+        {calls.map((c, i) => {
+          const e = entrance(`${i}|${c.method}|${c.url}`);
+          return (
+            <li key={i} className={cn("flex items-center gap-2.5 px-4 py-1.5", i > 0 && "border-border/60 border-t", e.className)} style={e.style}>
+              <Pill tone={METHOD_TONE[c.method] ?? "neutral"} round={false} className="w-14 justify-center font-mono font-semibold">
+                {c.method}
+              </Pill>
+              <span className="text-foreground min-w-0 flex-1 truncate font-mono text-micro" title={c.url}>
+                {c.url}
               </span>
-            )}
-            {c.time && <span className="text-faint w-14 shrink-0 text-right text-micro tabular-nums">{c.time}</span>}
-          </div>
-        ))}
-      </div>
+              {c.status !== undefined && (
+                <Pill tone={statusTone(c.status)}>
+                  {c.status}
+                  {c.statusText ? ` ${c.statusText}` : ""}
+                </Pill>
+              )}
+              {c.time && <span className="text-faint w-14 shrink-0 text-right text-micro tabular-nums">{c.time}</span>}
+            </li>
+          );
+        })}
+      </ul>
     </VizFrame>
   );
 }
@@ -47,6 +48,7 @@ export function HttpBlock({ calls, source }: { calls: HttpCall[]; source: string
 export function TestsBlock({ report, source }: { report: TestReport; source: string }) {
   const total = report.passed + report.failed + report.skipped || 1;
   const ok = report.failed === 0;
+  const entrance = useRowEntrance(report.failures);
   return (
     <VizFrame
       title={ok ? "tests passed" : "tests failed"}
@@ -54,44 +56,60 @@ export function TestsBlock({ report, source }: { report: TestReport; source: str
       actions={report.duration ? <span className="text-faint mr-1 text-micro tabular-nums">{report.duration}</span> : undefined}
     >
       <div className="px-4 py-3">
-        <div className="flex h-1.5 gap-px overflow-hidden rounded-full" aria-hidden>
-          {report.passed > 0 && <span style={{ width: `${(report.passed / total) * 100}%`, background: "var(--ok)" }} />}
-          {report.failed > 0 && <span style={{ width: `${(report.failed / total) * 100}%`, background: "var(--destructive)" }} />}
-          {report.skipped > 0 && <span style={{ width: `${(report.skipped / total) * 100}%`, background: "var(--muted-foreground)", opacity: 0.4 }} />}
+        {/* Segments grow from the left once, as one bar; later counts re-flow by width. */}
+        <div className="viz-grow-x flex h-1.5 origin-left gap-px overflow-hidden rounded-full" aria-hidden>
+          {report.passed > 0 && <span className="viz-tween-w" style={{ width: `${(report.passed / total) * 100}%`, background: "var(--ok)" }} />}
+          {report.failed > 0 && <span className="viz-tween-w" style={{ width: `${(report.failed / total) * 100}%`, background: "var(--destructive)" }} />}
+          {report.skipped > 0 && <span className="viz-tween-w" style={{ width: `${(report.skipped / total) * 100}%`, background: "var(--muted-foreground)", opacity: 0.4 }} />}
         </div>
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-meta">
+        <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-meta tabular-nums">
           <span className="text-ok inline-flex items-center gap-1 font-medium">
-            <Check className="size-3.5" aria-hidden /> {report.passed} passed
+            <Check className="size-3.5" strokeWidth={2} aria-hidden /> <RollNumber text={String(report.passed)} /> passed
           </span>
           {report.failed > 0 && (
             <span className="text-destructive inline-flex items-center gap-1 font-medium">
-              <X className="size-3.5" aria-hidden /> {report.failed} failed
+              <X className="size-3.5" strokeWidth={2} aria-hidden /> <RollNumber text={String(report.failed)} /> failed
             </span>
           )}
           {report.skipped > 0 && <span className="text-muted-foreground">{report.skipped} skipped</span>}
         </div>
-        {report.failures.length > 0 && (
-          <ul className="mt-2 flex list-none flex-col gap-0.5 border-t pt-2">
-            {report.failures.map((f, i) => (
-              <li key={i} className="text-destructive stagger-item flex items-start gap-1.5 font-mono text-micro" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
-                <X className="mt-0.5 size-3 shrink-0" aria-hidden />
+      </div>
+      {report.failures.length > 0 && (
+        <ul className="m-0 flex list-none flex-col border-t p-0">
+          {report.failures.map((f, i) => {
+            const e = entrance(f);
+            return (
+              <li key={i} className={cn("text-destructive flex items-start gap-2 px-4 py-1.5 font-mono text-micro", i > 0 && "border-border/60 border-t", e.className)} style={e.style}>
+                <X className="mt-0.5 size-3 shrink-0" strokeWidth={2} aria-hidden />
                 <span className="min-w-0 break-all">{f}</span>
               </li>
-            ))}
-          </ul>
-        )}
-      </div>
+            );
+          })}
+        </ul>
+      )}
     </VizFrame>
   );
 }
 
+// The log ground (--trace) is dark in both themes, so the light amber hue is the readable warn ink.
 const LEVEL_STYLE: Record<LogLevel, string> = {
   error: "text-destructive",
-  warn: "text-attention-text",
+  warn: "text-warn",
   info: "text-live",
   debug: "text-faint",
   plain: "text-trace-fg",
 };
+
+const LEVEL_HUE: Record<Exclude<LogLevel, "plain">, string> = {
+  error: "var(--destructive)",
+  warn: "var(--warn)",
+  info: "var(--live)",
+  debug: "var(--faint)",
+};
+
+/** A content action, not chrome: always visible, unlike the header's copy/raw/maximize. */
+const JUMP_BUTTON =
+  "viz-press text-muted-foreground hover:text-foreground hover:bg-muted/70 grid size-7 shrink-0 cursor-pointer place-items-center rounded-md transition-[color,background-color] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring/60";
 
 /** ```log → terminal-ground viewer with level coloring and one-click level filters. */
 export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }) {
@@ -109,7 +127,7 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
   const shown = lines
     .map((l, i) => ({ l, i }))
     .filter(({ l }) => (!filter || l.level === filter) && (!q || l.text.toLowerCase().includes(q)));
-  const levels: LogLevel[] = ["error", "warn", "info", "debug"];
+  const levels: Exclude<LogLevel, "plain">[] = ["error", "warn", "info", "debug"];
   const firstError = lines.findIndex((l) => l.level === "error");
   const jump = () => {
     if (firstError < 0) return;
@@ -126,11 +144,11 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
   };
   return (
     <VizFrame
-      title={`${lines.length} ${lines.length === 1 ? "line" : "lines"}`}
+      title={count(lines.length, "line")}
       source={source}
       rawLanguage="text"
       actions={
-        <span className="mr-1 flex items-center gap-1">
+        <span className="mr-0.5 flex items-center gap-1">
           {levels.map(
             (lv) =>
               (counts[lv] ?? 0) > 0 && (
@@ -140,70 +158,66 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
                   onClick={() => setFilter((f) => (f === lv ? null : lv))}
                   aria-pressed={filter === lv}
                   className={cn(
-                    "cursor-pointer rounded-full border px-1.5 py-0.5 text-micro font-medium tabular-nums",
-                    filter === lv ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"
+                    "viz-press inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-full border px-2 text-micro font-medium tabular-nums transition-[color,background-color,border-color] duration-150 ease-(--viz-ease) outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                    filter === lv ? "bg-muted text-foreground border-line-strong" : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
                   )}
                 >
+                  <span aria-hidden className="size-1.5 rounded-full" style={{ background: LEVEL_HUE[lv] }} />
                   {lv} {counts[lv]}
                 </button>
               )
           )}
           {firstError >= 0 && (
-            <button
-              type="button"
-              onClick={jump}
-              aria-label="Jump to first error"
-              title="Jump to first error"
-              className="text-muted-foreground hover:text-foreground grid size-6 cursor-pointer place-items-center rounded-md"
-            >
-              <CornerDownRight className="size-3.5" />
+            <button type="button" onClick={jump} aria-label="Jump to first error" title="Jump to first error" className={JUMP_BUTTON}>
+              <CornerDownRight className="size-3.5" strokeWidth={1.75} />
             </button>
           )}
         </span>
       }
     >
       {lines.length > 3 && (
-        <label className="flex items-center gap-2 border-b px-3 py-1.5">
-          <Search className="text-faint size-3.5 shrink-0" aria-hidden />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-            placeholder="Search log"
-            aria-label="Search log"
-            className="text-foreground placeholder:text-faint min-w-0 flex-1 bg-transparent text-meta outline-none"
-          />
-          {(q || filter) && (
-            <span className="text-faint shrink-0 text-micro tabular-nums" aria-live="polite">
-              {shown.length} of {lines.length}
-            </span>
-          )}
-        </label>
+        <VizSearch
+          className="border-b"
+          value={query}
+          onChange={setQuery}
+          placeholder="Search log"
+          count={q || filter ? `${shown.length} of ${lines.length}` : undefined}
+        />
       )}
-      <div ref={scroller} className="bg-trace relative max-h-96 overflow-auto px-4 py-3">
-        <pre className="m-0 font-mono text-code whitespace-pre-wrap">
-          {shown.length === 0 && <div className="text-faint font-sans text-micro">No lines match.</div>}
-          {shown.map(({ l, i }) => (
-            <div
-              key={i}
-              data-line={i}
-              className={cn(
-                "-mx-2 min-w-0 rounded px-2 transition-colors duration-500 motion-reduce:transition-none [overflow-wrap:anywhere]",
-                LEVEL_STYLE[l.level],
-                flash === i && "bg-destructive/15"
-              )}
-            >
-              {q ? <Mark text={l.text} q={q} /> : l.text || "\u00a0"}
-            </div>
-          ))}
-        </pre>
-      </div>
+      {shown.length === 0 && (
+        <VizEmpty
+          onClear={() => {
+            setQuery("");
+            setFilter(null);
+          }}
+        >
+          No lines match.
+        </VizEmpty>
+      )}
+      {/* Stays mounted while empty: "jump to first error" scrolls it in the frame after clearing. */}
+      <div ref={scroller} hidden={shown.length === 0} className="bg-trace relative max-h-96 overflow-auto px-4 py-3">
+          <pre className="m-0 font-mono text-code whitespace-pre-wrap">
+            {shown.map(({ l, i }) => (
+              <div
+                key={i}
+                data-line={i}
+                className={cn(
+                  // The jump flash lands at once and fades out slowly: it marks where you are, then leaves.
+                  "-mx-2 min-w-0 rounded px-2 [overflow-wrap:anywhere]",
+                  flash === i ? "bg-destructive/20" : "transition-[background-color] duration-700 ease-(--viz-ease)",
+                  LEVEL_STYLE[l.level]
+                )}
+              >
+                {q ? <Mark text={l.text} q={q} /> : l.text || "\u00a0"}
+              </div>
+            ))}
+          </pre>
+        </div>
     </VizFrame>
   );
 }
 
-/** Search hits get a quiet series-1 wash \u2014 never the amber "action needed" hue. */
+/** Search hits get a quiet series-1 wash, never the amber "action needed" hue. */
 function Mark({ text, q }: { text: string; q: string }) {
   const out: React.ReactNode[] = [];
   const low = text.toLowerCase();
@@ -211,7 +225,7 @@ function Mark({ text, q }: { text: string; q: string }) {
   for (let k = low.indexOf(q); k >= 0; k = low.indexOf(q, at)) {
     if (k > at) out.push(text.slice(at, k));
     out.push(
-      <mark key={k} className="text-foreground rounded-[2px] bg-[color-mix(in_oklch,var(--viz-1)_30%,transparent)]">
+      <mark key={k} className="text-foreground rounded-[2px] bg-[color-mix(in_oklab,var(--viz-1)_30%,transparent)]">
         {text.slice(k, k + q.length)}
       </mark>
     );

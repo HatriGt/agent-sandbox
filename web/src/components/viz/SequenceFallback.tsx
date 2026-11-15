@@ -40,7 +40,7 @@ export function SequenceFallback({ sequence }: { sequence: Sequence }) {
 
   const { rowY, W, H } = layout;
   const laneX = (i: number) => PAD_X + i * LANE_W + LANE_W / 2;
-  const fade = "transition-opacity duration-150 motion-reduce:transition-none";
+  const fade = "transition-opacity duration-150 ease-(--viz-ease)";
   const dim = (i: number) => hover !== null && hover !== i;
   // Blocks nest by containment; outer ones draw a touch wider than inner ones.
   const blocks = items.filter((i): i is Extract<typeof i, { kind: "block" }> => i.kind === "block");

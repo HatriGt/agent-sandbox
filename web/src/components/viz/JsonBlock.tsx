@@ -22,6 +22,8 @@ export function JsonBlock({ value, source }: { value: unknown; source: string })
 
 function JsonNode({ value, depth, name }: { value: unknown; depth: number; name?: string }) {
   const [open, setOpen] = React.useState(depth < 2);
+  // Only a fold the reader opened unfolds; the default-open levels are part of the card's entrance.
+  const [touched, setTouched] = React.useState(false);
   const key = name !== undefined && (
     <>
       <span className="text-foreground">{JSON.stringify(name)}</span>
@@ -46,17 +48,20 @@ function JsonNode({ value, depth, name }: { value: unknown; depth: number; name?
       <div>
         <button
           type="button"
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            setTouched(true);
+            setOpen((o) => !o);
+          }}
           aria-expanded={open}
-          className="hover:bg-muted/60 flex w-full cursor-pointer items-center rounded text-left"
+          className="no-press hover:bg-muted/60 active:bg-muted flex w-full cursor-pointer items-center rounded text-left outline-none transition-[background-color] duration-150 ease-(--viz-ease) focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-inset"
           style={{ paddingLeft: depth * 14 }}
         >
-          <ChevronRight className={cn("text-muted-foreground mr-0.5 size-3 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+          <ChevronRight className={cn("text-muted-foreground mr-0.5 size-3 shrink-0 transition-[rotate] duration-150 ease-(--viz-ease)", open && "rotate-90")} aria-hidden />
           {key}
           <span className="text-muted-foreground">
             {braces[0]}
             {!open && (
-              <span className="text-faint">
+              <span className="viz-fade text-faint tabular-nums">
                 {" "}
                 {entries.length} {isArr ? (entries.length === 1 ? "item" : "items") : entries.length === 1 ? "key" : "keys"} {braces[1]}
               </span>
@@ -64,14 +69,16 @@ function JsonNode({ value, depth, name }: { value: unknown; depth: number; name?
           </span>
         </button>
         {open && (
-          <>
-            {entries.map(([k, v]) => (
-              <JsonNode key={k} name={isArr ? undefined : k} value={v} depth={depth + 1} />
-            ))}
-            <div className="text-muted-foreground" style={{ paddingLeft: depth * 14 + 14 }}>
-              {braces[1]}
+          <div className="viz-fold" data-open data-fresh={touched || undefined}>
+            <div>
+              {entries.map(([k, v]) => (
+                <JsonNode key={k} name={isArr ? undefined : k} value={v} depth={depth + 1} />
+              ))}
+              <div className="text-muted-foreground" style={{ paddingLeft: depth * 14 + 14 }}>
+                {braces[1]}
+              </div>
             </div>
-          </>
+          </div>
         )}
       </div>
     );

@@ -133,7 +133,7 @@ function MermaidSvg({ text, label, fallback }: { text: string; label: string; fa
         role="img"
         aria-label={label}
         data-mermaid={state}
-        className={state === "ready" ? "mermaid-diagram px-4 py-4" : "hidden"}
+        className={state === "ready" ? "mermaid-diagram viz-swap px-4 py-4" : "hidden"}
       />
     </>
   );

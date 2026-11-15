@@ -26,7 +26,6 @@ import {
   parseAnnotate,
   parseLayers,
 } from "@/lib/viz-extra";
-import { Markdown } from "@/components/ui/markdown";
 import { ChartBlock } from "./ChartBlock";
 import { CalloutBlock } from "./CalloutBlock";
 import { HeatmapBlock, FunnelBlock, SpansBlock } from "./ChartExtras";
@@ -241,7 +240,7 @@ export function smartBlock(language: string, code: string, { open = false }: { o
       const kind = calloutKind(language);
       // Callout content is markdown — it re-enters the same pipeline, so a table inside a warning
       // still renders rich. No VizBoundary needed: CalloutBlock has no parser to disagree with.
-      if (kind) return <CalloutBlock kind={kind}>{<Markdown>{src}</Markdown>}</CalloutBlock>;
+      if (kind) return <CalloutBlock kind={kind} source={src} />;
       break;
     }
     case "plaintext":
