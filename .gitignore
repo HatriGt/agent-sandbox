@@ -14,3 +14,4 @@ data-dev/
 .shots/*.png
 .shots/demo/
 .shots/*.log
+bench/code-mode/out/
