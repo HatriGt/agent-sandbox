@@ -12,13 +12,142 @@ export interface McpCall {
   tool: string;
   /** Humanized: "execute sql". */
   label: string;
+  /**
+   * Set on code mode's own two tools (`mcp__code-mode__search` / `mcp__code-mode__run`, see
+   * docs/plan-code-mode.md): "code-mode" is the in-box wrapper, not a server the operator configured,
+   * so callers branch on this instead of presenting it as one.
+   */
+  codeMode?: "run" | "search";
 }
+
+/** The server name the code-mode wrapper is installed under (src/code-mode). */
+export const CODE_MODE_SERVER = "code-mode";
 
 /** Parse claude's MCP tool namespacing. Anything else is a local tool → null. */
 export function parseMcpName(name: string): McpCall | null {
   const m = name.match(/^mcp__([\w.-]+)__([\w.-]+)$/);
   if (!m) return null;
-  return { server: m[1], tool: m[2], label: m[2].replace(/[_-]+/g, " ").toLowerCase() };
+  const call: McpCall = { server: m[1], tool: m[2], label: m[2].replace(/[_-]+/g, " ").toLowerCase() };
+  if (m[1] === CODE_MODE_SERVER && (m[2] === "run" || m[2] === "search")) call.codeMode = m[2];
+  return call;
+}
+
+/* ───────────────────────────── code mode ───────────────────────────── */
+
+/** One MCP call a code-mode script made, from the summary lines of the `run` result. */
+export interface CodeModeCall {
+  /** The call's number in the session, the `n` of `recall(n)`. */
+  n: number;
+  /** Wire name, `mcp__tracker__list_issues`. */
+  name: string;
+  server: string;
+  /** Humanized tool, "list issues". */
+  tool: string;
+  /** Result size in chars (the summary rounds: "41k" → 41000). 0 when failed/unfinished. */
+  chars: number;
+  /** Key/array shape of the result, never its values. */
+  shape: string;
+  /** The call threw; the error text. */
+  failed?: string;
+  /** No reply before the script ended. */
+  unfinished?: boolean;
+  /** Over the server's upstream cap: the script saw a cut copy. */
+  cut?: boolean;
+}
+
+export interface CodeModeResult {
+  /** The returned value (JSON text), or the `Error: …` / "returned nothing" line. */
+  value: string;
+  /** Whether `value` is the script's error rather than a returned value. */
+  error: boolean;
+  console: string;
+  calls: CodeModeCall[];
+  /** "--- 5 MCP calls: 50k chars in, 81 out ---" without the dashes. */
+  totals?: string;
+  /** The trailing `await recall(n) …` hint. */
+  recall?: string;
+  /**
+   * The server's note under the value when the script returned object fields set to undefined
+   * (a misspelt field name, usually): `(undefined, so left out of the value above: "comment_count" ×6; …)`.
+   * Split off so `value` stays parseable JSON for the table/kv views.
+   */
+  hint?: string;
+}
+
+const SUMMARY_RE = /^--- (\d+) MCP calls?: (.+?) ---$/;
+const HINT_RE = /^\(undefined, so left out of the value above: .*\)$/;
+const CALL_RE = /^#(\d+) (mcp__[\w.-]+?__[\w.-]+?) (?:(failed): (.*)|(did not finish)|(\d+(?:\.\d+)?[kM]?)( \(over [^)]*: the script saw a cut copy\))?(?: (.*))?)$/;
+
+/** "41k" → 41000, "2.4M" → 2400000, "312" → 312 (src/code-mode/box/result.ts size()). */
+function parseSize(s: string): number {
+  const n = parseFloat(s);
+  return Math.round(s.endsWith("M") ? n * 1_000_000 : s.endsWith("k") ? n * 1000 : n);
+}
+
+/**
+ * Split the text a code-mode `run` returns (src/code-mode/box/result.ts formatRun) into its parts:
+ * value, then `--- console ---`, then `--- N MCP calls: … ---` and one line per call, then the recall
+ * hint. Parses from the END so a returned value that itself contains a `---` line stays whole.
+ * Text that is not in this shape comes back as the value, with no calls.
+ */
+export function parseCodeModeResult(text: string | undefined): CodeModeResult {
+  const lines = (text ?? "").replace(/\r\n/g, "\n").split("\n");
+  let end = lines.length;
+  while (end > 0 && !lines[end - 1].trim()) end--;
+  let recall: string | undefined;
+  if (end > 0 && /^await recall\(n\)/.test(lines[end - 1])) recall = lines[--end];
+  const calls: CodeModeCall[] = [];
+  let totals: string | undefined;
+  // Walk back over call lines; they only count if a summary header sits right above them.
+  let i = end;
+  while (i > 0 && CALL_RE.test(lines[i - 1])) i--;
+  const head = i > 0 ? lines[i - 1].match(SUMMARY_RE) : null;
+  if (head) {
+    totals = `${head[1]} MCP call${head[1] === "1" ? "" : "s"}: ${head[2]}`;
+    for (const l of lines.slice(i, end)) {
+      const m = l.match(CALL_RE)!;
+      const mcp = parseMcpName(m[2]);
+      const call: CodeModeCall = {
+        n: Number(m[1]),
+        name: m[2],
+        server: mcp?.server ?? "",
+        tool: mcp?.label ?? m[2],
+        chars: m[6] ? parseSize(m[6]) : 0,
+        shape: m[8] ?? "",
+      };
+      if (m[3]) call.failed = m[4];
+      if (m[5]) call.unfinished = true;
+      if (m[7]) call.cut = true;
+      calls.push(call);
+    }
+    end = i - 1;
+  } else if (recall !== undefined) {
+    // A recall hint with no summary above it is not ours; keep it as part of the value.
+    end++;
+    recall = undefined;
+  }
+  let consoleText = "";
+  const ci = lines.slice(0, end).lastIndexOf("--- console ---");
+  if (ci >= 0) {
+    consoleText = lines.slice(ci + 1, end).join("\n");
+    end = ci;
+  }
+  // The undefined-fields note sits on the line right after the value (src/code-mode/box/result.ts).
+  let hint: string | undefined;
+  while (end > 0 && !lines[end - 1].trim()) end--;
+  if (end > 0 && HINT_RE.test(lines[end - 1])) hint = lines[--end];
+  const value = lines.slice(0, end).join("\n").trim();
+  const out: CodeModeResult = { value, error: /^Error: /.test(value), console: consoleText, calls };
+  if (totals) out.totals = totals;
+  if (recall) out.recall = recall;
+  if (hint) out.hint = hint;
+  return out;
+}
+
+/** The first non-empty line of a script, for headers and the collapsed row. */
+export function scriptHeadline(code: string | undefined, max = 120): string {
+  const first = (code ?? "").split("\n").find((l) => l.trim())?.trim() ?? "";
+  return first.length > max ? `${first.slice(0, max - 1)}…` : first;
 }
 
 /**
@@ -122,3 +251,27 @@ export function mcpSummary(view: McpResultView): string {
   }
 }
 
+
+/** Servers a script names in its `call("mcp__server__tool", …)` literals, in first-use order. */
+export function scriptServers(code: string | undefined): string[] {
+  const out: string[] = [];
+  for (const m of (code ?? "").matchAll(/mcp__([\w.-]+?)__[\w.-]+/g)) {
+    if (m[1] !== CODE_MODE_SERVER && !out.includes(m[1])) out.push(m[1]);
+  }
+  return out;
+}
+
+/**
+ * The MCP calls a run of tool events made: a direct call counts one, a code-mode `run` counts the
+ * calls its summary lists, a code-mode `search` counts none (it only looks tools up).
+ */
+export function mcpCallCount(events: { name: string; result?: string }[]): number {
+  let n = 0;
+  for (const e of events) {
+    const m = parseMcpName(e.name);
+    if (!m) continue;
+    if (m.codeMode === "run") n += parseCodeModeResult(e.result).calls.length;
+    else if (!m.codeMode) n++;
+  }
+  return n;
+}

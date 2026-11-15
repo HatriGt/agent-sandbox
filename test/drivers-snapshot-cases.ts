@@ -3,7 +3,7 @@
  * one-off generator that captured test/fixtures/drivers-snapshot.json from the PRE-refactor
  * msb.ts, so the driver extraction is provably byte-identical.
  */
-import { agentSh, agentEnvFlags, bootstrapScript } from "../src/msb.js";
+import { agentSh, agentEnvFlags, bootstrapScript, mcpInstallSh } from "../src/msb.js";
 import type { Config } from "../src/config.js";
 
 const base = {
@@ -31,5 +31,10 @@ export function snapshotCases(): Record<string, unknown> {
       out[`env:${kind}:full:ask=${askModel ?? "none"}`] = agentEnvFlags(cfg, "fix it", [{ name: "repo" }], "gh-tok", "opus", kind);
     }
   }
+  // The one-exec MCP install (installMcpConfig): direct, with code mode, and code mode with no build.
+  const conf = { mcpServers: { tracker: { type: "stdio", command: "npx", args: ["-y", "tracker-mcp@1.0.0"], env: { TOKEN: "t" } } } };
+  out["mcpInstall:direct"] = mcpInstallSh({ conf, specs: ["tracker-mcp@1.0.0"] });
+  out["mcpInstall:code-mode"] = mcpInstallSh({ conf, specs: ["tracker-mcp@1.0.0"], codeMode: { on: true } });
+  out["mcpInstall:code-mode-unavailable"] = mcpInstallSh({ conf, specs: [], codeMode: { unavailable: "no build" } });
   return out;
 }

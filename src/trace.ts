@@ -28,7 +28,7 @@ export type TraceEvent =
    * `streaming`: a background shell still producing output — `result` is the output seen so far,
    * folded in from the agent's BashOutput/TaskOutput polls (see foldBackgroundShells).
    */
-  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean; diff?: string; at?: number; ms?: number; streaming?: boolean }
+  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean; diff?: string; code?: string; at?: number; ms?: number; streaming?: boolean }
   /** Extended thinking. `at` is the stamp current when it opened; `streaming` while the close marker has not arrived. */
   | { kind: "think"; text: string; at?: number; streaming?: boolean }
   /** A TodoWrite snapshot. `at` is the formatter's wall-clock ms; absent on logs written before it. */
@@ -156,6 +156,10 @@ const PLAN_CLOSE = "⟦/plan⟧";
 // above it. Attached to that tool event's `diff`, never rendered as prose.
 const DIFF_OPEN = "⟦diff⟧";
 const DIFF_CLOSE = "⟦/diff⟧";
+// Code mode's script (src/drivers/sentinels.ts CODE_*): `⟦code⟧ <ms>` … `⟦/code⟧` after a
+// `mcp__code-mode__run` row. Attached to that tool event's `code`, like a diff.
+const CODE_OPEN_RE = /^⟦code⟧(?: \d+)?$/;
+const CODE_CLOSE = "⟦/code⟧";
 const ASK_OPEN = "⟦ask⟧";
 const ASK_CLOSE = "⟦/ask⟧";
 // One line per turn, stamped by the formatter from the stream-json usage fields it used to drop:
@@ -217,6 +221,8 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   let summary: string[] | null = null;
   // A ⟦diff⟧ block collects into the most recent tool event's `diff`.
   let diff: string[] | null = null;
+  // A ⟦code⟧ block collects into the most recent tool event's `code`.
+  let code: string[] | null = null;
 
   // A log we are shown is a TAIL of the real one. When the cut lands inside a tool_result the block
   // arrives without its `→ Tool: arg` line, and every indented line of real command output would
@@ -286,6 +292,21 @@ export function parseTrace(rawLog: string): TraceEvent[] {
         if (lastTool?.kind === "tool" && text.trim()) lastTool.diff = text;
         diff = null;
       } else diff.push(line);
+      continue;
+    }
+    if (code !== null) {
+      if (line === CODE_CLOSE) {
+        const text = code.join("\n");
+        const lastTool = [...events].reverse().find((e) => e.kind === "tool");
+        if (lastTool?.kind === "tool" && text.trim()) lastTool.code = text;
+        code = null;
+      } else code.push(line);
+      continue;
+    }
+    if (CODE_OPEN_RE.test(line)) {
+      flushProse();
+      code = [];
+      target = null;
       continue;
     }
     if (line === DIFF_OPEN) {

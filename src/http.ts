@@ -2410,7 +2410,10 @@ app.post("/agent-prefs.json", (req: Request, res: Response) => {
     // A body without `autoCompact` (the driver picker) keeps the stored one: the two settings are
     // saved from different controls and neither may silently reset the other.
     const body = { ...((req.body ?? {}) as Record<string, unknown>) };
-    if (!("autoCompact" in body)) body.autoCompact = loadAgentPrefs(p.kind === "user" ? p.userId : OPERATOR_OWNER).autoCompact;
+    // Same for `codeMode` (code mode for MCP, off unless "on"): no body that lacks it may turn it off.
+    const stored = loadAgentPrefs(p.kind === "user" ? p.userId : OPERATOR_OWNER);
+    if (!("autoCompact" in body)) body.autoCompact = stored.autoCompact;
+    if (!("codeMode" in body)) body.codeMode = stored.codeMode;
     const prefs = normalizeAgentPrefs(body);
     assertSelectable(prefs.defaultAgent, (req.body as { allowPartialSupervision?: unknown } | undefined)?.allowPartialSupervision === true);
     saveAgentPrefs(prefs, p.kind === "user" ? p.userId : OPERATOR_OWNER);

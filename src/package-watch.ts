@@ -42,6 +42,8 @@ export interface LastProvision {
   skipped: string[];
   failed: string[];
   dropped: string[];
+  /** Why code mode fell back to the direct servers on the last install (`code-mode: fallback (…)`). */
+  codeModeFallback?: string;
 }
 
 /**
@@ -127,6 +129,14 @@ export async function fetchLatestVersions(
  */
 export const BAKED_MCP_PACKAGES: readonly string[] = ["mcp-remote", "@upstash/context7-mcp", "@modelcontextprotocol/server-sequential-thinking"];
 
+/**
+ * Baked into the claude image for the box programs we ship, pinned and never followed by the
+ * "image is behind" watch: the code-mode server (src/code-mode) loads the MCP SDK from the global
+ * node_modules (29 MB, measured in the Phase 0 spike). Moving the pin is a code change, tested with
+ * the server, not a dashboard update.
+ */
+export const IMAGE_PINNED_PACKAGES: readonly string[] = ["@modelcontextprotocol/sdk@1.32.2"];
+
 export const CLAUDE_CODE_PACKAGE = "@anthropic-ai/claude-code";
 /** In the baked manifest but not ours to choose: they come with the base image's node. */
 export const BASE_PACKAGES: ReadonlySet<string> = new Set(["npm", "corepack"]);
@@ -149,7 +159,7 @@ export function imageChanges(baked: Readonly<Record<string, string>>, latest: Re
     } else if (b !== l) out.push({ name, baked: b, latest: l });
   }
   for (const [name, version] of Object.entries(baked)) {
-    if (BASE_PACKAGES.has(name) || name === CLAUDE_CODE_PACKAGE || wanted.has(name)) continue;
+    if (BASE_PACKAGES.has(name) || name === CLAUDE_CODE_PACKAGE || wanted.has(name) || IMAGE_PINNED_PACKAGES.some((p) => packageNameOf(p) === name)) continue;
     out.push({ name, baked: version, latest: "" });
   }
   return out;

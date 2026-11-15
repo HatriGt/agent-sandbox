@@ -219,7 +219,7 @@ const DEFAULT_EGRESS = [
  */
 export function configuredImage(): { claudeImage: string; claudeCodeVersion: string } {
   // Bump the default deliberately (after a smoke run), not automatically: the agent's behavior IS the product.
-  return { claudeImage: process.env.MSB_CLAUDE_IMAGE || "", claudeCodeVersion: req("CLAUDE_CODE_VERSION", "2.1.273") };
+  return { claudeImage: process.env.MSB_CLAUDE_IMAGE || "", claudeCodeVersion: req("CLAUDE_CODE_VERSION", "2.1.322") };
 }
 
 export function loadConfig(): Config {

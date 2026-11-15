@@ -11,6 +11,12 @@ import { redactShapesSource } from "../redact.js";
 import {
   AGENT_LOG,
   AT_MARK,
+  CODE_CLOSE,
+  CODE_MAX_BYTES,
+  CODE_MAX_LINES,
+  CODE_MODE_RUN,
+  CODE_MODE_SEARCH,
+  CODE_OPEN,
   COMPACT_MARK,
   CTX_MARK,
   DIFF_CLOSE,
@@ -37,6 +43,7 @@ import {
 import { AGENT_SYS_PROMPT } from "./prompts.js";
 import type { Driver } from "./types.js";
 import type { AutoCompactMode } from "../agent-kind.js";
+import { CODE_MODE_PROMPT_PATH, CODE_MODE_SERVER } from "../code-mode/index.js";
 
 /**
  * Version-aware Claude Code install: (re)install iff the installed version differs from the pin.
@@ -275,11 +282,16 @@ export function streamFmtScript(): string {
     // Stamp the tool_use id (short tail) so a result can be matched to ITS OWN call. With parallel
     // tool use one assistant message issues N tool_use blocks and the N results arrive afterwards;
     // without a correlation token the parser can only attach every result to the most recent call.
-    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.skill||inp.file_path||inp.path||inp.pattern||inp.bash_id||inp.shell_id||inp.task_id||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();st();w("→ "+b.name+(arg?": "+df(arg.slice(0,200)):"")+(b.id?" ${ID_OPEN}"+String(b.id).slice(-8)+"${ID_CLOSE}":""));` +
+    // Code mode (src/code-mode): `run`'s input is a whole script. Its headline is the script's first
+    // non-empty line and the script follows as a ⟦code⟧ block, capped and defanged like ⟦diff⟧.
+    // `search` keeps the generic row with its query as the arg.
+    `else if(b.type==="tool_use"){const inp=b.input||{};const cm=b.name==="${CODE_MODE_RUN}"&&typeof inp.code==="string";const arg=String((cm?inp.code.split("\\n").find(l=>l.trim())||"":"")||(b.name==="${CODE_MODE_SEARCH}"?inp.query||"":"")||inp.command||inp.skill||inp.file_path||inp.path||inp.pattern||inp.bash_id||inp.shell_id||inp.task_id||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();st();w("→ "+b.name+(arg?": "+df(arg.slice(0,200)):"")+(b.id?" ${ID_OPEN}"+String(b.id).slice(-8)+"${ID_CLOSE}":""));` +
     // Per-edit diff block: what the Edit/Write actually changes, as -old/+new lines. Defanged and
     // capped (lines then bytes) — the truncation is announced, mirroring the tool_result budgets.
     `const dd=diffLines(b.name,inp);if(dd.length){const head=[];let bytes=0;let cut=0;for(const l of dd){if(head.length>=${DIFF_MAX_LINES}||bytes+l.length+1>${DIFF_MAX_BYTES}){cut++;continue}bytes+=l.length+1;head.push(l)}` +
-    `if(cut>0)head.push("… "+cut+" more lines");w("${DIFF_OPEN}\\n"+df(head.join("\\n"))+"\\n${DIFF_CLOSE}")}}` +
+    `if(cut>0)head.push("… "+cut+" more lines");w("${DIFF_OPEN}\\n"+df(head.join("\\n"))+"\\n${DIFF_CLOSE}")}` +
+    `if(cm){const head=[];let bytes=0;let cut=0;for(const l of inp.code.replace(/^(?:[ \\t]*\\r?\\n)+/,"").replace(/\\s+$/,"").split("\\n")){if(head.length>=${CODE_MAX_LINES}||bytes+l.length+1>${CODE_MAX_BYTES}){cut++;continue}bytes+=l.length+1;head.push(l)}` +
+    `if(cut>0)head.push("… "+cut+" more lines");w("${CODE_OPEN} "+Date.now()+"\\n"+df(head.join("\\n"))+"\\n${CODE_CLOSE}")}}` +
     `}return}` +
     `if(e.type==="user"&&e.message){for(const b of e.message.content||[]){` +
     // Cap the result, but SAY SO. Silently dropping the tail made a truncated listing look like the
@@ -348,11 +360,18 @@ export function claudeLaunchSh(resume: boolean): string {
   // for that long. Three seconds is enough for servers that work; a server that connects later
   // still joins the run, its tools arrive on a later turn.
   const mcpWait = `CLAUDE_CODE_MCP_STARTUP_WAIT_MS=${CLAUDE_MCP_WAIT_MS} `;
+  // Code mode (docs/plan-code-mode.md): when the installed config IS the code-mode wrapper — the
+  // install wrote it only after `server.js --check` passed — the model is told how to work with its
+  // two tools. Decided from the file, not the setting, so a box that fell back to the direct config
+  // is never told its MCP tools are hidden. Part of --append-system-prompt: it survives compaction.
+  const codeModePrompt =
+    `if grep -qsF ${CODE_MODE_SERVER} ${MCP_CONFIG_PATH} && [ -s ${CODE_MODE_PROMPT_PATH} ]; then ` +
+    `AGENT_SYS_PROMPT="$AGENT_SYS_PROMPT $(cat ${CODE_MODE_PROMPT_PATH})"; fi; `;
   const claude =
     `${mcpWait}claude ${cont}-p "$AGENT_TASK" ${settingSources} ${streamFmt} ${mcpFlag} ` +
     `--append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} ` +
     `$([ -s ${MCP_CONFIG_PATH} ] && printf -- '%s' "$(node -e 'const c=require(\"${MCP_CONFIG_PATH}\");process.stdout.write(Object.keys(c.mcpServers||{}).map(n=>\"mcp__\"+n).join(\" \"))')")`;
-  return `${claude} 2>> ${AGENT_LOG} | node "$HOME/.claude/stream-fmt.js" ${AGENT_LOG}; `;
+  return `${codeModePrompt}${claude} 2>> ${AGENT_LOG} | node "$HOME/.claude/stream-fmt.js" ${AGENT_LOG}; `;
 }
 
 /**

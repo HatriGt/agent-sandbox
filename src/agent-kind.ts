@@ -30,6 +30,22 @@ export interface AgentPrefs {
   defaultModel?: string;
   /** When Claude Code compacts the conversation on its own; absent = "standard" (its default). */
   autoCompact?: AutoCompactMode;
+  /**
+   * Code mode for MCP (docs/plan-code-mode.md): Claude Code reaches this owner's MCP servers through
+   * the in-box code-mode server (two tools, one script per job) instead of each server directly.
+   * Absent = off; only "on" is stored. Claude Code threads only (installMcpConfig).
+   */
+  codeMode?: "on";
+}
+
+/**
+ * Whether a run uses code mode: a per-run override ("on" / "off") wins over the owner's setting.
+ * There is no per-run override wired today (autoCompact, the pattern, is prefs-only), so callers
+ * pass undefined; the parameter is where one lands.
+ */
+export function codeModeEnabled(prefs: Pick<AgentPrefs, "codeMode"> | undefined, override?: "on" | "off"): boolean {
+  if (override === "on" || override === "off") return override === "on";
+  return prefs?.codeMode === "on";
 }
 
 /**
@@ -54,12 +70,15 @@ export const AGENT_PREFS_KIND = "agent-prefs";
  * an error (silently coercing a typo'd pick to claude would look like the setting didn't save).
  */
 export function normalizeAgentPrefs(raw: unknown): AgentPrefs {
-  const r = (raw ?? {}) as { defaultAgent?: unknown; defaultModel?: unknown; autoCompact?: unknown };
+  const r = (raw ?? {}) as { defaultAgent?: unknown; defaultModel?: unknown; autoCompact?: unknown; codeMode?: unknown };
   const model = modelOf(r.defaultModel);
+  if (r.codeMode !== undefined && r.codeMode !== null && r.codeMode !== "" && r.codeMode !== "on" && r.codeMode !== "off") {
+    throw new Error("codeMode must be one of: on, off");
+  }
   if (r.autoCompact !== undefined && r.autoCompact !== null && r.autoCompact !== "" && !isAutoCompactMode(r.autoCompact)) {
     throw new Error(`autoCompact must be one of: ${AUTO_COMPACT_MODES.join(", ")}`);
   }
-  const compact = compactOf(r.autoCompact);
+  const compact = { ...compactOf(r.autoCompact), ...codeModeOf(r.codeMode) };
   if (r.defaultAgent === undefined || r.defaultAgent === null || r.defaultAgent === "") {
     return { defaultAgent: "claude", ...model, ...compact };
   }
@@ -80,13 +99,23 @@ function compactOf(v: unknown): { autoCompact?: AutoCompactMode } {
   return isAutoCompactMode(v) && v !== "standard" ? { autoCompact: v } : {};
 }
 
+/** Off is the default and is not stored ("off" in a body clears it). */
+function codeModeOf(v: unknown): { codeMode?: "on" } {
+  return v === "on" ? { codeMode: "on" } : {};
+}
+
 /** The stored prefs for an owner; a missing/corrupt blob degrades to the default, never throws. */
 export function loadAgentPrefs(owner = ownerKey()): AgentPrefs {
   try {
     const raw = loadBlob(AGENT_PREFS_KIND, owner);
     if (!raw) return { defaultAgent: "claude" };
-    const parsed = JSON.parse(raw) as { defaultAgent?: unknown; defaultModel?: unknown; autoCompact?: unknown };
-    return { defaultAgent: isAgentKind(parsed.defaultAgent) ? parsed.defaultAgent : "claude", ...modelOf(parsed.defaultModel), ...compactOf(parsed.autoCompact) };
+    const parsed = JSON.parse(raw) as { defaultAgent?: unknown; defaultModel?: unknown; autoCompact?: unknown; codeMode?: unknown };
+    return {
+      defaultAgent: isAgentKind(parsed.defaultAgent) ? parsed.defaultAgent : "claude",
+      ...modelOf(parsed.defaultModel),
+      ...compactOf(parsed.autoCompact),
+      ...codeModeOf(parsed.codeMode),
+    };
   } catch {
     return { defaultAgent: "claude" };
   }

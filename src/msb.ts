@@ -1,4 +1,4 @@
-import { BAKED_MCP_PACKAGES } from "./package-watch.js";
+import { BAKED_MCP_PACKAGES, IMAGE_PINNED_PACKAGES } from "./package-watch.js";
 /**
  * Thin wrapper over the microsandbox CLI (`msb`), exposing only the operations the
  * orchestrator needs. Command shapes are the ones verified in docs/runbook.md.
@@ -20,7 +20,8 @@ import { MEMORY_ALL_MD, MEMORY_MD, memorySetup } from "./drivers/memory-tool.js"
 import { repoSlugFromUrl } from "./setup-store.js";
 import { harnessPromptHint, reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
-import { loadAgentPrefs, type AgentKind } from "./agent-kind.js";
+import { codeModeEnabled, loadAgentPrefs, type AgentKind } from "./agent-kind.js";
+import { CODE_MODE_DIR, CODE_MODE_SERVER, CODE_MODE_UPSTREAM_PATH, codeModeFiles, codeModeWrapperConfig } from "./code-mode/index.js";
 import {
   ASK_ALLOWED_TOOLS,
   ASK_DIR,
@@ -448,7 +449,7 @@ export function isOrphanWarmBox(name: string, state: string, inFlight: ReadonlyS
  * logs. Kept, because they are the point of warming: bun's transpile cache and the model catalog.
  */
 export const OMP_WARM_SCRUB_SH =
-  "rm -rf /root/.agent-mcp.json /root/.omp/agent/mcp.json /root/.claude/skills /root/.omp/agent/agent.db* " +
+  "rm -rf /root/.agent-mcp.json /root/.agent-mcp.upstream.json /root/.omp/agent/mcp.json /root/.claude/skills /root/.omp/agent/agent.db* " +
   "/root/.omp/agent/sessions /root/.omp/sessions /root/.omp/logs /root/.hdb /root/.mcp-auth /root/.npm/_logs " +
   "/root/.local/share/chrome-devtools-mcp /workspace/* /workspace/.[!.]* /tmp/* /root/.tmp/* 2>/dev/null; true";
 
@@ -952,8 +953,10 @@ export async function bakeAgentImage(cfg: Config, tag: string, extraNpx: string[
   if (!digest) throw new Error(`cannot resolve the digest of ${cfg.image}`);
   const repo = cfg.image.replace(/[:@].*$/, "");
   // The image is shared by every user, so it carries the list chosen for everyone
-  // (BAKED_MCP_PACKAGES), not the operator's own servers; `extraNpx` adds or pins more.
-  const df = agentImageDockerfile(cfg, `${repo}@${digest}`, bakeSpecOrder([...BAKED_MCP_PACKAGES], extraNpx), agent);
+  // (BAKED_MCP_PACKAGES), not the operator's own servers; `extraNpx` adds or pins more. The claude
+  // image also carries the pinned packages our own box programs load (IMAGE_PINNED_PACKAGES).
+  const pinned = agent === "claude" ? [...IMAGE_PINNED_PACKAGES, ...extraNpx] : extraNpx;
+  const df = agentImageDockerfile(cfg, `${repo}@${digest}`, bakeSpecOrder([...BAKED_MCP_PACKAGES], pinned), agent);
   const q = shellQuote(tag);
   const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, 'sh -c "$(cat)"'], {
     timeoutMs: 1_800_000,
@@ -1444,7 +1447,7 @@ const DEFANG_SENTINELS_SED = `sed -e 's/⟦/​⟦/g' -e 's/^●/​●/' -e 's/
 
 
 /** omp reads its user-level MCP servers from here (it does NOT read Claude's paths or a flag). */
-const OMP_MCP_CONFIG_PATH = "/root/.omp/agent/mcp.json";
+export const OMP_MCP_CONFIG_PATH = "/root/.omp/agent/mcp.json";
 
 /**
  * Write the enabled MCP servers into the box (or remove stale files when none are enabled). Runs
@@ -1523,6 +1526,93 @@ for (const file of process.argv.slice(1)) {
 if (dropped.size) console.log("mcp-drop:" + [...dropped].join(","));
 `;
 
+/**
+ * In-box writer for the code-mode files (argv = target dir; stdin = base64 of JSON
+ * [{name, contents}]). The files ride stdin, not argv: ~72 KB of server, and the ssh remote command
+ * that carries the script is one argument capped at ~128 KB (ExecOpts.input). Only the named files
+ * are written, so the server's remembered result shapes (shapes.json) in the same dir survive.
+ */
+export const CODE_MODE_WRITE_JS = String.raw`
+const fs = require("fs"), path = require("path");
+const dir = process.argv[1];
+fs.mkdirSync(dir, { recursive: true });
+for (const f of JSON.parse(Buffer.from(fs.readFileSync(0, "utf8"), "base64").toString("utf8"))) {
+  if (!/^[\w.-]+$/.test(f.name)) continue;
+  fs.writeFileSync(path.join(dir, f.name), f.contents);
+}
+`;
+
+/** What one install writes, decided on the controller; mcpInstallSh turns it into the one exec. */
+export interface McpInstallPlan {
+  /** The servers as Claude Code takes them (toClaudeMcpConfig). */
+  conf: { mcpServers: Record<string, unknown> };
+  /** npx packages to pre-install (npxPackagesOf). */
+  specs: string[];
+  /**
+   * Code mode (Claude Code only). `on`: the server files ride stdin (codeModePayload) and the
+   * wrapper replaces the direct config when `--check` passes. `unavailable`: the flag is on but the
+   * controller has no build to ship (a dev run from the TypeScript sources), so the box keeps the
+   * direct config and the note says why. Absent: off.
+   */
+  codeMode?: { on: true } | { unavailable: string };
+}
+
+/**
+ * The shell for one MCP install, in ONE exec (each exec is an SSH→msb→guest round trip on the
+ * task-start critical path): the direct config for Claude Code and omp, the npx pre-install, the
+ * npx→direct-bin rewrite and, with code mode on, the switch to the code-mode wrapper.
+ *
+ * Code mode keeps the direct config as a fallback that is ALREADY in place: the upstream file (the
+ * real servers, mode 600) is written next to it and goes through the same npx→bin rewrite (its
+ * servers are started by the code-mode server now, not by Claude Code); only when
+ * `server.js --check` passes is /root/.agent-mcp.json replaced by the wrapper. A failed check leaves
+ * the direct config and a `code-mode: fallback (<why>)` line in MCP_NOTES_PATH. omp's config always
+ * gets the direct servers: its handling of `alwaysLoad` and its MCP tool naming are unverified.
+ * Pure, for tests.
+ */
+export function mcpInstallSh(plan: McpInstallPlan): string {
+  const json = JSON.stringify(plan.conf);
+  const on = !!plan.codeMode && "on" in plan.codeMode;
+  const up = CODE_MODE_UPSTREAM_PATH;
+  const writes =
+    `printf '%s' ${shellQuote(json)} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH} && ` +
+    `mkdir -p /root/.omp/agent && printf '%s' ${shellQuote(json)} > ${OMP_MCP_CONFIG_PATH} && chmod 600 ${OMP_MCP_CONFIG_PATH}` +
+    // The upstream file is created 600 (umask in a subshell), never readable for a moment; with
+    // code mode off a stale one is removed, it holds the same secrets as the config.
+    (on
+      ? ` && (umask 077; printf '%s' ${shellQuote(JSON.stringify({ ...plan.conf, codeMode: { deny: [] } }))} > ${up}) && chmod 600 ${up}`
+      : `; rm -f ${up}`);
+  // First inside the braces: it reads the whole stdin, so nothing after it can eat the payload.
+  const files = on ? `node -e ${shellQuote(CODE_MODE_WRITE_JS)} ${CODE_MODE_DIR}; ` : "";
+  const direct = plan.specs.length
+    ? `; R="$R" D="$D" node -e ${shellQuote(MCP_DIRECT_BIN_JS)} ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH}${on ? ` ${up}` : ""} || true`
+    : "";
+  // Why a check failed: its own verdict line (sdk missing / config problem), else the first error,
+  // else its first line; one line, cut short, without parentheses that would end the note early.
+  let check = "";
+  if (on) {
+    check =
+      `; if CK=$(node ${CODE_MODE_SERVER} --check ${up} 2>&1); then printf '%s' ${shellQuote(JSON.stringify(codeModeWrapperConfig()))} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH}; ` +
+      `else W=$(printf '%s\\n' "$CK" | grep -m1 -E '^(sdk: missing|config:)|Error' || printf '%s\\n' "$CK" | grep -m1 .); ` +
+      `echo "code-mode: fallback ($(printf '%s' "\${W:-the check failed}" | tr -d '()' | cut -c1-200))"; fi`;
+  } else if (plan.codeMode && "unavailable" in plan.codeMode) {
+    check = `; echo ${shellQuote(`code-mode: fallback (${plan.codeMode.unavailable.replace(/[()\r\n]/g, " ").slice(0, 200)})`)}`;
+  }
+  // The install's decisions are kept in the box (MCP_NOTES_PATH) so the thread can show what the
+  // agent lacks — the watch probe reads them — and the bake's package manifest rides back on the
+  // same exec, so the controller learns what the box was born with without opening a snapshot.
+  return (
+    writes +
+    `; { ${files}${preinstallSh(plan.specs)}${direct}${check}; } > ${MCP_NOTES_PATH} 2>&1; cat ${MCP_NOTES_PATH}` +
+    `; echo "mcp-baked:$(tr -d '\\n' < ${BAKED_MANIFEST} 2>/dev/null)"`
+  );
+}
+
+/** The stdin payload for an install with code mode on (CODE_MODE_WRITE_JS reads it). */
+export function codeModePayload(files: Array<{ name: string; contents: string }>): string {
+  return Buffer.from(JSON.stringify(files), "utf8").toString("base64");
+}
+
 export async function installMcpConfig(cfg: Config, box: string): Promise<string[]> {
   try {
     const store = await loadMcpStore(cfg);
@@ -1533,29 +1623,25 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<string
     if (withheld.length) console.error(`[mcp] ${box}: kept out of the box (carries the controller's operator token): ${withheld.join(", ")}`);
     const conf = toClaudeMcpConfig(store, policy);
     if (!conf) {
-      await exec(cfg, box, `rm -f ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} ${MCP_NOTES_PATH}`);
+      await exec(cfg, box, `rm -f ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} ${CODE_MODE_UPSTREAM_PATH} ${MCP_NOTES_PATH}`);
       return [];
     }
-    const json = JSON.stringify(conf);
     const specs = npxPackagesOf(conf);
     wantStoredPackages(cfg, specs);
-    // ONE exec for the config writes, the package pre-install AND the npx→direct-bin rewrite: each
-    // exec is an SSH→msb→guest round trip on the task-start critical path.
-    const direct = specs.length
-      ? `; R="$R" D="$D" node -e ${shellQuote(MCP_DIRECT_BIN_JS)} ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} || true`
-      : "";
-    // The install's decisions are kept in the box (MCP_NOTES_PATH) so the thread can show what the
-    // agent lacks — the watch probe reads them — and the bake's package manifest rides back on the
-    // same exec, so the controller learns what the box was born with without opening a snapshot.
-    const r = await exec(
-      cfg,
-      box,
-      `printf '%s' ${shellQuote(json)} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH} && ` +
-        `mkdir -p /root/.omp/agent && printf '%s' ${shellQuote(json)} > ${OMP_MCP_CONFIG_PATH} && chmod 600 ${OMP_MCP_CONFIG_PATH}` +
-        `; { ${preinstallSh(specs)}${direct}; } > ${MCP_NOTES_PATH} 2>&1; cat ${MCP_NOTES_PATH}` +
-        `; echo "mcp-baked:$(tr -d '\\n' < ${BAKED_MANIFEST} 2>/dev/null)"`,
-      { timeoutMs: 300_000 }
-    );
+    // Code mode: the box OWNER's setting (the ambient owner, as for autoCompact). Claude Code only:
+    // omp's config path always gets the direct servers (mcpInstallSh).
+    let codeMode: McpInstallPlan["codeMode"];
+    let input: string | undefined;
+    if (codeModeEnabled(loadAgentPrefs())) {
+      try {
+        input = codeModePayload(codeModeFiles());
+        codeMode = { on: true };
+      } catch (e) {
+        codeMode = { unavailable: `the controller has no code-mode build: ${(e as Error).message}` };
+      }
+    }
+    // ONE exec for everything (mcpInstallSh); with code mode the server files ride its stdin.
+    const r = await exec(cfg, box, mcpInstallSh({ conf, specs, codeMode }), { timeoutMs: 300_000, ...(input !== undefined ? { input } : {}) });
     const out = r.stdout ?? "";
     const baked = out.match(/^mcp-baked:(\{.*\})\s*$/m);
     if (baked) rememberBaked(baked[1]);
@@ -1585,13 +1671,14 @@ function rememberBaked(json: string): void {
   if (Object.keys(m).length) bakedPackages = m;
 }
 
-/** mcp-skip:'spec' free=…k / mcp-fail:'spec' / mcp-drop:name,name → the last provision record. */
+/** mcp-skip:'spec' free=…k / mcp-fail:'spec' / mcp-drop:name,name / code-mode: fallback (why) → the last provision record. */
 export function rememberProvision(box: string, notes: readonly string[]): void {
   const specOf = (l: string) => (l.match(/^mcp-(?:skip|fail):'([^']+)'/)?.[1] ?? l.replace(/^mcp-(?:skip|fail):/, "").split(" ")[0].replace(/^'|'$/g, "")).trim();
   const skipped = notes.filter((l) => l.startsWith("mcp-skip:")).map(specOf);
   const failed = notes.filter((l) => l.startsWith("mcp-fail:")).map(specOf);
   const dropped = notes.filter((l) => l.startsWith("mcp-drop:")).flatMap((l) => l.slice("mcp-drop:".length).split(",").map((s) => s.trim()).filter(Boolean));
-  lastProvision = { at: Date.now(), box, skipped, failed, dropped };
+  const fallback = notes.map((l) => l.match(/^code-mode: fallback \((.*)\)$/)?.[1]).find((w) => w !== undefined);
+  lastProvision = { at: Date.now(), box, skipped, failed, dropped, ...(fallback !== undefined ? { codeModeFallback: fallback } : {}) };
 }
 
 export function mcpProvisionState(): { baked: Record<string, string>; last: LastProvision | undefined } {
@@ -1606,9 +1693,9 @@ export function mcpProvisionState(): { baked: Record<string, string>; last: Last
  */
 export const MCP_MIN_FREE_KB = 307_200;
 
-/** The `mcp-skip:` / `mcp-fail:` / `mcp-drop:` lines the in-box install prints, for the run log. */
+/** The `mcp-skip:` / `mcp-fail:` / `mcp-drop:` / `code-mode: fallback (…)` lines the in-box install prints, for the run log. */
 export function mcpInstallNotes(stdout: string): string[] {
-  return stdout.split("\n").map((l) => l.trim()).filter((l) => /^mcp-(skip|fail|drop):/.test(l));
+  return stdout.split("\n").map((l) => l.trim()).filter((l) => /^mcp-(skip|fail|drop):|^code-mode: fallback \(/.test(l));
 }
 
 /**

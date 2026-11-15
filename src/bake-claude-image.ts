@@ -6,6 +6,8 @@
  * Usage: node dist/bake-claude-image.js [tag]   (default: agent-claude:<yyyymmddhhmm>)
  * Extra MCP packages: BAKE_NPX=pkg@version,pkg@version (pin them: the box then never follows a
  * release the operator has not seen). After baking, set MSB_CLAUDE_IMAGE=<tag> in .env.
+ * The claude image also always carries IMAGE_PINNED_PACKAGES (src/package-watch.ts): the MCP SDK
+ * the code-mode server loads. An image baked before it lacks the SDK, and code mode falls back.
  */
 import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";

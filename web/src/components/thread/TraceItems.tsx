@@ -19,8 +19,9 @@ import { api } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { ATTACHMENT_RE, SessionReposContext, useSession } from "@/lib/session-context";
 import { SkillMark } from "@/lib/skillGlyph";
-import { parseMcpName } from "@/lib/mcp";
+import { parseCodeModeResult, parseMcpName } from "@/lib/mcp";
 import { McpItem } from "./McpItem";
+import { CodeModeItem } from "./CodeModeItem";
 import { TraceOutput, VisualRawSwitch, useOutputVisual } from "./TraceOutput";
 import { outputStats } from "@/lib/highlight";
 import { Lightbox } from "@/components/ui/lightbox";
@@ -432,7 +433,8 @@ function ToolItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const repeat = React.useContext(RepeatedPolls).has(event);
   if (repeat && !live) return <PollRow event={event} />;
   const mcp = parseMcpName(event.name);
-  if (mcp) return <McpItem event={event} call={mcp} live={live} />;
+  if (mcp?.codeMode === "run") return <CodeModeItem event={event} live={live} />;
+  if (mcp) return <McpItem event={event} call={mcp} live={live} asText={mcp.codeMode === "search"} />;
   if (event.name === "Skill") return <SkillItem event={event} live={live} />;
   return SHELL_TOOLS.has(event.name) ? <ShellItem event={event} live={live} /> : <StepItem event={event} live={live} />;
 }
@@ -517,7 +519,9 @@ export function toolFacts(events: ToolEvent[]): string[] {
   const mcpByServer = new Map<string, number>();
   for (const e of events) {
     const m = parseMcpName(e.name);
-    if (m) mcpByServer.set(m.server, (mcpByServer.get(m.server) ?? 0) + 1);
+    // Code mode: the calls its script made, per server; its own search is a lookup, not a call.
+    if (m?.codeMode === "run") for (const c of parseCodeModeResult(e.result).calls) mcpByServer.set(c.server, (mcpByServer.get(c.server) ?? 0) + 1);
+    else if (m && !m.codeMode) mcpByServer.set(m.server, (mcpByServer.get(m.server) ?? 0) + 1);
   }
   const skillsUsed = [...new Set(events.filter((e) => e.name === "Skill").map((e) => skillOf(e)).filter(Boolean))] as string[];
   const fileNames = [...files].map((f) => f.split("/").pop() ?? f);

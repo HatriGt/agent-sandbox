@@ -3,7 +3,7 @@ import { AlertTriangle, ChevronDown, FileSearch, Globe, Lightbulb, PencilLine, P
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { cn } from "@/lib/utils";
-import { parseMcpName } from "@/lib/mcp";
+import { mcpCallCount, parseMcpName, scriptHeadline, scriptServers } from "@/lib/mcp";
 import type { TraceEvent } from "@/lib/trace";
 import { useNow } from "@/hooks/useNow";
 import { Density, SPRING, ToolStepsList, formatDuration, notableTools, toolFacts, useExpandAll } from "./TraceItems";
@@ -23,6 +23,11 @@ const WRITE = /^(write|edit|multiedit|notebookedit|patch|apply_patch)$/i;
 /** The live label for a tool call in progress: present tense, the one thing the agent is doing. */
 function doingLabel(e: ToolEvent): { label: string; detail?: string } {
   const mcp = parseMcpName(e.name);
+  if (mcp?.codeMode === "run") {
+    const servers = scriptServers(e.code);
+    return { label: servers.length ? `Running a script on ${servers.join(", ")}` : "Running a script", detail: scriptHeadline(e.code ?? e.arg, 44) || undefined };
+  }
+  if (mcp?.codeMode === "search") return { label: "Looking up MCP tools", detail: e.arg || undefined };
   if (mcp) return { label: `Calling ${mcp.server}`, detail: mcp.tool };
   if (e.name === "Skill") return { label: "Running a skill", detail: e.arg?.match(/^[a-z0-9][a-z0-9-]{0,49}/)?.[0] };
   const first = (e.arg ?? "").split("\n")[0].trim();
@@ -42,11 +47,13 @@ function didLabel(events: ToolEvent[]): string {
   const shell = events.filter((e) => SHELL.test(e.name)).length;
   const writes = events.filter((e) => WRITE.test(e.name)).length;
   const reads = events.filter((e) => READ.test(e.name)).length;
-  const mcp = events.filter((e) => parseMcpName(e.name)).length;
+  const mcpSteps = events.filter((e) => parseMcpName(e.name)).length;
+  // Code mode: a script's inner calls are the external calls; its search is not one.
+  const mcp = mcpCallCount(events);
   if (writes && writes === n) return `Edited ${writes === 1 ? "a file" : `${writes} files`}`;
   if (shell && shell === n) return `Ran ${shell === 1 ? "a command" : `${shell} commands`}`;
   if (reads && reads === n) return `Explored ${reads === 1 ? "a file" : `${reads} files`}`;
-  if (mcp && mcp === n) return `Made ${mcp === 1 ? "an external call" : `${mcp} external calls`}`;
+  if (mcpSteps && mcpSteps === n) return mcp ? `Made ${mcp === 1 ? "an external call" : `${mcp} external calls`}` : "Looked up MCP tools";
   return `Took ${n === 1 ? "a step" : `${n} steps`}`;
 }
 

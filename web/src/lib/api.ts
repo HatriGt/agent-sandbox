@@ -102,6 +102,8 @@ export interface AgentPrefs {
   defaultModel?: string;
   /** When Claude Code compacts the conversation on its own; absent = "standard". */
   autoCompact?: "standard" | "early" | "off";
+  /** Code mode for MCP (docs/plan-code-mode.md): Claude reaches MCP servers through one script tool. Absent = off. */
+  codeMode?: "on";
   agents: AgentChoice[];
 }
 
@@ -187,7 +189,7 @@ export interface McpServersResponse {
   config: { mcpServers: Record<string, unknown> };
   /** Globally installed npm packages the boxes are born with (name → version), once a box has reported. */
   baked?: Record<string, string>;
-  lastProvision?: { at: number; box: string; skipped: string[]; failed: string[]; dropped: string[] } | null;
+  lastProvision?: { at: number; box: string; skipped: string[]; failed: string[]; dropped: string[]; codeModeFallback?: string } | null;
 }
 
 /** How an npx server's package reaches a box: baked into the image, installed every run, or left out of the last run. */
@@ -526,7 +528,7 @@ export interface HealthResponse {
   orphanSweep: { at: number; removed: string[]; freedMib?: number; error?: string } | null;
   startFailures: { streak: number; last?: { box: string; at: number; tail: string }; alertedAt: number };
   baked: Record<string, string>;
-  lastProvision: { at: number; box: string; skipped: string[]; failed: string[]; dropped: string[] } | null;
+  lastProvision: { at: number; box: string; skipped: string[]; failed: string[]; dropped: string[]; codeModeFallback?: string } | null;
   rebakeDue: { name: string; baked: string; latest: string }[];
   rebakeCheckedAt: number;
   /** Null for a signed-in user who is not an admin: where boxes boot from is the operator's business. */
@@ -1143,7 +1145,7 @@ export const api = {
   agentPrefs: (signal?: AbortSignal) =>
     fetch(url("/agent-prefs.json"), { headers: authHeaders, signal }).then(parse<AgentPrefs>),
   /** `defaultModel: ""` clears the preference (the agent's own default applies). */
-  saveAgentPrefs: (body: { defaultAgent: AgentId; allowPartialSupervision?: boolean; defaultModel?: string; autoCompact?: "standard" | "early" | "off" }) => post<AgentPrefs>("/agent-prefs.json", body),
+  saveAgentPrefs: (body: { defaultAgent: AgentId; allowPartialSupervision?: boolean; defaultModel?: string; autoCompact?: "standard" | "early" | "off"; codeMode?: "on" | "off" }) => post<AgentPrefs>("/agent-prefs.json", body),
 
   /** Model providers: the caller's own keys/endpoints. Keys come back masked only. */
   providers: (signal?: AbortSignal) => fetch(url("/providers.json"), { headers: authHeaders, signal }).then(parse<ProvidersResponse>),

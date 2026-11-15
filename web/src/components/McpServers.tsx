@@ -22,6 +22,7 @@ import { BrandGlyph } from "@/lib/brandIcon";
 import { fmtAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useTick, Verdict, type Mutate } from "@/components/mcp/Verdict";
+import { CodeModeSetting } from "@/components/mcp/CodeModeSetting";
 import { ServerSheet } from "@/components/mcp/ServerSheet";
 import { describe, errMsg, statusOf, type Health, type Status } from "@/components/mcp/model";
 
@@ -164,6 +165,7 @@ export function McpServers() {
           <EmptyState onAdd={() => setEditing({})} onPaste={() => setPasting(true)} />
         ) : (
           <div className="flex flex-col gap-3">
+            <CodeModeSetting data={cached.data ?? null} enabledServers={counts.on} />
             <DataTable
               aria-label="MCP servers"
               rows={visible}

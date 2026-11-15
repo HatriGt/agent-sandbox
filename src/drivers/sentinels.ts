@@ -66,6 +66,21 @@ export const DIFF_OPEN = "⟦diff⟧";
 export const DIFF_CLOSE = "⟦/diff⟧";
 
 /**
+ * Code mode's script (docs/plan-code-mode.md): a `mcp__code-mode__run` call's input is a whole
+ * JavaScript program, which a 200-char one-line headline arg cannot show. The formatter writes the
+ * script's first non-empty line as the headline and the script itself as `⟦code⟧ <ms>`…`⟦/code⟧`
+ * after the tool line; the trace parser attaches it to the tool event as `code`. Defanged like any
+ * model-produced block and capped like ⟦diff⟧ (lines, then bytes, the cut announced).
+ */
+export const CODE_OPEN = "⟦code⟧";
+export const CODE_CLOSE = "⟦/code⟧";
+export const CODE_MAX_LINES = 400;
+export const CODE_MAX_BYTES = 32768;
+/** The two tools the code-mode server exposes (src/code-mode/box/server.ts names them). */
+export const CODE_MODE_RUN = "mcp__code-mode__run";
+export const CODE_MODE_SEARCH = "mcp__code-mode__search";
+
+/**
  * Turn-end token usage, previously dropped on the floor: `⟦usage⟧ in=N out=N ctx=N`. `in`/`out` are
  * the turn's cumulative totals from the `result` frame (input + cache reads + cache writes); `ctx`
  * is the last request's context footprint — the "how full is the window" number the dashboard's

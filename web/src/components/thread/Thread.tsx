@@ -26,7 +26,7 @@ import type { ContextStatus } from "./ContextRing";
 import { useAutoCompactMode } from "@/hooks/useAutoCompactMode";
 import { compactInstructions, isCompactCommand } from "@/lib/compact";
 import { matchReplies, stampReply, type PendingReply } from "@/lib/replies";
-import { parseMcpName } from "@/lib/mcp";
+import { parseCodeModeResult, parseMcpName } from "@/lib/mcp";
 import { McpConnectItem } from "./McpItem";
 import { setPrefill } from "@/lib/draft";
 import { ChangedFilesCard, type ChangedEntry } from "./ChangedFilesTree";
@@ -1629,9 +1629,13 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
     const e = events[idx];
     if (e.kind === "tool") {
       const mcp = parseMcpName(e.name);
-      if (mcp && !seenServers.has(mcp.server)) {
-        seenServers.add(mcp.server);
-        out.push({ kind: "mcp-connect", server: mcp.server });
+      // Code mode's wrapper is not a server the operator configured: the servers its script reached
+      // get the hairline instead (known once the run's result lists its calls).
+      const servers = mcp?.codeMode === "run" ? parseCodeModeResult(e.result).calls.map((c) => c.server).filter(Boolean) : mcp && !mcp.codeMode ? [mcp.server] : [];
+      for (const server of servers) {
+        if (seenServers.has(server)) continue;
+        seenServers.add(server);
+        out.push({ kind: "mcp-connect", server });
       }
       const last = out[out.length - 1];
       if (last?.kind === "tools") last.events.push(e);
@@ -1825,7 +1829,12 @@ function mcpNotesText(notes: string[]): string {
     if (!n.startsWith("mcp-drop:")) continue;
     for (const name of n.slice("mcp-drop:".length).split(",").map((x) => x.trim()).filter(Boolean)) if (!why.has(name)) why.set(name, "not installed");
   }
-  if (why.size === 0) return "";
+  // `code-mode: fallback (<why>)`: code mode is on but its server could not start in this box, so
+  // the agent has the MCP servers directly, as with code mode off.
+  const fallback = notes.map((n) => n.match(/^code-mode: fallback \((.*)\)$/)?.[1]).find((w) => w !== undefined);
+  const codeMode = fallback !== undefined ? `Code mode is off for this run (${fallback || "its server did not start"}); MCP tools are used directly` : "";
+  if (why.size === 0) return codeMode;
   const list = [...why].map(([name, w]) => `${name} (${w})`).join(", ");
-  return `Running without ${why.size === 1 ? "an MCP server" : `${why.size} MCP servers`}: ${list}`;
+  const without = `Running without ${why.size === 1 ? "an MCP server" : `${why.size} MCP servers`}: ${list}`;
+  return codeMode ? `${without}. ${codeMode}` : without;
 }

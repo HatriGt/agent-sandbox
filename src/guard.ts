@@ -28,12 +28,13 @@ const CONTROL_PATHS = [
   /^(\/root|\/home\/[^/]+)?\/\.claude(\/|$)/, // hooks + settings that implement the pause/guard
   /^(\/root|\/home\/[^/]+)?\/\.claude\.json$/, // Claude Code's user config (MCP servers)
   /(^|\/)\.agent-mcp\.json$/, // MCP server secrets
+  /(^|\/)\.agent-mcp\.upstream\.json$/, // the same servers behind code mode (src/code-mode)
   /(^|\/)\.agent\.(log|task|run|done)$/, // the controller's channel (the question file is allowed)
   /(^|\/)\.git-credentials$/,
   /(^|\/)\.claimed$/,
 ];
 
-const SECRET_NAMES = /(GH_TOKEN|GITHUB_TOKEN|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|\.git-credentials|\.agent-mcp\.json|AGENT_SYS_PROMPT)/;
+const SECRET_NAMES = /(GH_TOKEN|GITHUB_TOKEN|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN|\.git-credentials|\.agent-mcp\.json|\.agent-mcp\.upstream\.json|AGENT_SYS_PROMPT)/;
 const NETWORK_TOOLS = /\b(curl|wget|nc|ncat|netcat|socat|scp|sftp|rsync|ssh|telnet|openssl\s+s_client|python3?\s+-c|node\s+-e|http\s)\b/;
 // `set` dumps only as a bare command; as a word it is everywhere (`echo '{"op":"set"}' | curl localhost`).
 const ENV_DUMP = /\b(printenv|env|export\s*$|declare\s+-x|cat\s+\/proc\/(self|\d+)\/environ)\b|(^|[;&|(]\s*)set\s*(\||$)/;

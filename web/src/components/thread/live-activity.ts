@@ -1,5 +1,5 @@
 import type { TraceEvent } from "@/lib/trace";
-import { parseMcpName } from "@/lib/mcp";
+import { parseMcpName, scriptServers } from "@/lib/mcp";
 
 const SHELL = /^(bash|shell|sh|zsh|powershell|pwsh|cmd|terminal|exec)$/i;
 const READ = /^(read|glob|grep|search|ls|cat|find)$/i;
@@ -16,6 +16,13 @@ export function liveActivity(events: TraceEvent[]): string | null {
   if (last.kind === "say") return "Writing";
   if (last.kind !== "tool" || (last.result !== undefined && !last.streaming)) return null;
   const mcp = parseMcpName(last.name);
+  if (mcp?.codeMode === "run") {
+    // The result (and with it the call count) only exists once the script is done; until then the
+    // script's literal call names say which servers it is reaching.
+    const servers = scriptServers(last.code);
+    return servers.length ? `Running a script on ${servers.join(", ")}` : "Running a script";
+  }
+  if (mcp?.codeMode === "search") return "Looking up MCP tools";
   if (mcp) return `Calling ${mcp.server}`;
   const first = (last.arg ?? "").split("\n")[0].trim();
   const file = first.split(/\s/)[0].split("/").pop();

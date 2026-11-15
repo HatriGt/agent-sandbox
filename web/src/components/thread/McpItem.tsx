@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
 
 /** Server identity chip on the dark ground: brighter tint, low-alpha fill, same hue every run. */
-function ServerChip({ server, live }: { server: string; live?: boolean }) {
+export function ServerChip({ server, live }: { server: string; live?: boolean }) {
   const hue = serverHue(server);
   const style = {
     "--srv": `oklch(0.78 0.13 ${hue})`,
@@ -39,7 +39,7 @@ function ServerChip({ server, live }: { server: string; live?: boolean }) {
 }
 
 /** Dashed connector chip → tool. Energy flows while the call is out. */
-function Connector({ live, failed }: { live?: boolean; failed?: boolean }) {
+export function Connector({ live, failed }: { live?: boolean; failed?: boolean }) {
   return (
     <svg className="h-2 w-5 shrink-0" viewBox="0 0 20 8" aria-hidden>
       <path
@@ -55,13 +55,21 @@ function Connector({ live, failed }: { live?: boolean; failed?: boolean }) {
   );
 }
 
-export function McpItem({ event, call, live }: { event: ToolEvent; call: McpCall; live?: boolean }) {
+/**
+ * `asText`: the result is prose-ish text, not data — code mode's `search` answers with `### mcp__…`
+ * signature blocks — so it is shown as mono text and summarised by how many tools it lists.
+ */
+export function McpItem({ event, call, live, asText }: { event: ToolEvent; call: McpCall; live?: boolean; asText?: boolean }) {
   const [open, setOpen] = React.useState(!!event.failed);
   React.useEffect(() => {
     if (event.failed) setOpen(true);
   }, [event.failed]);
   const hasOutput = !!event.result;
-  const view = React.useMemo(() => analyzeResult(event.result), [event.result]);
+  const view = React.useMemo<McpResultView>(
+    () => (asText ? (event.result?.trim() ? { kind: "text", text: event.result.trim() } : { kind: "empty" }) : analyzeResult(event.result)),
+    [event.result, asText]
+  );
+  const summary = asText ? toolListSummary(event.result) : mcpSummary(view);
   const { output, isJson } = React.useMemo(() => renderable(view, event.result ?? ""), [view, event.result]);
 
   return (
@@ -82,7 +90,7 @@ export function McpItem({ event, call, live }: { event: ToolEvent; call: McpCall
               <Check className="text-emerald-400/80 size-3" strokeWidth={2.5} aria-hidden />
               {/* The folded footer repeats this summary; on a phone the header has no room for it
                   twice (it was clipped against the step's duration column). */}
-              <span className="hidden sm:inline">{mcpSummary(view)}</span>
+              <span className="hidden sm:inline">{summary}</span>
             </span>
           )}
           {hasOutput && <PanelFold open={open} text={output} onToggle={() => setOpen((v) => !v)} />}
@@ -109,12 +117,18 @@ export function McpItem({ event, call, live }: { event: ToolEvent; call: McpCall
             )}
           >
             <span className="text-trace-fg/40 select-none">›</span>
-            <span className="truncate">{mcpSummary(view)}</span>
+            <span className="truncate">{summary}</span>
           </button>
         )}
       </div>
     </div>
   );
+}
+
+/** "6 tools" for a code-mode search answer (one `### mcp__…` heading per tool). */
+function toolListSummary(text: string | undefined): string {
+  const n = (text ?? "").split("\n").filter((l) => /^### mcp__/.test(l.trim())).length;
+  return n ? `${n} ${n === 1 ? "tool" : "tools"}` : mcpSummary(analyzeResult(text));
 }
 
 /**
@@ -165,7 +179,7 @@ export function McpConnectItem({ server }: { server: string }) {
 }
 
 /** The result as terminal text plus whether it should get JSON token coloring. */
-function renderable(view: McpResultView, raw: string): { output: string; isJson: boolean } {
+export function renderable(view: McpResultView, raw: string): { output: string; isJson: boolean } {
   switch (view.kind) {
     case "json":
       return { output: view.pretty, isJson: true };
