@@ -141,3 +141,8 @@ test("saveFile contents and names", () => {
   assert.equal(safeFileName("my file?.csv"), "my_file_.csv");
   assert.equal(safeFileName("../"), undefined);
 });
+
+test("formatRun: a thrown Error is not prefixed twice", () => {
+  assert.match(formatRun({ error: "Error: mcp__x__y: bad schema", logs: [], droppedLogChars: 0, calls: [] }), /^Error: mcp__x__y: bad schema$/m);
+  assert.doesNotMatch(formatRun({ error: "Error: boom", logs: [], droppedLogChars: 0, calls: [] }), /Error: Error:/);
+});

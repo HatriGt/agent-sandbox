@@ -85,11 +85,40 @@ export function skillByteSize(s: Pick<SkillDef, "content" | "files">): number {
 export function parseSkillStore(raw: string): SkillStore {
   try {
     const obj = JSON.parse(raw);
-    if (obj && typeof obj === "object" && obj.skills && typeof obj.skills === "object") return { skills: { ...obj.skills } };
+    if (obj && typeof obj === "object" && obj.skills && typeof obj.skills === "object") {
+      const skills: Record<string, SkillDef> = {};
+      for (const [k, s] of Object.entries(obj.skills as Record<string, SkillDef>)) skills[k] = { ...s, description: healDescription(s) };
+      return { skills };
+    }
   } catch {
     /* fall through */
   }
   return { skills: {} };
+}
+
+/** A description that is only a YAML block indicator (`>-`, `|`): an import from before the web
+ * parser read block scalars kept the marker and dropped the text. */
+const BLOCK_INDICATOR = /^[>|][+-]?$/;
+
+/**
+ * The description the index, the matcher and the box's SKILL.md use. A stored one that is empty or
+ * a bare block indicator is replaced by the body's first paragraph line, so the skill still says
+ * what it is for (on 2026-11-15 two such skills were auto-picked for a claims task on their names
+ * alone and the model read a PowerShell playbook that could not apply).
+ */
+export function healDescription(s: Pick<SkillDef, "description" | "content">): string {
+  const d = (s.description ?? "").trim();
+  if (d && !BLOCK_INDICATOR.test(d)) return d;
+  let fence = false;
+  const line = (s.content ?? "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => {
+      if (l.startsWith("```")) fence = !fence;
+      return !fence && l && !l.startsWith("#") && !l.startsWith("```") && !/^---/.test(l);
+    });
+  const first = (line ?? "").replace(/\s+/g, " ");
+  return first.length > 200 ? first.slice(0, 199) + "…" : first || d;
 }
 
 export function serializeSkillStore(store: SkillStore): string {

@@ -483,3 +483,37 @@ stream-json (`bench/code-mode/out/e2e-e2e-cm-1794729815/root/e2e/raw.jsonl`) re-
 headline only): `thread-oldlog-after-1440.png`. MCP page toggle: `mcp-off-light.png`,
 `mcp-on-light.png` and `mcp-on-dark.png` (on, with the rebake and fallback warnings mocked in through
 `.shots/cm-2b/mcp-shot.mjs`).
+
+### 12. First live run with the flag on (2026-11-15, box pool-1794739858887-eqtw8q)
+
+Task: "check in qa claims if any claim created in last 3 days", operator account, claude on
+`agent-claude:202611151009`, model ak-claude-opus-5.5-low. Wrapper installed (no fallback note),
+`search` once, `run` three times (5 upstream calls, one failed on the upstream's own schema-name
+validation), answer correct, 21 s wall clock. Compared with the same task run direct the same morning
+(box pool-1794737836746-uf7w74, two turns):
+
+| | direct | code mode |
+|---|---|---|
+| context at session start | 56.6k | 26.1k |
+| context at the end | 66.2k | 42.4k |
+| input tokens, whole run (`⟦usage⟧ in`) | 413k | 256k |
+| output tokens | 2.2k | 2.2k |
+
+The 30k the direct run carries on every request is the MCP tool definitions of the four servers
+(the HANA server alone has 34 tools; Claude Code's ToolSearch deferral did not drop them for this
+account). What the run surfaced, and what changed because of it:
+
+- `search` listed three unavailable servers with their whole error bodies (two Cloudflare 530 pages,
+  one JSON-RPC error): ~1.2k tokens repeated in every search. `briefError()` in server.ts now keeps
+  the status and title only (`HTTP: 530 Error 1033: Cloudflare Tunnel error`).
+- A thrown call came back as `Error: Error: mcp__…: Invalid schema name` (the child names the error,
+  `formatRun` named it again). Fixed.
+- The model hedged on the result shape (`t.structuredContent?.rows ?? t`): the search header now
+  says `call()` resolves to the structured result's fields directly, and that a failed call throws.
+- The skill picker suggested `atom-qa-curl` and `create-deal` (name words "qa" and "create" matched
+  alone; both skills had a bare `>-` description from an old import), and the model read the first
+  (a PowerShell curl playbook): 6.3k tokens carried through six more requests, ~15% of the run's
+  input. `parseSkillStore` heals such descriptions from the body, and `matchSkills` needs two
+  distinct stems or a trigger phrase before it suggests a skill (src/skill-match.ts).
+- Not ours: `deal-hana-btp` fails with "Invalid Compact JWS" (the token in the operator's MCP config)
+  and the three `s4-*` tunnels were down. Both should show on the MCP page as failing servers.

@@ -200,7 +200,8 @@ export interface RunOutcome {
  */
 export function formatRun(o: RunOutcome): string {
   const out: string[] = [];
-  if (o.error) out.push(`Error: ${o.error}`);
+  // The child already names a thrown error ("Error: x", "TypeError: y"); do not double the generic name.
+  if (o.error) out.push(o.error.startsWith("Error: ") ? o.error : `Error: ${o.error}`);
   else if (o.value === undefined) out.push("(the script returned nothing; `return` the value you need)");
   else {
     let parsed: unknown;

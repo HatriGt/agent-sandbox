@@ -78,30 +78,46 @@ export function triggerPhrases(description: string): string[] {
  * keywords 1; each distinct stem counts once, so a long description cannot win on volume alone.
  */
 export function scoreSkill(task: string, skill: SkillLike): number {
+  return scoreSkillDetail(task, skill).score;
+}
+
+/**
+ * The score plus what it rests on: how many distinct stems matched and whether a trigger phrase
+ * did. matchSkills needs the breakdown — a single generic name word ("qa", "create") reaches the
+ * threshold on its own, which is how a claims task got a PowerShell curl skill suggested.
+ */
+export function scoreSkillDetail(task: string, skill: SkillLike): { score: number; hits: number; phrase: boolean } {
   const taskStems = new Set(keyStems(task));
   const taskLine = stemLine(task);
-  if (!taskStems.size) return 0;
+  if (!taskStems.size) return { score: 0, hits: 0, phrase: false };
   let score = 0;
+  let hits = 0;
+  let phrase = false;
   const counted = new Set<string>();
   for (const s of keyStems(skill.name.replace(/-/g, " "))) {
-    if (!counted.has(s) && taskStems.has(s)) score += 3;
+    if (!counted.has(s) && taskStems.has(s)) (score += 3), hits++;
     counted.add(s);
   }
   for (const p of triggerPhrases(skill.description)) {
     const line = stemLine(p).trim();
     if (line && taskLine.includes(` ${line} `)) {
       score += 4;
+      phrase = true;
       for (const s of line.split(" ")) counted.add(s);
     }
   }
   for (const s of keyStems(skill.description)) {
-    if (!counted.has(s) && taskStems.has(s)) score += 1;
+    if (!counted.has(s) && taskStems.has(s)) (score += 1), hits++;
     counted.add(s);
   }
-  return score;
+  return { score, hits, phrase };
 }
 
-/** The skills whose score clears the threshold, best first (ties by name), at most MATCH_MAX. */
+/**
+ * The skills whose score clears the threshold, best first (ties by name), at most MATCH_MAX. A
+ * pick also needs a quoted trigger phrase or two distinct matching stems: one name word alone
+ * ("qa" in atom-qa-curl, "create" in create-deal) is a coincidence, not a match.
+ */
 export function matchSkills(
   task: string,
   skills: SkillLike[],
@@ -109,8 +125,9 @@ export function matchSkills(
 ): Array<{ name: string; score: number }> {
   const threshold = opts.threshold ?? MATCH_THRESHOLD;
   return skills
-    .map((s) => ({ name: s.name, score: scoreSkill(task, s) }))
-    .filter((m) => m.score >= threshold)
+    .map((s) => ({ name: s.name, ...scoreSkillDetail(task, s) }))
+    .filter((m) => m.score >= threshold && (m.phrase || m.hits >= 2))
+    .map(({ name, score }) => ({ name, score }))
     .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
     .slice(0, opts.max ?? MATCH_MAX);
 }

@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import {
   normalizeSkill,
   toSkillMd,
+  healDescription,
+  parseSkillStore,
   enabledSkills,
   viewSkills,
   parseSkillStore,
@@ -124,4 +126,18 @@ test("store JSON round-trips and garbage parses to empty", () => {
   assert.deepEqual(back, store);
   assert.deepEqual(parseSkillStore("not json"), { skills: {} });
   assert.deepEqual(parseSkillStore("[1,2]"), { skills: {} });
+});
+
+test("parseSkillStore heals a description that is only a YAML block indicator", () => {
+  const raw = JSON.stringify({
+    skills: {
+      "atom-qa-curl": { name: "atom-qa-curl", description: ">-", content: "# ATOM QA curl\n\nRun authenticated curls against any app on any ATOM QA launchpad.\n", enabled: true, addedAt: 1, updatedAt: 1 },
+      fine: { name: "fine", description: "Use when deploying.", content: "# Deploy\n\nSteps.", enabled: true, addedAt: 1, updatedAt: 1 },
+    },
+  });
+  const store = parseSkillStore(raw);
+  assert.equal(store.skills["atom-qa-curl"].description, "Run authenticated curls against any app on any ATOM QA launchpad.");
+  assert.equal(store.skills.fine.description, "Use when deploying.");
+  assert.match(toSkillMd(store.skills["atom-qa-curl"]), /^---\nname: atom-qa-curl\ndescription: "Run authenticated curls/);
+  assert.equal(healDescription({ description: "|", content: "```\ncode\n```\n" }), "|");
 });

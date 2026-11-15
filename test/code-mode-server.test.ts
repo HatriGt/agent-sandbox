@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { parseConfig } from "../src/code-mode/box/server.ts";
+import { briefError, parseConfig } from "../src/code-mode/box/server.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const serverTs = join(root, "src", "code-mode", "box", "server.ts");
@@ -219,4 +219,13 @@ test("box modules import only each other, node built-ins and (type-only) the SDK
       assert.ok(ok, `${f} imports ${spec}`);
     }
   }
+});
+
+test("briefError keeps the status and title of a JSON error body and drops the rest", () => {
+  const cf = 'Streamable HTTP error: Error POSTing to endpoint: {"type":"https://developers.cloudflare.com/x","title":"Error 1033: Cloudflare Tunnel error","status":530,"detail":"The host is configured as a Cloudflare Tunnel, but Cloudflare is currently unable to reach it.","instance":"a5","ray_id":"a5adca73ddedf89e","timestamp":"2026-11-15T11:07:11Z","zone":"s4-qa.example","retryable":true}';
+  assert.equal(briefError(cf), "HTTP: 530 Error 1033: Cloudflare Tunnel error");
+  const rpc = 'Streamable HTTP error: Error POSTing to endpoint: {"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid Compact JWS"}}';
+  assert.equal(briefError(rpc), "HTTP: -32600 Invalid Compact JWS");
+  assert.equal(briefError("spawn npx ENOENT\n  at x"), "spawn npx ENOENT at x");
+  assert.equal(briefError("x".repeat(300)).length, 160);
 });

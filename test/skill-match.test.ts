@@ -89,3 +89,17 @@ test("every driver's prompt assembly appends the skills index and the skill hint
     }
   }
 });
+
+test("one generic name word alone does not pick a skill; two stems or a phrase do", () => {
+  const skills = [
+    { name: "atom-qa-curl", description: "Run authenticated curls against any app on any ATOM QA launchpad." },
+    { name: "create-deal", description: "Open a deal in the deal app." },
+    { name: "atom-hana-schema", description: "Use when exploring the claim, deal or capacity database of any atom application in HANA." },
+  ];
+  // 2026-11-15: "qa" and "created" matched the first two on their names alone (score 3 = threshold).
+  const picks = matchSkills("check in qa claims if any claim created in last 3 days", skills).map((m) => m.name);
+  assert.deepEqual(picks, []);
+  assert.deepEqual(matchSkills("explore the hana schema for claims", skills).map((m) => m.name), ["atom-hana-schema"]);
+  assert.deepEqual(matchSkills("curl the qa launchpad", skills).map((m) => m.name), ["atom-qa-curl"]);
+  assert.deepEqual(matchSkills("deploy it", [{ name: "deploy-x", description: 'Use when asked to "deploy it".' }]).map((m) => m.name), ["deploy-x"]);
+});

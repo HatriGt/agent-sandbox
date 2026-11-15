@@ -185,7 +185,7 @@ class Upstream {
       })
       .catch((e: unknown) => {
         this.state = "failed";
-        this.error = String((e as Error)?.message ?? e).slice(0, 600);
+        this.error = briefError(String((e as Error)?.message ?? e));
         this.attempts++;
         const backoff = Math.min(30_000, 1000 * 2 ** this.attempts);
         this.retryAt = Date.now() + backoff;
@@ -259,7 +259,34 @@ class Upstream {
 // The session
 
 const HOW_TO =
-  'Call these from mcp__code-mode__run: `const r = await call("mcp__server__tool", { ...args });`, then filter in the script and return only what the task needs.';
+  'Call these from mcp__code-mode__run: `const r = await call("mcp__server__tool", { ...args });`, then filter in the script and return only what the task needs. ' +
+  "call() resolves to the tool's structured result when it has one (use its fields directly: r.rows, not r.structuredContent.rows), else to its text parsed as JSON when it is JSON, else the text; a failed call throws, so wrap a call you can do without in try/catch.";
+
+/**
+ * An upstream's connect error, short enough to repeat in every search result. Transport errors
+ * arrive as a sentence wrapped around a whole JSON body (a Cloudflare 530 page is 600+ chars); keep
+ * the status, the title or message, and drop the rest.
+ */
+export function briefError(message: string): string {
+  let m = message.replace(/\s+/g, " ").trim();
+  const open = m.indexOf("{");
+  const close = m.lastIndexOf("}");
+  if (open >= 0 && close > open) {
+    try {
+      const j = JSON.parse(m.slice(open, close + 1)) as Record<string, unknown>;
+      const err = j.error && typeof j.error === "object" ? (j.error as Record<string, unknown>) : undefined;
+      const status = j.status ?? err?.code;
+      const title = j.title ?? j.message ?? err?.message ?? j.detail;
+      if (status !== undefined || title !== undefined) {
+        const head = m.slice(0, open).replace(/Streamable HTTP error: Error POSTing to endpoint:?/i, "HTTP:").trim();
+        m = `${head} ${[status, title].filter((x) => x !== undefined).join(" ")}`.trim();
+      }
+    } catch {
+      /* not JSON: keep the sentence */
+    }
+  }
+  return m.length > 160 ? m.slice(0, 159) + "…" : m;
+}
 
 export interface Paths {
   /** Where remembered result shapes persist across server processes (`claude -c` starts a new one). */
