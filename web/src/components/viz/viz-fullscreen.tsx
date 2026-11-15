@@ -73,7 +73,7 @@ export function VizFullscreen({
   const zoomBy = React.useCallback((f: number) => setView((v) => ({ ...v, scale: Math.min(MAX, Math.max(MIN, v.scale * f)) })), []);
   const canvas = mode === "canvas";
   const zoomable = canvas && !ownsZoom;
-  const btn = "viz-press text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default disabled:opacity-40";
+  const btn = "viz-press text-muted-foreground hover:text-foreground hover:bg-foreground/8 grid size-7 cursor-pointer place-items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default disabled:opacity-40";
   return (
     <VizFullscreenContext.Provider value>
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -83,7 +83,7 @@ export function VizFullscreen({
         // Opens from 0.98 + fade, no travel; closes softer (back to 0.98). Blocks that own their zoom
         // (the xyflow canvas) fade only: a scale-in makes them fit-view a shrunken box mid-animation.
         className={cn(
-          "h-[92dvh] max-h-[92dvh] w-[96vw] max-w-none sm:w-[96vw] data-[state=open]:slide-in-from-bottom-0",
+          "viz-card h-[92dvh] max-h-[92dvh] w-[96vw] max-w-none rounded-[20px] border-0 bg-(--viz-ground) sm:w-[96vw] dark:border-0 data-[state=open]:slide-in-from-bottom-0",
           ownsZoom ? "data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100" : "data-[state=open]:zoom-in-98 data-[state=closed]:zoom-out-98"
         )}
         bodyClassName="flex flex-col overflow-hidden p-0"
@@ -110,13 +110,13 @@ export function VizFullscreen({
           <>
             {actions && <span className="mr-1 flex items-center gap-0.5">{actions}</span>}
             {zoomable && (
-              <div className="bg-muted/50 mr-1 flex items-center gap-0.5 rounded-lg border p-0.5" role="group" aria-label="Zoom">
+              <div className="viz-pill mr-1 flex items-center gap-0.5 rounded-full p-0.5" role="group" aria-label="Zoom">
                 <button type="button" className={btn} onClick={() => zoomBy(1 / STEP)} disabled={view.scale <= MIN} aria-label="Zoom out" title="Zoom out (−)">
                   <Minus className="size-3.5" strokeWidth={1.75} />
                 </button>
                 <button
                   type="button"
-                  className="text-muted-foreground hover:text-foreground w-11 cursor-pointer rounded-md text-center text-micro font-medium tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
+                  className="text-muted-foreground hover:text-foreground w-11 cursor-pointer rounded-full text-center text-micro font-medium tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
                   onClick={() => setView(FIT)}
                   aria-live="polite"
                   aria-label="Reset zoom"
@@ -142,7 +142,7 @@ export function VizFullscreen({
         {!canvas ? (
           <FlowPane>{children}</FlowPane>
         ) : ownsZoom ? (
-          <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+          <div className="viz-tile mx-1 mb-1 min-h-0 flex-1 overflow-hidden rounded-[16px]">{children}</div>
         ) : (
           <ZoomPane view={view} setView={setView} zoomBy={zoomBy}>
             {children}
@@ -162,7 +162,7 @@ export function VizFullscreen({
  */
 function FlowPane({ children }: { children: React.ReactNode }) {
   return (
-    <div className="viz-swap flex min-h-0 flex-1 flex-col overflow-auto" style={{ "--viz-full": "calc(92dvh - 2.75rem)" } as React.CSSProperties}>
+    <div className="viz-tile viz-swap mx-1 mb-1 flex min-h-0 flex-1 flex-col overflow-auto rounded-[16px]" style={{ "--viz-full": "calc(92dvh - 3rem)" } as React.CSSProperties}>
       {children}
     </div>
   );
@@ -202,7 +202,7 @@ function ZoomPane({
   return (
     <div
       ref={ref}
-      className="viz-canvas-ground relative min-h-0 flex-1 cursor-grab touch-none overflow-hidden select-none active:cursor-grabbing"
+      className="viz-tile viz-canvas-ground relative mx-1 mb-1 min-h-0 flex-1 cursor-grab touch-none overflow-hidden rounded-[16px] select-none active:cursor-grabbing"
       data-panned={panned || undefined}
       onPointerDown={(e) => {
         if (e.button !== 0 || (e.target as HTMLElement).closest("button,a,input,[role=button]")) return;
@@ -224,10 +224,10 @@ function ZoomPane({
     >
       <div className="absolute inset-0 grid place-items-center overflow-visible p-8">
         <div
-          className={cn("bg-card w-full max-w-[min(100%,64rem)] origin-center rounded-xl border shadow-e2", !panned && "viz-swap")}
+          className={cn("viz-card w-full max-w-[min(100%,64rem)] origin-center p-1 shadow-e2", !panned && "viz-swap")}
           style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
         >
-          {children}
+          <div className="viz-tile overflow-hidden rounded-xl">{children}</div>
         </div>
       </div>
       <p className="text-faint pointer-events-none absolute right-3 bottom-2 text-micro tabular-nums select-none" aria-hidden>

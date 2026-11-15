@@ -191,8 +191,8 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
                   onClick={() => setFilter((f) => (f === lv ? null : lv))}
                   aria-pressed={filter === lv}
                   className={cn(
-                    "viz-press inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-full border px-2 text-micro font-medium tabular-nums transition-[color,background-color,border-color] duration-150 ease-(--viz-ease) outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
-                    filter === lv ? "bg-muted text-foreground border-line-strong" : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
+                    "viz-press viz-pill inline-flex h-6 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-micro font-medium tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                    filter === lv ? "text-foreground" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
                   <span aria-hidden className="size-1.5 rounded-full" style={{ background: LEVEL_HUE[lv] }} />

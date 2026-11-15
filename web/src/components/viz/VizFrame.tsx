@@ -45,11 +45,13 @@ export function VizSkeleton({ language }: { language: string }) {
     []
   );
   return (
-    <div className="bg-card not-prose viz-swap my-3 overflow-hidden rounded-xl border" aria-busy="true" data-viz-skeleton={language}>
-      <div className="flex h-8 items-center border-b px-3">
-        <span className="shimmer-text text-micro font-medium">{SKELETON_TITLE[language] ?? "Drawing"}…</span>
+    <div className="viz-card not-prose viz-swap my-3 p-1" aria-busy="true" data-viz-skeleton={language}>
+      <div className="flex h-8 items-center pl-2.5">
+        <span className="shimmer-text text-meta font-medium">{SKELETON_TITLE[language] ?? "Drawing"}…</span>
       </div>
-      <VizShimmer tall={tall} />
+      <div className="viz-tile overflow-hidden rounded-xl">
+        <VizShimmer tall={tall} />
+      </div>
     </div>
   );
 }
@@ -149,8 +151,9 @@ export function VizShimmer({ tall }: { tall: boolean }) {
 }
 
 /**
- * The shared card every visualizer sits in: hairline border (no shadow — one elevation cue per
- * surface), a quiet header with an optional title, copy-source, and a raw toggle that swaps the
+ * The shared card every visualizer sits in: a tonal step off the page (no hairline, no shadow —
+ * the tone is the edge), a 32px header with the title in ink and the utilities, and the body on a
+ * lighter tile inset 4px with a concentric radius. Copy-source and a raw toggle swap the
  * rendered view for the original fence text. The raw view is the trust anchor: nothing the
  * beautifier draws is more authoritative than what the agent actually wrote. Maximize opens the
  * same body in a fullscreen dialog with zoom (viz-fullscreen.tsx); `ownsZoom` blocks draw their own.
@@ -206,9 +209,9 @@ export function VizFrame({
     }
   };
   return (
-    <div className={cn("group/viz bg-card not-prose my-3 overflow-hidden rounded-xl border", !filling && "viz-frame-in", className)} data-live-slot={slot ?? undefined}>
-      <div className="flex h-8 items-center gap-0.5 border-b pr-1 pl-3">
-        <span className="text-muted-foreground min-w-0 flex-1 truncate text-micro font-medium tabular-nums">{title ?? slotTitle}</span>
+    <div className={cn("group/viz viz-card not-prose my-3 p-1", !filling && "viz-frame-in", className)} data-live-slot={slot ?? undefined}>
+      <div className="flex h-8 items-center gap-0.5 pr-0.5 pl-2.5">
+        <span className="text-foreground min-w-0 flex-1 truncate text-meta font-medium tabular-nums">{title ?? slotTitle}</span>
         <LiveSlotBadge />
         {actions}
         {/* Utility controls stay quiet until the card is engaged (index.css .viz-ctl). */}
@@ -234,17 +237,19 @@ export function VizFrame({
         )}
       </div>
       {/* Keyed wrapper: raw ⇄ rendered cross-fades through a 2px blur (the old view leaves at once). */}
-      {raw ? (
-        <div key="raw" className="viz-swap">
-          <CodeBlock className="my-0 rounded-none border-0">
-            <CodeBlockCode code={source} language={rawLanguage} />
-          </CodeBlock>
-        </div>
-      ) : (
-        <div key="viz" className={cn((toggled || filling) && "viz-swap")}>
-          {children}
-        </div>
-      )}
+      <div className="viz-tile overflow-hidden rounded-xl">
+        {raw ? (
+          <div key="raw" className="viz-swap">
+            <CodeBlock className="my-0 rounded-none border-0 bg-transparent">
+              <CodeBlockCode code={source} language={rawLanguage} />
+            </CodeBlock>
+          </div>
+        ) : (
+          <div key="viz" className={cn((toggled || filling) && "viz-swap")}>
+            {children}
+          </div>
+        )}
+      </div>
       {full && (
         <VizFullscreen open={full} onOpenChange={setFull} title={title ?? slotTitle ?? "Visualization"} mode={fullscreen} ownsZoom={ownsZoom} actions={actions}>
           {children}

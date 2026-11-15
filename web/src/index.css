@@ -168,6 +168,12 @@
   --trace: oklch(0.2 0.006 286);
   --trace-fg: oklch(0.93 0.003 286);
 
+  /* Visual-block surfaces (components/viz): a card is a tonal step off the page, no hairline; the
+     data inside it sits on a lighter tile. Relative to the page, so every theme gets its own step. */
+  --viz-ground: color-mix(in oklab, var(--foreground) 4.5%, var(--background));
+  --viz-tile: var(--card);
+  --viz-hairline: oklch(0 0 0 / 0.06);
+
   --faint: oklch(0.555 0.012 286);
   --shade-1: oklch(0 0 0 / 0.1);
   --shade-2: oklch(0 0 0 / 0.14);
@@ -221,6 +227,10 @@
 
   --trace: oklch(0.12 0.004 286);
   --trace-fg: oklch(0.9 0.004 286);
+
+  --viz-ground: color-mix(in oklab, var(--foreground) 5%, var(--background));
+  --viz-tile: color-mix(in oklab, var(--foreground) 10%, var(--background));
+  --viz-hairline: oklch(1 0 0 / 0.07);
 
   --faint: oklch(0.62 0.012 286);
   --shade-1: oklch(0 0 0 / 0.4);
@@ -1630,13 +1640,36 @@
   animation: viz-tip-in 125ms var(--viz-ease) backwards;
 }
 
-/* Hue-tinted pill (severity, status, delta, semver jump): the callout recipe at chip size — a few
-   percent of the hue over the card, a hairline in the same hue, ink in the hue's text token. */
+/* Hue-tinted pill (severity, status, delta, semver jump): a tonal wash of the hue, ink in the
+   hue's text token, no hairline — the chip is a tint of its ground, not a box drawn on it. */
 @layer components {
   .viz-tone {
     color: var(--tone-ink, var(--tone));
-    background-color: color-mix(in oklab, var(--tone) 9%, transparent);
-    border: 1px solid color-mix(in oklab, var(--tone) 24%, transparent);
+    background-color: color-mix(in oklab, var(--tone) 12%, transparent);
+  }
+  /* The block card and the tile inside it (VizFrame, the fullscreen sheet, the self-drawn list
+     cards). Hairlines on a tile are lighter than the page's: the tile already separates. */
+  .viz-card {
+    background: var(--viz-ground);
+    border-radius: 1rem;
+  }
+  .viz-tile {
+    --border: var(--viz-hairline);
+    background: var(--viz-tile);
+  }
+  /* A tonal pill control (level chips, status badges, the sheet's tools): rests at a few percent
+     of ink, deepens on hover, the pressed one holds more. */
+  .viz-pill {
+    background-color: color-mix(in oklab, var(--foreground) 5%, transparent);
+    transition: color var(--dur-fast) var(--viz-ease), background-color var(--dur-fast) var(--viz-ease);
+  }
+  .viz-pill:hover {
+    background-color: color-mix(in oklab, var(--foreground) 9%, transparent);
+  }
+  .viz-pill[aria-pressed="true"],
+  .viz-pill[data-state="open"] {
+    background-color: color-mix(in oklab, var(--foreground) 12%, transparent);
+    color: var(--foreground);
   }
 }
 
@@ -1983,7 +2016,7 @@ th[data-drop]::after {
 th[data-drop="before"]::after { left: -1px; }
 th[data-drop="after"]::after { right: -1px; }
 .viz-canvas-ground {
-  background-color: var(--popover);
+  background-color: var(--viz-tile);
   background-image: radial-gradient(color-mix(in oklab, var(--border) 80%, transparent) 1px, transparent 1.5px);
   background-size: 16px 16px;
   background-position: 8px 8px;

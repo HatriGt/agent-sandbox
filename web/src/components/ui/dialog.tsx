@@ -60,7 +60,7 @@ function DialogContent({
       >
         {/* Grab handle: only on the phone sheet, purely visual. */}
         <div className="bg-border mx-auto mt-2 h-1 w-9 shrink-0 rounded-full sm:hidden" aria-hidden />
-        <div className={cn("bg-popover sticky top-0 z-10 flex shrink-0 gap-3", dense ? "h-11 items-center border-b pr-2 pl-4" : "items-start px-6 pt-5 pb-4 sm:pt-6")}>
+        <div className={cn("bg-popover sticky top-0 z-10 flex shrink-0 gap-3", dense ? "h-11 items-center bg-transparent pr-2 pl-4" : "items-start px-6 pt-5 pb-4 sm:pt-6")}>
           <div className="min-w-0 flex-1">
             <DialogPrimitive.Title className={dense ? "text-foreground truncate text-meta font-medium tabular-nums" : "text-foreground text-h3 font-semibold tracking-[-0.01em]"}>{title}</DialogPrimitive.Title>
             {description && <DialogPrimitive.Description className="text-muted-foreground mt-1 text-meta">{description}</DialogPrimitive.Description>}

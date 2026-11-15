@@ -31,7 +31,7 @@ export function listItemTexts(children: React.ReactNode): string[] | null {
 export function DefinitionListBlock({ items }: { items: Definition[] }) {
   const entrance = useRowEntrance(items.map((d) => d.term));
   return (
-    <dl className="viz-frame-in bg-card not-prose my-3 grid grid-cols-[minmax(6rem,max-content)_1fr] overflow-hidden rounded-xl border @max-[26rem]:grid-cols-1">
+    <dl className="viz-frame-in viz-card not-prose my-3 grid grid-cols-[minmax(6rem,max-content)_1fr] overflow-hidden @max-[26rem]:grid-cols-1">
       {items.map((d, i) => {
         const e = entrance(d.term);
         // Each pair is one row with a shared hairline above it; the term column stays aligned.
@@ -59,7 +59,7 @@ export function StatusListBlock({ items }: { items: StatusItem[] }) {
   const tally = (["ok", "fail", "warn", "pending"] as const).map((s) => [s, items.filter((i) => i.state === s).length] as const).filter(([, n]) => n > 0);
   const entrance = useRowEntrance(items.map((_, i) => String(i)));
   return (
-    <div className="viz-frame-in bg-card not-prose my-3 overflow-hidden rounded-xl border">
+    <div className="viz-frame-in viz-card not-prose my-3 overflow-hidden">
       <ul className="m-0 list-none p-0">
         {items.map((it, i) => {
           const s = STATE[it.state];

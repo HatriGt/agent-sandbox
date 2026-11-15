@@ -98,7 +98,7 @@ export function BadgesBlock({ badges, source }: { badges: Badge[]; source: strin
         {badges.map((b) => {
           const e = entrance(b.label);
           return (
-            <span key={b.label} style={e.style} className={cn(e.className, "inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-micro")}>
+            <span key={b.label} style={e.style} className={cn(e.className, "viz-pill inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-micro")}>
               <span aria-hidden className={cn("size-1.5 rounded-full", b.tone === "live" && "viz-pulse")} style={{ background: BADGE_HUE[b.tone] }} />
               <span className="text-muted-foreground">{b.label}</span>
               {/* Keyed by value: a changed state word fades in instead of snapping. */}

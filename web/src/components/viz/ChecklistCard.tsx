@@ -13,7 +13,7 @@ export function ChecklistCard({ items }: { items: { checked: boolean; content: R
   const done = items.filter((i) => i.checked).length;
   const entrance = useRowEntrance(items.map((_, i) => String(i)));
   return (
-    <div className="viz-frame-in bg-card not-prose my-3 overflow-hidden rounded-xl border">
+    <div className="viz-frame-in viz-card not-prose my-3 overflow-hidden">
       <div className="flex h-8 items-center gap-3 border-b px-3">
         <span className="text-muted-foreground shrink-0 text-micro font-medium tabular-nums">
           <RollNumber text={String(done)} /> of {items.length} done

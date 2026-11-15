@@ -271,7 +271,7 @@ function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
         onClick={() => scrub.togglePin(a)}
       >
         {[0.25, 0.5, 0.75].map((f) => (
-          <line key={f} x1={0} x2={W} y1={plotH - f * (plotH - 18)} y2={plotH - f * (plotH - 18)} stroke="var(--viz-grid)" strokeWidth={1} />
+          <line key={f} x1={0} x2={W} y1={plotH - f * (plotH - 18)} y2={plotH - f * (plotH - 18)} stroke="var(--viz-grid)" strokeWidth={1} strokeDasharray="2 4" />
         ))}
         {a !== null && <rect x={a * group + 2} y={0} width={group - 4} height={plotH} rx={6} fill="var(--muted)" opacity={0.5} style={{ x: a * group + 2, ...track(reduced, "x") } as React.CSSProperties} />}
         <line x1={0} x2={W} y1={zeroY} y2={zeroY} stroke="var(--line-strong)" strokeWidth={1} />
@@ -308,7 +308,7 @@ function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
                       }
                     />
                     {showValues && (
-                      <text x={x + barW / 2} y={v < 0 ? Math.min(y + r + hh + 10, plotH - 2) : y - 4} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
+                      <text x={x + barW / 2} y={v < 0 ? Math.min(y + r + hh + 10, plotH - 2) : y - 4} textAnchor="middle" className="fill-foreground font-medium" fontSize={11}>
                         {fmt(v, spec.unit)}
                       </text>
                     )}
@@ -363,7 +363,7 @@ function StackedBars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
         onClick={() => scrub.togglePin(a)}
       >
         {[0.25, 0.5, 0.75].map((f) => (
-          <line key={f} x1={0} x2={W} y1={plotH - f * (plotH - 18)} y2={plotH - f * (plotH - 18)} stroke="var(--viz-grid)" strokeWidth={1} />
+          <line key={f} x1={0} x2={W} y1={plotH - f * (plotH - 18)} y2={plotH - f * (plotH - 18)} stroke="var(--viz-grid)" strokeWidth={1} strokeDasharray="2 4" />
         ))}
         {a !== null && <rect x={a * group + 2} y={0} width={group - 4} height={plotH} rx={6} fill="var(--muted)" opacity={0.5} style={{ x: a * group + 2, ...track(reduced, "x") } as React.CSSProperties} />}
         <line x1={0} x2={W} y1={plotH} y2={plotH} stroke="var(--line-strong)" strokeWidth={1} />
@@ -410,7 +410,7 @@ function StackedBars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
                 {label.length > Math.max(4, group / 7) ? label.slice(0, Math.max(3, Math.floor(group / 7))) + "…" : label}
               </text>
               {nL <= 12 && (
-                <text x={x + barW / 2} y={plotH - (totals[li] / max) * (plotH - 18) - 4 - (spec.series.length - 1) * 2} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
+                <text x={x + barW / 2} y={plotH - (totals[li] / max) * (plotH - 18) - 4 - (spec.series.length - 1) * 2} textAnchor="middle" className="fill-foreground font-medium" fontSize={11}>
                   {fmt(totals[li], spec.unit)}
                 </text>
               )}
@@ -439,7 +439,7 @@ function Scatter({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
     <div className="relative">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={spec.title ?? "scatter plot"}>
         {[0.25, 0.5, 0.75].map((f) => (
-          <line key={f} x1={0} x2={W} y1={plotH * (1 - f)} y2={plotH * (1 - f)} stroke="var(--viz-grid)" strokeWidth={1} />
+          <line key={f} x1={0} x2={W} y1={plotH * (1 - f)} y2={plotH * (1 - f)} stroke="var(--viz-grid)" strokeWidth={1} strokeDasharray="2 4" />
         ))}
         <line x1={0} x2={W} y1={plotH} y2={plotH} stroke="var(--line-strong)" strokeWidth={1} />
         {spec.series.map((s, si) =>
@@ -510,7 +510,7 @@ function Lines({ spec, slots, area }: { spec: ChartSpec; slots: number[]; area: 
         onClick={() => scrub.togglePin(a)}
       >
         {[0.25, 0.5, 0.75].map((f) => (
-          <line key={f} x1={0} x2={W} y1={plotH * (1 - f)} y2={plotH * (1 - f)} stroke="var(--viz-grid)" strokeWidth={1} />
+          <line key={f} x1={0} x2={W} y1={plotH * (1 - f)} y2={plotH * (1 - f)} stroke="var(--viz-grid)" strokeWidth={1} strokeDasharray="2 4" />
         ))}
         <line x1={0} x2={W} y1={py(Math.max(min, 0))} y2={py(Math.max(min, 0))} stroke="var(--line-strong)" strokeWidth={1} />
         {spec.series.map((s, si) => {

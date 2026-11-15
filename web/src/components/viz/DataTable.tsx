@@ -201,7 +201,7 @@ export function DataTable({
   }
 
   const span = visible.length + (shaped ? 1 : 0);
-  const cellPad = density === "compact" ? "px-2.5 py-1" : "px-3 py-2";
+  const cellPad = density === "compact" ? "px-3 py-1" : "px-3.5 py-2.5";
   const dirty = sort !== null || colOrder !== null || hidden.length > 0 || pins.length > 0 || query !== "" || density !== "cozy";
   const reset = () => {
     setSort(null);
@@ -220,7 +220,7 @@ export function DataTable({
   // variable the row and its first cell both read; a mixed opaque colour covers scrolled content.
   // A pinned row keeps a faint live-hue ground (persistent, not a hover look-alike); hover deepens it.
   const rowTint =
-    "[--row-bg:var(--card)] hover:[--row-bg:color-mix(in_oklab,var(--muted)_50%,var(--card))] focus-visible:[--row-bg:color-mix(in_oklab,var(--muted)_60%,var(--card))] data-pinned:[--row-bg:color-mix(in_oklab,var(--live)_6%,var(--card))] data-pinned:hover:[--row-bg:color-mix(in_oklab,var(--live)_9%,var(--card))] active:[--row-bg:color-mix(in_oklab,var(--muted)_70%,var(--card))]";
+    "[--row-bg:var(--viz-tile)] hover:[--row-bg:color-mix(in_oklab,var(--foreground)_4%,var(--viz-tile))] focus-visible:[--row-bg:color-mix(in_oklab,var(--foreground)_5%,var(--viz-tile))] data-pinned:[--row-bg:color-mix(in_oklab,var(--live)_6%,var(--viz-tile))] data-pinned:hover:[--row-bg:color-mix(in_oklab,var(--live)_9%,var(--viz-tile))] active:[--row-bg:color-mix(in_oklab,var(--foreground)_7%,var(--viz-tile))]";
   const stickyCell = "sticky left-0 z-[1] in-data-scrolled-start:shadow-[inset_-1px_0_0_var(--border),8px_0_12px_-8px_color-mix(in_oklab,var(--foreground)_18%,transparent)]";
   // The sticky header always has its hairline; the 1px drop only shows once rows scroll under it.
   const headShadow = "transition-[box-shadow] duration-150 in-data-scrolled-top:shadow-[0_1px_0_var(--border),0_2px_3px_-2px_color-mix(in_oklab,var(--foreground)_14%,transparent)]";
@@ -263,7 +263,7 @@ export function DataTable({
             </colgroup>
             <thead data-slot="table-header">
               {/* The row sticks to the top; each header is a plain positioned cell so a grip's 4px overflow paints above the next header. */}
-              <tr className="bg-card sticky top-0 z-10">
+              <tr className="bg-(--viz-tile) sticky top-0 z-10">
                 {visible.map((c, vi) => {
                   const h = head[c];
                   const on = sort?.col === c ? sort.dir : null;
@@ -304,7 +304,7 @@ export function DataTable({
                         setDrop(null);
                         setDragging(null);
                       }}
-                      className={cn("group/th bg-card relative border-b text-left align-bottom", cellPad, headShadow, numeric[c] && "text-right", vi === 0 && stickyCell, vi === 0 && "z-20")}
+                      className={cn("group/th bg-(--viz-tile) relative border-b text-left align-bottom", cellPad, headShadow, numeric[c] && "text-right", vi === 0 && stickyCell, vi === 0 && "z-20")}
                     >
                       <button
                         type="button"
@@ -326,7 +326,7 @@ export function DataTable({
                         }}
                         title="Sort · drag to reorder · Alt+←/→ to move"
                         className={cn(
-                          "group/sort viz-press -mx-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-micro font-medium tracking-[0.05em] uppercase whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
+                          "group/sort viz-press -mx-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-micro font-medium whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
                           on ? "text-foreground" : "text-muted-foreground hover:text-foreground",
                           numeric[c] && "flex-row-reverse"
                         )}
@@ -352,7 +352,7 @@ export function DataTable({
                     </th>
                   );
                 })}
-                {shaped && <th aria-hidden className="bg-card border-b p-0" />}
+                {shaped && <th aria-hidden className="bg-(--viz-tile) border-b p-0" />}
               </tr>
             </thead>
             <tbody className="[&>tr:last-child>td]:border-b-0">
@@ -486,7 +486,7 @@ function useScrollEdges() {
 }
 
 const TOOL_BUTTON =
-  "viz-press text-muted-foreground hover:text-foreground hover:bg-muted/70 inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium whitespace-nowrap transition-[color,background-color] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default disabled:opacity-40 [&_svg]:size-3.5 [&_svg]:shrink-0";
+  "viz-press viz-pill text-muted-foreground hover:text-foreground inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-micro font-medium whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default disabled:opacity-40 [&_svg]:size-3.5 [&_svg]:shrink-0";
 
 /**
  * The toolbar the table grows in the sheet (nothing in the card): the row filter with its count,
@@ -534,7 +534,7 @@ function TableToolbar({
     }
   };
   return (
-    <div className="flex h-10 items-center gap-1 border-b pr-2" data-table-toolbar>
+    <div className="flex h-10 items-center gap-1.5 border-b pr-2" data-table-toolbar>
       <VizSearch className="min-w-0 flex-1" value={query} onChange={onQuery} placeholder="Filter rows" count={shown !== total ? `${shown} of ${total}` : count(total, "row")} />
       <span className="text-faint mr-2 hidden text-micro whitespace-nowrap xl:inline" aria-hidden>
         Click a header to sort · drag it to reorder · drag its edge to resize
