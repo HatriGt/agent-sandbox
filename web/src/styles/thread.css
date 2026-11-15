@@ -2,18 +2,25 @@
    Thread.tsx so it ships with the thread chunk, not with every page. */
 
 /* ── Capped step list ──
-   A long run of steps scrolls inside its own 32rem window. Where it continues, the edge dissolves
-   (an alpha mask, so it works on any ground) instead of cutting a row in half. */
-.steps-scroll[data-above],
-.steps-scroll[data-below] {
-  --steps-fade: 2.5rem;
-  mask-image: linear-gradient(to bottom, transparent, #000 var(--steps-top, 0px), #000 calc(100% - var(--steps-bottom, 0px)), transparent);
+   A long run of steps scrolls inside its own 32rem window. Where it continues, the edge is a clean
+   cut with a hairline and a 1px shadow on the inside — the way every scroller in the app ends. It
+   used to dissolve through an alpha mask, which over a dark block (a code-mode script, a terminal)
+   read as white fog rising over the code. */
+.steps-scroll {
+  transition: box-shadow var(--dur-fast) var(--viz-ease);
 }
 .steps-scroll[data-above] {
-  --steps-top: var(--steps-fade);
+  box-shadow: inset 0 1px 0 var(--border), inset 0 3px 4px -3px color-mix(in oklab, var(--foreground) 16%, transparent);
 }
 .steps-scroll[data-below] {
-  --steps-bottom: var(--steps-fade);
+  box-shadow: inset 0 -1px 0 var(--border), inset 0 -3px 4px -3px color-mix(in oklab, var(--foreground) 16%, transparent);
+}
+.steps-scroll[data-above][data-below] {
+  box-shadow:
+    inset 0 1px 0 var(--border),
+    inset 0 3px 4px -3px color-mix(in oklab, var(--foreground) 16%, transparent),
+    inset 0 -1px 0 var(--border),
+    inset 0 -3px 4px -3px color-mix(in oklab, var(--foreground) 16%, transparent);
 }
 
 /* ── Streaming caret ──────────────────────────────────────────────────────────────────────────────

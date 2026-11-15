@@ -74,3 +74,19 @@ test("adoption never takes a line older than the send, or one another echo match
   assert.deepEqual(m.settled, [{ id: a.id, line: 1 }]);
   assert.deepEqual(m.pending, [b]);
 });
+
+test("a line stamped in the same second as the newest stamp at send time is this echo's line", () => {
+  // The resume writes `date +%s` + "000"; the formatter writes Date.now(). Same second, lower ms.
+  const r = stampReply("Fail closed", [{ text: "earlier", at: 1_700_000_000_000 }], 1_700_000_000_800, NOW);
+  const m = matchReplies([r], [{ text: "earlier", at: 1_700_000_000_000 }, { text: "Fail closed", at: 1_700_000_000_000 }], NOW);
+  assert.deepEqual(m.settled, [{ id: r.id, line: 1 }]);
+  assert.deepEqual(m.pending, []);
+});
+
+test("a stamp from another clock ahead of the box does not keep a same-text echo alive", () => {
+  // A queued message carried the controller's clock (ahead by 5s); the next ⟦you⟧ line is box-stamped.
+  const log = [{ text: "queued one", at: 1_700_000_010_000 }];
+  const r = stampReply("continue", log, 1_700_000_010_000, NOW);
+  const m = matchReplies([r], [...log, { text: "continue", at: 1_700_000_006_000 }], NOW);
+  assert.deepEqual(m.settled, [{ id: r.id, line: 1 }]);
+});

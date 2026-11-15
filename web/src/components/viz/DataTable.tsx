@@ -86,13 +86,23 @@ export function DataTable({
       }),
     [head, texts]
   );
-  // Identifiers are numbers without magnitude: no bar for id / # / port / year columns.
-  const idLike = React.useMemo(() => head.map((h) => /^(id|#|no\.?|pk|index|idx|port|pid|year|version|code)$/i.test(typeof h === "string" ? h.trim() : "")), [head]);
+  // Identifiers are numbers without magnitude: no bar for a column headed id / # / port / year /
+  // "claim header id" (the last word decides), nor for a column whose values all sit within 15%
+  // of each other — eight claim ids near 933700 drew eight full-length bars that read as links.
+  const idLike = React.useMemo(
+    () => head.map((h) => /(^|[\s_./-])(ids?|#|no\.?|nr|num|pk|index|idx|port|pid|year|version|code|key|sku|uuid|guid|hash|zip|phone)$/i.test(typeof h === "string" ? h.trim() : "")),
+    [head]
+  );
   const maxima = React.useMemo(
     () =>
-      head.map((_, c) =>
-        numeric[c] && !idLike[c] ? Math.max(...texts.map((r) => Math.abs(cellNumber(r[c] ?? "") ?? 0)), 0) : 0
-      ),
+      head.map((_, c) => {
+        if (!numeric[c] || idLike[c]) return 0;
+        const abs = texts.map((r) => cellNumber(r[c] ?? "")).filter((n): n is number => n !== null).map(Math.abs);
+        if (abs.length === 0) return 0;
+        const max = Math.max(...abs);
+        const min = Math.min(...abs);
+        return abs.length > 1 && max > 0 && min / max > 0.85 ? 0 : max;
+      }),
     [head, texts, numeric, idLike]
   );
 
@@ -187,7 +197,7 @@ export function DataTable({
       }
     >
       <div ref={edges} className="relative">
-        <div className="max-h-96 overflow-auto overscroll-x-none">
+        <div className="max-h-96 overflow-auto overscroll-x-none in-data-viz-fullscreen:max-h-(--viz-full)">
           <table className={cn("w-full border-separate border-spacing-0 text-meta", shaped && "table-fixed")} style={minWidth ? { minWidth } : undefined}>
             <colgroup ref={cols.colgroup}>
               {head.map((_, c) => {

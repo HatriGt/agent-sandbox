@@ -18,7 +18,7 @@ export function HttpBlock({ calls, source }: { calls: HttpCall[]; source: string
   const entrance = useRowEntrance(calls.map((c, i) => `${i}|${c.method}|${c.url}`));
   return (
     <VizFrame title={count(calls.length, "request")} source={source}>
-      <ul className="m-0 max-h-80 list-none overflow-auto p-0">
+      <ul className="m-0 max-h-80 list-none overflow-auto p-0 in-data-viz-fullscreen:max-h-(--viz-full)">
         {calls.map((c, i) => {
           const e = entrance(`${i}|${c.method}|${c.url}`);
           return (
@@ -92,6 +92,8 @@ export function TestsBlock({ report, source }: { report: TestReport; source: str
 }
 
 // The log ground (--trace) is dark in both themes, so the light amber hue is the readable warn ink.
+// The hue sits on the level word (and an error's message); the rest of a line is the ground's ink,
+// so a page of INFO lines reads as text, not as a wall of blue.
 const LEVEL_STYLE: Record<LogLevel, string> = {
   error: "text-destructive",
   warn: "text-warn",
@@ -99,6 +101,33 @@ const LEVEL_STYLE: Record<LogLevel, string> = {
   debug: "text-faint",
   plain: "text-trace-fg",
 };
+
+const STAMP = /^(\s*\[?(?:\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?|\d{2}:\d{2}:\d{2}(?:[.,]\d+)?)\]?\s+)/;
+const LEVEL = /^(\[?(?:ERROR|ERR|FATAL|PANIC|WARN|WARNING|INFO|NOTICE|DEBUG|TRACE|VERBOSE)\]?:?)(\s+|$)/i;
+
+/** Split a line into its timestamp, level word and message so each can carry its own ink. */
+function splitLine(text: string): { stamp: string; level: string; msg: string } {
+  const s = text.match(STAMP);
+  const rest = s ? text.slice(s[0].length) : text;
+  const l = rest.match(LEVEL);
+  if (!l) return { stamp: s?.[0] ?? "", level: "", msg: rest };
+  return { stamp: s?.[0] ?? "", level: l[1] + l[2], msg: rest.slice(l[0].length) };
+}
+
+function LogText({ line, q }: { line: LogLine; q: string }) {
+  const { stamp, level, msg } = splitLine(line.text);
+  const hue = LEVEL_STYLE[line.level];
+  const ink = line.level === "error" ? hue : line.level === "debug" ? "text-faint" : "text-trace-fg";
+  const t = (s: string) => (q ? <Mark text={s} q={q} /> : s);
+  return (
+    <>
+      {stamp && <span className="text-faint">{t(stamp)}</span>}
+      {level && <span className={cn(hue, "font-medium")}>{t(level)}</span>}
+      <span className={ink}>{t(msg)}</span>
+      {!line.text && "\u00a0"}
+    </>
+  );
+}
 
 const LEVEL_HUE: Record<Exclude<LogLevel, "plain">, string> = {
   error: "var(--destructive)",
@@ -195,7 +224,7 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
         </VizEmpty>
       )}
       {/* Stays mounted while empty: "jump to first error" scrolls it in the frame after clearing. */}
-      <div ref={scroller} hidden={shown.length === 0} className="bg-trace relative max-h-96 overflow-auto px-4 py-3">
+      <div ref={scroller} hidden={shown.length === 0} className="bg-trace relative max-h-96 overflow-auto px-4 py-3 in-data-viz-fullscreen:max-h-(--viz-full)">
           <pre className="m-0 font-mono text-code whitespace-pre-wrap">
             {shown.map(({ l, i }) => (
               <div
@@ -204,11 +233,10 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
                 className={cn(
                   // The jump flash lands at once and fades out slowly: it marks where you are, then leaves.
                   "-mx-2 min-w-0 rounded px-2 [overflow-wrap:anywhere]",
-                  flash === i ? "bg-destructive/20" : "transition-[background-color] duration-700 ease-(--viz-ease)",
-                  LEVEL_STYLE[l.level]
+                  flash === i ? "bg-destructive/20" : "transition-[background-color] duration-700 ease-(--viz-ease)"
                 )}
               >
-                {q ? <Mark text={l.text} q={q} /> : l.text || "\u00a0"}
+                <LogText line={l} q={q} />
               </div>
             ))}
           </pre>

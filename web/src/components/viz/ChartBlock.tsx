@@ -71,7 +71,7 @@ export function ChartBlock({
   }
 
   return (
-    <VizFrame title={spec.title ?? spec.type} source={source} rawLanguage="json" actions={headerActions}>
+    <VizFrame title={spec.title ?? spec.type} source={source} rawLanguage="json" actions={headerActions} fullscreen="canvas">
       <div className="px-4 py-3">
         {spec.type === "donut" ? (
           <Donut spec={spec} />
@@ -238,7 +238,12 @@ function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
   const zeroY = 18 + (pos / max) * (plotH - 18);
   const barTop = (v: number) => (v >= 0 ? zeroY - (v / max) * (plotH - 18) : zeroY);
   const group = W / Math.max(nL, 1);
-  const barW = Math.max(3, Math.min(28, (group - 8) / nS - 2));
+  const barW = Math.max(3, Math.min(40, (group - 8) / nS - 2));
+  // Bars round only at the end that moves: the rect runs `r` past the baseline and the local clip
+  // takes that strip back, so the foot is square on the axis. (A rect's `rx` rounds all four
+  // corners, which left every bar floating a hairline above its own zero line.) The clip lives in
+  // the rect's own box, so it rides the grow animation and the x/y/width/height tweens.
+  const r = Math.min(3, barW / 2);
   const showValues = nL * nS <= 16; // selective direct labels, never a number on every mark of a dense chart
   const a = scrub.active;
   const tip: TipState | null =
@@ -277,21 +282,22 @@ function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
                 const v = s.data[li] || 0;
                 const h = (Math.abs(v) / max) * (plotH - 18);
                 const x = cx - total / 2 + si * (barW + 2);
-                const y = barTop(v);
                 const hh = Math.max(h, 1);
+                const y = v < 0 ? barTop(v) - r : barTop(v);
                 return (
                   <g key={s.name}>
                     <rect
                       x={x}
                       y={y}
                       width={barW}
-                      height={hh}
-                      rx={Math.min(4, barW / 2)}
+                      height={hh + r}
+                      rx={r}
                       fill={seriesColor(slots[si])}
                       className={cn(!reduced && "viz-grow")}
                       style={
                         {
-                          x, y, width: barW, height: hh,
+                          x, y, width: barW, height: hh + r,
+                          clipPath: v < 0 ? `inset(${r}px 0 0 0)` : `inset(0 0 ${r}px 0)`,
                           ...geo(reduced, "x, y, width, height"),
                           transformOrigin: `${x + barW / 2}px ${zeroY}px`,
                           animationDelay: `${Math.min((li * nS + si) * 25, 300)}ms`,
@@ -299,7 +305,7 @@ function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
                       }
                     />
                     {showValues && (
-                      <text x={x + barW / 2} y={v < 0 ? Math.min(y + hh + 10, plotH - 2) : y - 4} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
+                      <text x={x + barW / 2} y={v < 0 ? Math.min(y + r + hh + 10, plotH - 2) : y - 4} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
                         {fmt(v, spec.unit)}
                       </text>
                     )}
@@ -329,7 +335,8 @@ function StackedBars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
   const plotH = 140;
   const H = plotH + 16;
   const group = W / Math.max(nL, 1);
-  const barW = Math.max(6, Math.min(32, group - 12));
+  const barW = Math.max(6, Math.min(44, group - 12));
+  const r = Math.min(3, barW / 2);
   const a = scrub.active;
   const tip: TipState | null =
     a === null
@@ -371,19 +378,22 @@ function StackedBars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
                 yCursor -= 2; // the 2px surface gap between stacked fills
                 if (h <= 0) return null;
                 const hh = Math.max(h, 1);
+                // Only the top segment rounds, and only at its top (see the grouped chart's `r`).
+                const cap = si === spec.series.length - 1;
                 return (
                   <rect
                     key={s.name}
                     x={x}
                     y={y}
                     width={barW}
-                    height={hh}
-                    rx={si === spec.series.length - 1 ? Math.min(4, barW / 2) : 1}
+                    height={cap ? hh + r : hh}
+                    rx={cap ? r : 0}
                     fill={seriesColor(slots[si])}
                     className={cn(!reduced && "viz-grow")}
                     style={
                       {
-                        x, y, width: barW, height: hh,
+                        x, y, width: barW, height: cap ? hh + r : hh,
+                        clipPath: cap ? `inset(0 0 ${r}px 0)` : undefined,
                         ...geo(reduced, "x, y, width, height"),
                         transformOrigin: `${x + barW / 2}px ${plotH}px`,
                         animationDelay: `${Math.min(li * 30, 300)}ms`,

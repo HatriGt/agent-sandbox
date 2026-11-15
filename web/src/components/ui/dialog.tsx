@@ -25,6 +25,7 @@ function DialogContent({
   actions,
   bodyClassName,
   overlayClassName,
+  dense,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   title: string;
@@ -33,6 +34,8 @@ function DialogContent({
   actions?: React.ReactNode;
   bodyClassName?: string;
   overlayClassName?: string;
+  /** A 44px tool-window header (meta-size title, hairline under it) instead of the form heading. */
+  dense?: boolean;
 }) {
   return (
     <DialogPrimitive.Portal>
@@ -57,13 +60,13 @@ function DialogContent({
       >
         {/* Grab handle: only on the phone sheet, purely visual. */}
         <div className="bg-border mx-auto mt-2 h-1 w-9 shrink-0 rounded-full sm:hidden" aria-hidden />
-        <div className="bg-popover sticky top-0 z-10 flex shrink-0 items-start gap-3 px-6 pt-5 pb-4 sm:pt-6">
+        <div className={cn("bg-popover sticky top-0 z-10 flex shrink-0 gap-3", dense ? "h-11 items-center border-b pr-2 pl-4" : "items-start px-6 pt-5 pb-4 sm:pt-6")}>
           <div className="min-w-0 flex-1">
-            <DialogPrimitive.Title className="text-foreground text-h3 font-semibold tracking-[-0.01em]">{title}</DialogPrimitive.Title>
+            <DialogPrimitive.Title className={dense ? "text-foreground truncate text-meta font-medium tabular-nums" : "text-foreground text-h3 font-semibold tracking-[-0.01em]"}>{title}</DialogPrimitive.Title>
             {description && <DialogPrimitive.Description className="text-muted-foreground mt-1 text-meta">{description}</DialogPrimitive.Description>}
           </div>
           {actions}
-          <DialogPrimitive.Close className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-8 shrink-0 cursor-pointer place-items-center rounded-md transition-colors" aria-label="Close">
+          <DialogPrimitive.Close className={cn("text-muted-foreground hover:text-foreground hover:bg-muted grid shrink-0 cursor-pointer place-items-center rounded-md transition-colors", dense ? "size-7" : "size-8")} aria-label="Close">
             <X className="size-4" />
           </DialogPrimitive.Close>
         </div>

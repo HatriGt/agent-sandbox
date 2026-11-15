@@ -36,7 +36,7 @@ export function FlowBlock({ chains, source }: { chains: FlowStep[][]; source: st
   const entrance = useRowEntrance(flat);
   const stepCount = chains.reduce((n, c) => n + c.length, 0);
   return (
-    <VizFrame title={chains.length > 1 ? `${chains.length} pipelines · ${stepCount} steps` : `${stepCount} ${stepCount === 1 ? "step" : "steps"}`} source={source}>
+    <VizFrame title={chains.length > 1 ? `${chains.length} pipelines · ${stepCount} steps` : `${stepCount} ${stepCount === 1 ? "step" : "steps"}`} source={source} fullscreen="canvas">
       <div className="flex flex-col gap-2 px-4 py-3" onMouseLeave={() => setHover(null)}>
         {chains.map((steps, ci) => (
           <div key={ci} className="flex flex-wrap items-center gap-y-1.5">

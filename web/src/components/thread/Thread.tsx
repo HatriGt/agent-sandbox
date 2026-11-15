@@ -668,19 +668,20 @@ export function Thread({
     if (runState !== "waiting") setAnswered(null);
   }, [runState, box.name]);
   // The answer just picked, drawn at once as the recorded decision ("asked — answered") where the
-  // question sat, instead of a plain echo bubble that the real card replaced seconds later when the
-  // resumed run wrote the answer into the log.
-  // Tied to the recorded question it answers, so a later question never borrows it.
+  // question card sat. The log only gets the ⟦ask⟧ block and the ⟦you⟧ answer when the resume
+  // runs in the box, a few seconds later — so without this the thread showed a plain echo bubble
+  // first and the decision card popped in 3s after it. No echo bubble is sent for an answer: the
+  // card IS the echo, and the recorded group takes its place (same spot, no entrance) when it lands.
+  // Tied to the question it answers, so a later question never borrows it.
   const [sent, setSent] = React.useState<{ ask: string; text: string } | null>(null);
-  const openAskTextRef = React.useRef<string | null>(null);
   React.useEffect(() => setSent(null), [box.name]);
   const sentAnswer = sent?.text ?? null;
   const answer = React.useCallback(
     (text: string) => {
-      echo(text);
       setAnswering(true);
       setAnswered(question ?? "");
-      setSent(openAskTextRef.current !== null ? { ask: openAskTextRef.current, text } : null);
+      setSent({ ask: question ?? "", text });
+      jumpToLatest.current();
       api
         .resume(box.name, text, { force: true })
         .catch((e: unknown) => {
@@ -691,11 +692,12 @@ export function Thread({
         })
         .finally(() => setAnswering(false));
     },
-    [box.name, echo, onReplyFailed, question]
+    [box.name, onReplyFailed, question]
   );
   const showQuestion = !!question && runState === "waiting" && answered !== question;
   const resuming = !!question && runState === "waiting" && answered === question;
-  // The newest recorded question still without an answer in the log: where an answer just sent is drawn.
+  // The newest recorded question still without an answer in the log (a tail cut between the ⟦ask⟧
+  // block and its ⟦you⟧ line): the live card below stands for it while it is the open question.
   const openAsk = React.useMemo(() => {
     for (let i = groups.length - 1; i >= 0; i--) {
       const g = groups[i];
@@ -703,12 +705,17 @@ export function Thread({
     }
     return -1;
   }, [groups]);
-  const openAskGroup = openAsk >= 0 ? groups[openAsk] : null;
-  openAskTextRef.current = openAskGroup?.kind === "asked" ? openAskGroup.question : null;
-  const optimisticAsk = React.useMemo(
-    () => (openAskGroup?.kind === "asked" && sent && sent.ask === openAskGroup.question && !showQuestion ? { ...openAskGroup, answer: sent.text } : null),
-    [openAskGroup, sent, showQuestion]
-  );
+  // The recorded copy of the decision just sent, once the log has it: from then on it is the one
+  // drawn (without an entrance — the card is already on screen) and the optimistic one steps aside.
+  const landedAsk = React.useMemo(() => {
+    if (!sent) return -1;
+    for (let i = groups.length - 1; i >= 0; i--) {
+      const g = groups[i];
+      if (g.kind === "asked" && sameText(g.question, sent.ask) && sameText(g.answer, sent.text)) return i;
+    }
+    return -1;
+  }, [groups, sent]);
+  const optimisticAsk = sent && !showQuestion && landedAsk < 0 ? sent : null;
 
   // Pull requests the agent opened, from its prose and tool output.
   const pulls = React.useMemo(() => findPullRequests(events.map((e) => (e.kind === "say" ? e.text : e.kind === "tool" ? e.result ?? "" : "")).join("\n")), [events]);
@@ -1163,19 +1170,21 @@ export function Thread({
               // still the one waiting (or its answer is in flight), the live card below IS the
               // question — rendering the transcript copy too showed it twice. Once answered (or
               // superseded) it stays as the recorded decision.
-              if (g.kind === "asked" && i === openAsk && !optimisticAsk && (showQuestion || resuming)) return null;
+              if (g.kind === "asked" && i === openAsk && (showQuestion || resuming || optimisticAsk)) return null;
               // think folds into a work trail; the plan renders once at the head (or in the dock).
               if (g.kind === "think" || g.kind === "plan") return null;
               const msgIndex = messageIndex[i];
               return (
                 <GroupRow
                   key={key}
-                  g={i === openAsk && optimisticAsk ? optimisticAsk : g}
+                  g={g}
                   rowKey={key}
                   live={runState === "running" && i === groups.length - 1}
                   // The agent's byline opens each of its runs, whatever it starts with (prose, tools, thinking).
                   opensAgent={agentKinds.includes(g.kind) && (i === 0 || !agentKinds.includes(groups[i - 1].kind))}
-                  noEnter={g.kind === "you" && g.at !== undefined && swappedIn.current.has(g.at)}
+                  // A line that takes over from something already drawn in its place (an echo, the
+                  // decision card just sent) must not rise in as if new.
+                  noEnter={(g.kind === "you" && g.at !== undefined && swappedIn.current.has(g.at)) || i === landedAsk}
                   revertIndex={g.kind === "you" && canRevertNow && revertable.has(msgIndex) ? msgIndex : 0}
                   onRevert={askRevert}
                   onEdit={editMessage}
@@ -1219,6 +1228,12 @@ export function Thread({
                 card has already taken its place just above — a fading copy below it was a second,
                 stale question and a layout jump when it finally collapsed. */}
             {showQuestion && <QuestionCard key="question" question={question!} onAnswer={answer} onDiscuss={discuss} busy={answering} />}
+            {/* The decision just sent, in the card's place, until the log's own copy takes over above. */}
+            {optimisticAsk && (
+              <div className="mt-5" data-turn="answer-sent">
+                <AnsweredQuestionItem question={optimisticAsk.ask} answer={optimisticAsk.text} />
+              </div>
+            )}
 
             {/* An echo whose log line just landed leaves at once (`custom`): the line is already drawn
                 in its place. One that is withdrawn (delivery failed) folds away as before. */}
@@ -1573,7 +1588,7 @@ const GroupRow = React.memo(function GroupRow({
     case "asked":
       return (
         <div data-turn={rowKey} className="mt-5">
-          <AnsweredQuestionItem question={g.question} answer={g.answer} />
+          <AnsweredQuestionItem question={g.question} answer={g.answer} noEnter={noEnter} />
         </div>
       );
     case "work":
@@ -1765,6 +1780,11 @@ function groupAt(g: TraceGroup): number | undefined {
     for (const item of g.items) if (item.kind === "tools" && item.events[0]?.at !== undefined) return item.events[0].at;
   }
   return undefined;
+}
+
+/** The log's copy of a question or answer vs the live text: defang marks and edges aside, the same words. */
+function sameText(a: string, b: string): boolean {
+  return a.replace(/​/g, "").trim() === b.replace(/​/g, "").trim();
 }
 
 function sentence(s: string): string {

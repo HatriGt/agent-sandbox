@@ -144,7 +144,7 @@ export function SequenceBlock({ sequence, source }: { sequence: Sequence; source
   const msgs = sequence.items.filter((i) => i.kind === "msg").length;
   const text = React.useMemo(() => sequenceToMermaid(sequence), [sequence]);
   return (
-    <VizFrame title={`${sequence.actors.length} participants · ${msgs} message${msgs === 1 ? "" : "s"}`} source={source}>
+    <VizFrame title={`${sequence.actors.length} participants · ${msgs} message${msgs === 1 ? "" : "s"}`} source={source} fullscreen="canvas">
       <MermaidSvg text={text} label={`sequence diagram between ${sequence.actors.join(", ")}`} fallback={<SequenceFallback sequence={sequence} />} />
     </VizFrame>
   );
@@ -179,7 +179,7 @@ export function mermaidKind(src: string): string | null {
 /** Raw ```mermaid fence → mermaid SVG; a render error shows the source as code. */
 export function MermaidBlock({ source, kind }: { source: string; kind: string }) {
   return (
-    <VizFrame title={kind} source={source}>
+    <VizFrame title={kind} source={source} fullscreen="canvas">
       <MermaidSvg
         text={source}
         label={kind}

@@ -1642,11 +1642,11 @@ export function QueuedItem({
  * answer you gave — so scrolling back shows the decision, not just a bare reply. Read-only; the
  * chosen option (or your free-text answer) is highlighted.
  */
-export function AnsweredQuestionItem({ question, answer }: { question: string; answer: string }) {
+export function AnsweredQuestionItem({ question, answer, noEnter = false }: { question: string; answer: string; noEnter?: boolean }) {
   const parsed = React.useMemo(() => parseQuestion(question), [question]);
   const chosen = parsed.options.findIndex((o) => o.trim().toLowerCase() === answer.trim().toLowerCase());
   return (
-    <div className="enter flex flex-col gap-1.5">
+    <div className={cn(!noEnter && "enter", "flex flex-col gap-1.5")}>
       <span className="label text-muted-foreground flex items-center gap-1.5">
         <PauseIcon className="size-3" strokeWidth={2.5} aria-hidden />
         {answer.trim() ? "The agent asked — you answered" : "The agent asked"}

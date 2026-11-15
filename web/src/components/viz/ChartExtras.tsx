@@ -63,7 +63,7 @@ export function SpansBlock({ spans, unit, source }: { spans: Span[]; unit?: stri
   const range = max - min || 1;
   const [tip, setTip] = React.useState<TipState | null>(null);
   return (
-    <VizFrame title={`${spans.length} ${spans.length === 1 ? "span" : "spans"}`} source={source}>
+    <VizFrame title={`${spans.length} ${spans.length === 1 ? "span" : "spans"}`} source={source} fullscreen="canvas">
       <div className="relative flex flex-col gap-1.5 px-4 py-3" onMouseLeave={() => setTip(null)}>
         {spans.map((s, i) => {
           const left = ((s.start - min) / range) * 100;
@@ -115,7 +115,7 @@ export function FunnelBlock({ stages, source }: { stages: { label: string; value
   const [tip, setTip] = React.useState<TipState | null>(null);
   const last = stages[stages.length - 1];
   return (
-    <VizFrame title={stages.length > 1 ? `${stages.length} stages · ${pct(last.value, top)} convert` : "1 stage"} source={source}>
+    <VizFrame title={stages.length > 1 ? `${stages.length} stages · ${pct(last.value, top)} convert` : "1 stage"} source={source} fullscreen="canvas">
       <div className="relative flex flex-col gap-1 px-4 py-3" onMouseLeave={() => setTip(null)}>
         {stages.map((s, i) => {
           const frac = Math.min(1, s.value / top);
@@ -163,7 +163,7 @@ export function HeatmapBlock({ map, source }: { map: Heatmap; source: string }) 
   const span = max - min || 1;
   const dense = map.rows.length * map.cols.length > 120;
   return (
-    <VizFrame title={`${map.rows.length}×${map.cols.length}`} source={source} rawLanguage="json">
+    <VizFrame title={`${map.rows.length}×${map.cols.length}`} source={source} rawLanguage="json" fullscreen="canvas">
       <div className="relative overflow-x-auto px-4 py-3">
         <table className="border-separate" style={{ borderSpacing: 2 }}>
           <thead>

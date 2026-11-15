@@ -25,7 +25,7 @@ export function DiffstatBlock({ files, source }: { files: DiffStat[]; source: st
         </span>
       }
     >
-      <ul className="m-0 max-h-80 list-none overflow-auto p-0">
+      <ul className="m-0 max-h-80 list-none overflow-auto p-0 in-data-viz-fullscreen:max-h-(--viz-full)">
         {files.map((f, i) => {
           const total = f.add + f.del;
           const w = (total / max) * 96;
@@ -54,7 +54,7 @@ export function CommitsBlock({ commits, source }: { commits: Commit[]; source: s
   const entrance = useRowEntrance(commits.map((c, i) => `${i}|${c.hash}`));
   return (
     <VizFrame title={count(commits.length, "commit")} source={source}>
-      <ul className="m-0 max-h-80 list-none overflow-auto p-0">
+      <ul className="m-0 max-h-80 list-none overflow-auto p-0 in-data-viz-fullscreen:max-h-(--viz-full)">
         {commits.map((c, i) => {
           const m = c.message.match(/^(feat|fix|ux|docs|chore|refactor|perf|test|build|ci|style)(\([^)]*\))?(!)?:\s*(.*)$/);
           const e = entrance(`${i}|${c.hash}`);
@@ -90,7 +90,7 @@ export function DepsBlock({ deps, source }: { deps: DepUpdate[]; source: string 
   const entrance = useRowEntrance(deps.map((d) => d.name));
   return (
     <VizFrame title={count(deps.length, "update")} source={source}>
-      <ul className="m-0 max-h-80 list-none overflow-auto p-0">
+      <ul className="m-0 max-h-80 list-none overflow-auto p-0 in-data-viz-fullscreen:max-h-(--viz-full)">
         {deps.map((d, i) => {
           const e = entrance(d.name);
           return (

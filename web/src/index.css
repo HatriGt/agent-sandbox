@@ -1964,6 +1964,14 @@ col { transition: width 0.2s var(--ease-out-quint); }
 .mermaid-diagram { display: flex; justify-content: center; overflow-x: auto; }
 .mermaid-diagram svg { height: auto; max-width: 100%; max-height: 28rem; }
 [data-viz-fullscreen] .mermaid-diagram svg { max-height: none; }
+/* The fullscreen canvas ground: a 16px dot grid in the hairline colour. It says "this pans" and
+   gives a zoomed picture something to move against; the sheet's own colour stays underneath. */
+.viz-canvas-ground {
+  background-color: var(--popover);
+  background-image: radial-gradient(color-mix(in oklab, var(--border) 80%, transparent) 1px, transparent 1.5px);
+  background-size: 16px 16px;
+  background-position: 8px 8px;
+}
 
 /* ───────── Round: the conversation column (2026-10-22) ───────── */
 

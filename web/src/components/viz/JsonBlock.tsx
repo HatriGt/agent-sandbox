@@ -11,9 +11,14 @@ import { VizFrame } from "./VizFrame";
  * always alongside the literal text, never color alone.
  */
 export function JsonBlock({ value, source }: { value: unknown; source: string }) {
+  const title = Array.isArray(value)
+    ? `JSON · ${value.length} ${value.length === 1 ? "item" : "items"}`
+    : value && typeof value === "object"
+      ? `JSON · ${Object.keys(value).length} ${Object.keys(value).length === 1 ? "key" : "keys"}`
+      : "JSON";
   return (
-    <VizFrame title="json" source={source} rawLanguage="json">
-      <div className="max-h-96 overflow-auto px-3 py-2 font-mono text-code">
+    <VizFrame title={title} source={source} rawLanguage="json">
+      <div className="max-h-96 overflow-auto px-3 py-2 font-mono text-code in-data-viz-fullscreen:max-h-(--viz-full)">
         <JsonNode value={value} depth={0} />
       </div>
     </VizFrame>

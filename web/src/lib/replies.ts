@@ -77,8 +77,18 @@ export function matchReplies(replies: readonly PendingReply[], lines: readonly S
   const used = new Set<number>();
   const isNewFor = (r: PendingReply, i: number, sameText: boolean) => {
     const at = lines[i].at;
-    if (at !== undefined && r.after !== undefined) return at > r.after;
-    // No clock on one side: only a same-text line can be judged, by counting past what was there.
+    // The resume stamps the ⟦you⟧ line at whole seconds (`date +%s`), the formatter stamps its
+    // lines in milliseconds: a line that lands in the same second as the newest stamp seen at send
+    // time is still newer than it. Observed live as an answer bubble that never retired, the agent's
+    // reply rendering above it.
+    if (at !== undefined && r.after !== undefined) {
+      if (at > r.after) return true;
+      if (at % 1000 === 0 && at >= Math.floor(r.after / 1000) * 1000) return true;
+    }
+    // Counting past what was there judges a same-text line whatever the clocks say: the tail only
+    // ever loses lines from its top, so more copies than at send time means one of them is new.
+    // (Also the rescue when a stamp written by another clock — a queued message carries the
+    // controller's — puts `after` ahead of the box.)
     return sameText && ordinal[i] > r.seen;
   };
   const settled: { id: string; line: number }[] = [];

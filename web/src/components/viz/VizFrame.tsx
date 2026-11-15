@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import { LiveSlotBadge, LiveSlotContext, useLiveSlotTitle } from "./live-blocks";
 import { IconSwap } from "./motion";
-import { VizFullscreen, VizFullscreenContext, VizFullscreenGate } from "./viz-fullscreen";
+import { VizFullscreen, VizFullscreenContext, VizFullscreenGate, type VizFullscreenMode } from "./viz-fullscreen";
 
 /**
  * A quiet 28px icon button for a block's header (copy, raw, maximize, fold-all, chart ⇄ table):
@@ -163,6 +163,7 @@ export function VizFrame({
   children,
   className,
   ownsZoom,
+  fullscreen = ownsZoom ? "canvas" : "flow",
 }: {
   title?: string;
   /** Original fence text, powering both the copy action and the raw toggle. */
@@ -173,6 +174,8 @@ export function VizFrame({
   className?: string;
   /** The body pans/zooms itself in fullscreen (reads VizFullscreenContext); skip the generic zoom. */
   ownsZoom?: boolean;
+  /** `flow` (a document: fills the sheet, scrolls) or `canvas` (a picture: centred, pan + zoom). */
+  fullscreen?: VizFullscreenMode;
 }) {
   const [raw, setRaw] = React.useState(false);
   // Raw ⇄ visual only cross-fades once the reader has toggled; first paint is the frame's entrance.
@@ -243,7 +246,7 @@ export function VizFrame({
         </div>
       )}
       {full && (
-        <VizFullscreen open={full} onOpenChange={setFull} title={title ?? slotTitle ?? "Visualization"} ownsZoom={ownsZoom}>
+        <VizFullscreen open={full} onOpenChange={setFull} title={title ?? slotTitle ?? "Visualization"} mode={fullscreen} ownsZoom={ownsZoom}>
           {children}
         </VizFullscreen>
       )}

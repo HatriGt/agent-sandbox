@@ -70,7 +70,7 @@ export function TreeBlock({ roots, source }: { roots: TreeNode[]; source: string
         <VizSearch className="border-b" value={query} onChange={setQuery} placeholder="Filter by path" count={keep ? `${keep.size} shown` : undefined} />
       )}
       <TreeCtx.Provider value={ctx}>
-        <div className={cn("max-h-96 overflow-auto px-2 py-1.5 font-mono text-micro", keep && keep.size === 0 && "hidden")} role="tree">
+        <div className={cn("max-h-96 overflow-auto px-2 py-1.5 font-mono text-micro in-data-viz-fullscreen:max-h-(--viz-full)", keep && keep.size === 0 && "hidden")} role="tree">
           {roots.map((n, i) => (
             <Node key={`${i}:${n.name}`} node={n} depth={0} parent="" />
           ))}

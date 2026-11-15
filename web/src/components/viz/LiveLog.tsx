@@ -205,7 +205,7 @@ export function LiveLogView({ state, live, className }: { state: LiveLogState; l
           role="log"
           aria-label={kind === "access" ? "Incoming requests" : "Log lines"}
           className={cn(
-            "focus-visible:ring-ring max-h-80 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset",
+            "focus-visible:ring-ring max-h-80 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset in-data-viz-fullscreen:max-h-(--viz-full)",
             scrolled && "shadow-[inset_0_1px_0_var(--border)]"
           )}
         >
