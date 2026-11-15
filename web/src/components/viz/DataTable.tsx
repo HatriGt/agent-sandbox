@@ -1,6 +1,6 @@
 import * as React from "react";
 import { motion } from "motion/react";
-import { ArrowUp, ChevronsUpDown, Pin } from "lucide-react";
+import { ArrowUp, Check, ChevronsUpDown, Columns3, Copy, Pin, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { cellNumber, csvField } from "@/lib/viz";
 import { columnGrip, MIN_COL, shapeKey, useColumnWidths } from "@/lib/column-widths";
@@ -9,6 +9,9 @@ import { count, VizEmpty, VizFrame, VizSearch } from "./VizFrame";
 import { ChartBlock } from "./ChartBlock";
 import { FIRST_CAP } from "./motion";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { InlineOnly, VizFullscreenContext } from "./viz-fullscreen";
+import { IconSwap } from "./motion";
 import type { ChartSpec } from "@/lib/viz";
 
 /** Rows glide to their new place on sort / pin / filter up to this many; past it they jump (FLIP cost). */
@@ -75,6 +78,33 @@ export function DataTable({
   const [pins, setPins] = React.useState<string[]>([]);
   const [sort, setSort] = React.useState<{ col: number; dir: 1 | -1 } | null>(null);
   const [view, setView] = React.useState<"table" | "chart">("table");
+  // Column order and hidden columns are by original index, so they survive rows streaming in.
+  // Both are reached from the sheet (drag a header, the Columns menu) and the card follows: the
+  // body is one set of elements mounted in both places.
+  const [colOrder, setColOrder] = React.useState<number[] | null>(null);
+  const [hidden, setHidden] = React.useState<number[]>([]);
+  const [density, setDensity] = React.useState<"cozy" | "compact">("cozy");
+  const [drop, setDrop] = React.useState<{ col: number; side: "before" | "after" } | null>(null);
+  const [dragging, setDragging] = React.useState<number | null>(null);
+  const allOrder = React.useMemo(() => {
+    const ids = head.map((_, i) => i);
+    if (!colOrder) return ids;
+    const kept = colOrder.filter((c) => c < head.length);
+    return [...kept, ...ids.filter((i) => !kept.includes(i))];
+  }, [colOrder, head]);
+  const visible = React.useMemo(() => allOrder.filter((c) => !hidden.includes(c)), [allOrder, hidden]);
+  const moveCol = (from: number, to: number, side: "before" | "after") => {
+    if (from === to) return;
+    const o = allOrder.filter((c) => c !== from);
+    o.splice(o.indexOf(to) + (side === "after" ? 1 : 0), 0, from);
+    setColOrder(o);
+  };
+  // Alt+←/→ on a header moves the column one place among the visible ones.
+  const nudgeCol = (c: number, by: -1 | 1) => {
+    const vi = visible.indexOf(c);
+    const to = visible[vi + by];
+    if (to !== undefined) moveCol(c, to, by < 0 ? "before" : "after");
+  };
 
   // A column is numeric when ≥80% of its non-empty cells parse as numbers.
   const numeric = React.useMemo(
@@ -137,7 +167,7 @@ export function DataTable({
   const cols = useColumnWidths(`viz:${shapeKey([title ?? "", ...headTexts])}`, texts.length > 0, `${headTexts.join(",")}|${texts.length}`);
   const shaped = cols.shaped;
   const widthOf = (c: number) => cols.width(String(c)) ?? cols.floor(String(c)) ?? MIN_COL;
-  const minWidth = shaped ? head.reduce<number>((s, _, c) => s + widthOf(c), 0) : undefined;
+  const minWidth = shaped ? visible.reduce<number>((s, c) => s + widthOf(c), 0) : undefined;
   const edges = useScrollEdges();
   const reduced = useReducedMotion();
   const entrance = useTableEntrance(order);
@@ -170,8 +200,19 @@ export function DataTable({
     );
   }
 
-  const span = head.length + (shaped ? 1 : 0);
-  const cellPad = "px-3 py-2";
+  const span = visible.length + (shaped ? 1 : 0);
+  const cellPad = density === "compact" ? "px-2.5 py-1" : "px-3 py-2";
+  const dirty = sort !== null || colOrder !== null || hidden.length > 0 || pins.length > 0 || query !== "" || density !== "cozy";
+  const reset = () => {
+    setSort(null);
+    setColOrder(null);
+    setHidden([]);
+    setPins([]);
+    setQuery("");
+    setDensity("cozy");
+  };
+  // What is on screen, as CSV: the shown rows in their order, the visible columns in theirs.
+  const csvShown = () => [visible.map((c) => headTexts[c]), ...order.map((ri) => visible.map((c) => texts[ri][c] ?? ""))].map((r) => r.map(csvField).join(",")).join("\n");
   const hairline = "border-t-0 border-b border-border/50";
   // Text stays on one line (a wide table scrolls) until a column is shaped; then it wraps to the width the user chose.
   const textWrap = shaped ? "whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap";
@@ -196,11 +237,25 @@ export function DataTable({
         ) : undefined
       }
     >
+      <TableToolbar
+        query={query}
+        onQuery={setQuery}
+        shown={order.length}
+        total={texts.length}
+        columns={allOrder.map((c) => ({ c, label: headTexts[c] || `column ${c + 1}`, on: !hidden.includes(c) }))}
+        onToggleColumn={(c) => setHidden((h) => (h.includes(c) ? h.filter((x) => x !== c) : visible.length > 1 ? [...h, c] : h))}
+        onShowAll={() => setHidden([])}
+        density={density}
+        onDensity={setDensity}
+        csv={csvShown}
+        dirty={dirty}
+        onReset={reset}
+      />
       <div ref={edges} className="relative">
-        <div className="max-h-96 overflow-auto overscroll-x-none in-data-viz-fullscreen:max-h-(--viz-full)">
+        <div className="max-h-96 overflow-auto overscroll-x-none in-data-viz-fullscreen:max-h-[calc(var(--viz-full)-2.5rem)]">
           <table className={cn("w-full border-separate border-spacing-0 text-meta", shaped && "table-fixed")} style={minWidth ? { minWidth } : undefined}>
             <colgroup ref={cols.colgroup}>
-              {head.map((_, c) => {
+              {visible.map((c) => {
                 const w = shaped ? cols.width(String(c)) : undefined;
                 return <col key={c} data-col={String(c)} style={w ? { width: w } : undefined} />;
               })}
@@ -209,7 +264,8 @@ export function DataTable({
             <thead data-slot="table-header">
               {/* The row sticks to the top; each header is a plain positioned cell so a grip's 4px overflow paints above the next header. */}
               <tr className="bg-card sticky top-0 z-10">
-                {head.map((h, c) => {
+                {visible.map((c, vi) => {
+                  const h = head[c];
                   const on = sort?.col === c ? sort.dir : null;
                   const label = headTexts[c] || `column ${c + 1}`;
                   return (
@@ -217,7 +273,38 @@ export function DataTable({
                       key={c}
                       scope="col"
                       aria-sort={on ? (on === 1 ? "ascending" : "descending") : "none"}
-                      className={cn("group/th bg-card relative border-b text-left align-bottom", cellPad, headShadow, numeric[c] && "text-right", c === 0 && stickyCell, c === 0 && "z-20")}
+                      // Drag a header to reorder (the edge grip resizes, and must not start a drag).
+                      draggable={visible.length > 1}
+                      data-dragging={dragging === c || undefined}
+                      data-drop={drop?.col === c ? drop.side : undefined}
+                      onDragStart={(e) => {
+                        if ((e.target as HTMLElement).closest(".dt-resize")) return e.preventDefault();
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", label);
+                        setDragging(c);
+                      }}
+                      onDragOver={(e) => {
+                        if (dragging === null || dragging === c) return;
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        const r = e.currentTarget.getBoundingClientRect();
+                        const side = e.clientX < r.left + r.width / 2 ? "before" : "after";
+                        if (drop?.col !== c || drop.side !== side) setDrop({ col: c, side });
+                      }}
+                      onDragLeave={(e) => {
+                        if (!e.currentTarget.contains(e.relatedTarget as Node | null) && drop?.col === c) setDrop(null);
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        if (dragging !== null && drop?.col === c) moveCol(dragging, c, drop.side);
+                        setDrop(null);
+                        setDragging(null);
+                      }}
+                      onDragEnd={() => {
+                        setDrop(null);
+                        setDragging(null);
+                      }}
+                      className={cn("group/th bg-card relative border-b text-left align-bottom", cellPad, headShadow, numeric[c] && "text-right", vi === 0 && stickyCell, vi === 0 && "z-20")}
                     >
                       <button
                         type="button"
@@ -232,6 +319,12 @@ export function DataTable({
                               : { col: c, dir: numeric[c] ? -1 : 1 }
                           )
                         }
+                        onKeyDown={(e) => {
+                          if (!e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+                          e.preventDefault();
+                          nudgeCol(c, e.key === "ArrowLeft" ? -1 : 1);
+                        }}
+                        title="Sort · drag to reorder · Alt+←/→ to move"
                         className={cn(
                           "group/sort viz-press -mx-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-micro font-medium tracking-[0.05em] uppercase whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-ring/60",
                           on ? "text-foreground" : "text-muted-foreground hover:text-foreground",
@@ -245,7 +338,8 @@ export function DataTable({
                             strokeWidth={1.75}
                             className={cn(
                               "absolute size-3 transition-[opacity,scale,filter] duration-150 ease-(--viz-ease)",
-                              on ? "scale-25 opacity-0 blur-[4px]" : "opacity-0 group-hover/sort:opacity-60 group-focus-visible/sort:opacity-60"
+                              // The sheet shows every column's sort glyph faintly: the affordance is on display there.
+                              on ? "scale-25 opacity-0 blur-[4px]" : "opacity-0 group-hover/sort:opacity-60 group-focus-visible/sort:opacity-60 in-data-viz-fullscreen:opacity-35 in-data-viz-fullscreen:group-hover/sort:opacity-70"
                             )}
                           />
                           <ArrowUp
@@ -304,8 +398,9 @@ export function DataTable({
                       ent.kind === "first" ? "viz-in" : ent.kind === "new" ? "viz-row-new" : "viz-fade"
                     )}
                   >
-                    {rows[ri].map((cell, c) => {
-                      const sticky = c === 0 && cn(stickyCell, "bg-(--row-bg) transition-[background-color] duration-150 ease-(--viz-ease)");
+                    {visible.map((c, vi) => {
+                      const cell = rows[ri][c];
+                      const sticky = vi === 0 && cn(stickyCell, "bg-(--row-bg) transition-[background-color] duration-150 ease-(--viz-ease)");
                       if (!numeric[c]) {
                         // Support-matrix cells: a lone ✓ / ✗ / yes / no wears the functional hue
                         // (still the glyph/word itself, never color alone).
@@ -313,7 +408,7 @@ export function DataTable({
                         const tone = ["✓", "✔", "yes"].includes(t) ? "text-ok" : ["✗", "✘", "no", "×"].includes(t) ? "text-destructive" : ["—", "-", "n/a"].includes(t) ? "text-faint" : "";
                         return (
                           <td key={c} className={cn(hairline, cellPad, "align-top", textWrap, tone, tone && "text-center font-medium", sticky)}>
-                            {c === 0 && pinned && <Pin className="viz-mark text-live mr-1 inline size-3 -translate-y-px" strokeWidth={2} aria-label="pinned" />}
+                            {vi === 0 && pinned && <Pin className="viz-mark text-live mr-1 inline size-3 -translate-y-px" strokeWidth={2} aria-label="pinned" />}
                             {cell}
                           </td>
                         );
@@ -345,13 +440,15 @@ export function DataTable({
         </div>
       </div>
       {texts.length > 8 && (
-        <VizSearch
-          className="border-t"
-          value={query}
-          onChange={setQuery}
-          placeholder="Filter rows"
-          count={order.length !== texts.length ? `${order.length} of ${texts.length}` : count(texts.length, "row")}
-        />
+        <InlineOnly>
+          <VizSearch
+            className="border-t"
+            value={query}
+            onChange={setQuery}
+            placeholder="Filter rows"
+            count={order.length !== texts.length ? `${order.length} of ${texts.length}` : count(texts.length, "row")}
+          />
+        </InlineOnly>
       )}
     </VizFrame>
   );
@@ -388,8 +485,121 @@ function useScrollEdges() {
   return setWrap;
 }
 
+const TOOL_BUTTON =
+  "viz-press text-muted-foreground hover:text-foreground hover:bg-muted/70 inline-flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium whitespace-nowrap transition-[color,background-color] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default disabled:opacity-40 [&_svg]:size-3.5 [&_svg]:shrink-0";
+
+/**
+ * The toolbar the table grows in the sheet (nothing in the card): the row filter with its count,
+ * a hint for the header gestures, the Columns menu (show/hide by original order), density, copy
+ * of what is shown as CSV, and Reset once anything differs from how the agent wrote the table.
+ */
+function TableToolbar({
+  query,
+  onQuery,
+  shown,
+  total,
+  columns,
+  onToggleColumn,
+  onShowAll,
+  density,
+  onDensity,
+  csv,
+  dirty,
+  onReset,
+}: {
+  query: string;
+  onQuery: (q: string) => void;
+  shown: number;
+  total: number;
+  columns: { c: number; label: string; on: boolean }[];
+  onToggleColumn: (c: number) => void;
+  onShowAll: () => void;
+  density: "cozy" | "compact";
+  onDensity: (d: "cozy" | "compact") => void;
+  csv: () => string;
+  dirty: boolean;
+  onReset: () => void;
+}) {
+  const full = React.useContext(VizFullscreenContext);
+  const [copied, setCopied] = React.useState(false);
+  if (!full) return null;
+  const off = columns.filter((c) => !c.on).length;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(csv());
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard denied */
+    }
+  };
+  return (
+    <div className="flex h-10 items-center gap-1 border-b pr-2" data-table-toolbar>
+      <VizSearch className="min-w-0 flex-1" value={query} onChange={onQuery} placeholder="Filter rows" count={shown !== total ? `${shown} of ${total}` : count(total, "row")} />
+      <span className="text-faint mr-2 hidden text-micro whitespace-nowrap xl:inline" aria-hidden>
+        Click a header to sort · drag it to reorder · drag its edge to resize
+      </span>
+      <Popover>
+        <PopoverTrigger asChild>
+          <button type="button" className={TOOL_BUTTON} aria-label="Columns">
+            <Columns3 strokeWidth={1.75} />
+            Columns
+            {off > 0 && <span className="text-faint tabular-nums">· {off} hidden</span>}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent className="w-56 p-1.5" aria-label="Columns">
+          <div className="max-h-72 overflow-auto">
+            {columns.map((col) => (
+              <button
+                key={col.c}
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={col.on}
+                onClick={() => onToggleColumn(col.c)}
+                className="hover:bg-accent flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-md px-2 text-left text-meta outline-none transition-[background-color] duration-100 focus-visible:ring-2 focus-visible:ring-ring/60"
+              >
+                <span className={cn("grid size-4 shrink-0 place-items-center rounded border transition-[background-color,border-color] duration-100", col.on ? "bg-foreground border-foreground text-background" : "border-line-strong")} aria-hidden>
+                  {col.on && <Check className="size-3" strokeWidth={3} />}
+                </span>
+                <span className="truncate">{col.label}</span>
+              </button>
+            ))}
+          </div>
+          {off > 0 && (
+            <button type="button" onClick={onShowAll} className="text-muted-foreground hover:text-foreground hover:bg-accent mt-1 flex h-8 w-full cursor-pointer items-center rounded-md border-t px-2 text-micro font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/60">
+              Show all columns
+            </button>
+          )}
+        </PopoverContent>
+      </Popover>
+      <AnimatedTabs
+        ariaLabel="Row density"
+        size="sm"
+        className="mx-1"
+        value={density}
+        onChange={onDensity}
+        items={[
+          { value: "cozy", label: "Cozy" },
+          { value: "compact", label: "Compact" },
+        ]}
+      />
+      <button type="button" onClick={copy} className={TOOL_BUTTON} aria-label={copied ? "Copied" : "Copy shown rows as CSV"}>
+        <IconSwap on={copied} offIcon={<Copy strokeWidth={1.75} />} onIcon={<Check className="text-ok" strokeWidth={2.25} />} />
+        Copy CSV
+      </button>
+      <button type="button" onClick={onReset} disabled={!dirty} className={TOOL_BUTTON} aria-label="Reset sort, order, columns and filter">
+        <RotateCcw strokeWidth={1.75} />
+        Reset
+      </button>
+    </div>
+  );
+}
+
 /** Table ⇄ Chart, in the card header. Only offered when the data has one obvious chart in it. */
 function ViewSwitch({ view, onChange }: { view: "table" | "chart"; onChange: (v: "table" | "chart") => void }) {
+  // Switching swaps the whole block for a ChartBlock (a different frame), which would close the
+  // sheet under the reader: the switch lives in the card only.
+  if (React.useContext(VizFullscreenContext)) return null;
   return (
     <AnimatedTabs
       ariaLabel="View as"

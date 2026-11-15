@@ -14,6 +14,19 @@ export const VizFullscreenContext = React.createContext(false);
 export const VizFullscreenGate = React.createContext<((open: boolean) => void) | null>(null);
 
 /**
+ * A frame renders its body twice while fullscreen is open — once in the card, once in the sheet —
+ * from the same elements, so block state (sort, filter, folds) is shared. These pick a mount:
+ * `FullscreenOnly` for the toolbar a block grows in the sheet, `InlineOnly` for a control that
+ * would unmount the frame (a table ⇄ chart switch swaps the whole block, closing the sheet).
+ */
+export function FullscreenOnly({ children }: { children: React.ReactNode }) {
+  return React.useContext(VizFullscreenContext) ? <>{children}</> : null;
+}
+export function InlineOnly({ children }: { children: React.ReactNode }) {
+  return React.useContext(VizFullscreenContext) ? null : <>{children}</>;
+}
+
+/**
  * How a block uses the fullscreen:
  *  · `flow`   — a document (table, json, log, list): fills the dialog's width, top-aligned, its own
  *               scroller runs the dialog's height. No zoom: text is read, not inspected.
@@ -41,6 +54,7 @@ export function VizFullscreen({
   title,
   mode,
   ownsZoom,
+  actions,
   children,
 }: {
   open: boolean;
@@ -48,6 +62,8 @@ export function VizFullscreen({
   title: string;
   mode: VizFullscreenMode;
   ownsZoom?: boolean;
+  /** The block's header controls (level chips, series toggles, expand-all): the sheet keeps them. */
+  actions?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const [view, setView] = React.useState<View>(FIT);
@@ -59,6 +75,7 @@ export function VizFullscreen({
   const zoomable = canvas && !ownsZoom;
   const btn = "viz-press text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60 disabled:cursor-default disabled:opacity-40";
   return (
+    <VizFullscreenContext.Provider value>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         title={title}
@@ -91,6 +108,7 @@ export function VizFullscreen({
         }}
         actions={
           <>
+            {actions && <span className="mr-1 flex items-center gap-0.5">{actions}</span>}
             {zoomable && (
               <div className="bg-muted/50 mr-1 flex items-center gap-0.5 rounded-lg border p-0.5" role="group" aria-label="Zoom">
                 <button type="button" className={btn} onClick={() => zoomBy(1 / STEP)} disabled={view.scale <= MIN} aria-label="Zoom out" title="Zoom out (−)">
@@ -121,19 +139,18 @@ export function VizFullscreen({
           </>
         }
       >
-        <VizFullscreenContext.Provider value>
-          {!canvas ? (
-            <FlowPane>{children}</FlowPane>
-          ) : ownsZoom ? (
-            <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
-          ) : (
-            <ZoomPane view={view} setView={setView} zoomBy={zoomBy}>
-              {children}
-            </ZoomPane>
-          )}
-        </VizFullscreenContext.Provider>
+        {!canvas ? (
+          <FlowPane>{children}</FlowPane>
+        ) : ownsZoom ? (
+          <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+        ) : (
+          <ZoomPane view={view} setView={setView} zoomBy={zoomBy}>
+            {children}
+          </ZoomPane>
+        )}
       </DialogContent>
     </Dialog>
+    </VizFullscreenContext.Provider>
   );
 }
 
@@ -145,7 +162,7 @@ export function VizFullscreen({
  */
 function FlowPane({ children }: { children: React.ReactNode }) {
   return (
-    <div className="viz-swap min-h-0 flex-1 overflow-auto" style={{ "--viz-full": "calc(92dvh - 2.75rem)" } as React.CSSProperties}>
+    <div className="viz-swap flex min-h-0 flex-1 flex-col overflow-auto" style={{ "--viz-full": "calc(92dvh - 2.75rem)" } as React.CSSProperties}>
       {children}
     </div>
   );

@@ -1966,6 +1966,22 @@ col { transition: width 0.2s var(--ease-out-quint); }
 [data-viz-fullscreen] .mermaid-diagram svg { max-height: none; }
 /* The fullscreen canvas ground: a 16px dot grid in the hairline colour. It says "this pans" and
    gives a zoomed picture something to move against; the sheet's own colour stays underneath. */
+/* Column reorder: the header being dragged dims, the drop edge is a 2px live-hue line on the
+   neighbour it will land beside. */
+th[data-dragging] { opacity: 0.4; }
+th[data-drop]::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--live);
+  z-index: 11;
+  pointer-events: none;
+}
+th[data-drop="before"]::after { left: -1px; }
+th[data-drop="after"]::after { right: -1px; }
 .viz-canvas-ground {
   background-color: var(--popover);
   background-image: radial-gradient(color-mix(in oklab, var(--border) 80%, transparent) 1px, transparent 1.5px);

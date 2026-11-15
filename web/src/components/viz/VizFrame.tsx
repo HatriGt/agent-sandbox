@@ -246,7 +246,7 @@ export function VizFrame({
         </div>
       )}
       {full && (
-        <VizFullscreen open={full} onOpenChange={setFull} title={title ?? slotTitle ?? "Visualization"} mode={fullscreen} ownsZoom={ownsZoom}>
+        <VizFullscreen open={full} onOpenChange={setFull} title={title ?? slotTitle ?? "Visualization"} mode={fullscreen} ownsZoom={ownsZoom} actions={actions}>
           {children}
         </VizFullscreen>
       )}

@@ -5,6 +5,7 @@ import { IconSwap } from "./motion";
 import { cn } from "@/lib/utils";
 import type { ChartSpec } from "@/lib/viz";
 import { VIZ_ICON_BUTTON, VizFrame, seriesColor } from "./VizFrame";
+import { InlineOnly } from "./viz-fullscreen";
 import { DataTable } from "./DataTable";
 
 /**
@@ -46,6 +47,7 @@ export function ChartBlock({
     });
   const tableable = !noTable && spec.type !== "sparkline" && spec.labels.length > 0;
   const switcher = tableable && (
+    <InlineOnly>
     <button
       type="button"
       onClick={() => setView((v) => (v === "chart" ? "table" : "chart"))}
@@ -55,6 +57,7 @@ export function ChartBlock({
     >
       <IconSwap on={view === "table"} offIcon={<Table2 className="size-3.5" strokeWidth={1.75} />} onIcon={<BarChart3 className="size-3.5" strokeWidth={1.75} />} />
     </button>
+    </InlineOnly>
   );
   const headerActions =
     actions || switcher ? (

@@ -5,6 +5,7 @@ import { FileMark } from "@/lib/fileIcon";
 import type { TreeNode } from "@/lib/viz";
 import { VIZ_ICON_BUTTON, VizEmpty, VizFrame, VizSearch } from "./VizFrame";
 import { IconSwap } from "./motion";
+import { FullscreenOnly } from "./viz-fullscreen";
 
 type Fold = { base: "auto" | "all" | "none"; over: Record<string, boolean> };
 
@@ -66,8 +67,12 @@ export function TreeBlock({ roots, source }: { roots: TreeNode[]; source: string
         )
       }
     >
-      {count > 8 && (
+      {count > 8 ? (
         <VizSearch className="border-b" value={query} onChange={setQuery} placeholder="Filter by path" count={keep ? `${keep.size} shown` : undefined} />
+      ) : (
+        <FullscreenOnly>
+          <VizSearch className="border-b" value={query} onChange={setQuery} placeholder="Filter by path" count={keep ? `${keep.size} shown` : undefined} />
+        </FullscreenOnly>
       )}
       <TreeCtx.Provider value={ctx}>
         <div className={cn("max-h-96 overflow-auto px-2 py-1.5 font-mono text-micro in-data-viz-fullscreen:max-h-(--viz-full)", keep && keep.size === 0 && "hidden")} role="tree">

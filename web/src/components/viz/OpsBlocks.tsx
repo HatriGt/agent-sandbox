@@ -150,7 +150,16 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
   }, [lines]);
   const [query, setQuery] = React.useState("");
   const [flash, setFlash] = React.useState<number | null>(null);
-  const scroller = React.useRef<HTMLDivElement>(null);
+  // The body mounts twice while fullscreen is open (card + sheet), so the scroller is found by id,
+  // not held in a ref: a ref would point at whichever mounted last and go null when the sheet closes.
+  const id = React.useId();
+  React.useEffect(() => {
+    if (flash === null) return;
+    for (const box of Array.from(document.querySelectorAll<HTMLElement>(`[data-log="${CSS.escape(id)}"]`))) {
+      const row = box.querySelector<HTMLElement>(`[data-line="${flash}"]`);
+      if (row) box.scrollTo({ top: row.offsetTop - 12, behavior: resolvedReduced() ? "auto" : "smooth" });
+    }
+  }, [flash, id]);
   const q = query.trim().toLowerCase();
   // Keep the original line index so "jump to first error" can find its row under any filter.
   const shown = lines
@@ -164,11 +173,6 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
     if (filter && filter !== "error") setFilter(null);
     if (q && !lines[firstError].text.toLowerCase().includes(q)) setQuery("");
     setFlash(firstError);
-    requestAnimationFrame(() => {
-      const row = scroller.current?.querySelector<HTMLElement>(`[data-line="${firstError}"]`);
-      const box = scroller.current;
-      if (row && box) box.scrollTo({ top: row.offsetTop - 12, behavior: resolvedReduced() ? "auto" : "smooth" });
-    });
     window.setTimeout(() => setFlash((f) => (f === firstError ? null : f)), 1600);
   };
   return (
@@ -224,7 +228,7 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
         </VizEmpty>
       )}
       {/* Stays mounted while empty: "jump to first error" scrolls it in the frame after clearing. */}
-      <div ref={scroller} hidden={shown.length === 0} className="bg-trace relative max-h-96 overflow-auto px-4 py-3 in-data-viz-fullscreen:max-h-(--viz-full)">
+      <div data-log={id} hidden={shown.length === 0} className="bg-trace relative max-h-96 overflow-auto px-4 py-3 in-data-viz-fullscreen:max-h-(--viz-full) in-data-viz-fullscreen:flex-1">
           <pre className="m-0 font-mono text-code whitespace-pre-wrap">
             {shown.map(({ l, i }) => (
               <div
@@ -236,6 +240,10 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
                   flash === i ? "bg-destructive/20" : "transition-[background-color] duration-700 ease-(--viz-ease)"
                 )}
               >
+                {/* The sheet has room for a line gutter: the number the agent would quote. */}
+                <span className="text-faint mr-3 hidden w-8 shrink-0 text-right tabular-nums select-none in-data-viz-fullscreen:inline-block" aria-hidden>
+                  {i + 1}
+                </span>
                 <LogText line={l} q={q} />
               </div>
             ))}
