@@ -374,7 +374,7 @@ function ServerActions({ server: s, health, testing, onTest, onEdit, onMutate }:
 
 function ListSkeleton() {
   return (
-    <div className="bg-card overflow-hidden rounded-xl border shadow-e1" aria-busy="true" aria-label="Loading servers">
+    <div className="surface overflow-hidden rounded-xl" aria-busy="true" aria-label="Loading servers">
       <div className="bg-muted/30 flex items-center gap-1.5 border-b px-4 py-2.5">
         <Bar className="h-8 w-16 rounded-full" />
         <Bar className="h-8 w-14 rounded-full" />
@@ -415,7 +415,7 @@ function EmptyState({ onAdd, onPaste }: { onAdd: () => void; onPaste: () => void
         </p>
       </div>
       <div className="relative mt-6 grid gap-2 sm:grid-cols-2">
-        <button type="button" onClick={onAdd} className="group bg-background hover-raise hover:border-line-strong flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors">
+        <button type="button" onClick={onAdd} className="group surface surface-hover hover-raise flex cursor-pointer items-start gap-3 p-4 text-left">
           <span className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg shadow-e1" aria-hidden>
             <Plus className="size-4" />
           </span>
@@ -424,7 +424,7 @@ function EmptyState({ onAdd, onPaste }: { onAdd: () => void; onPaste: () => void
             <span className="text-muted-foreground text-micro leading-snug">A command the sandbox runs, or a URL it connects to — with its secrets.</span>
           </span>
         </button>
-        <button type="button" onClick={onPaste} className="group bg-background hover-raise hover:border-line-strong flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors">
+        <button type="button" onClick={onPaste} className="group surface surface-hover hover-raise flex cursor-pointer items-start gap-3 p-4 text-left">
           <span className="bg-muted text-muted-foreground group-hover:text-foreground grid size-8 shrink-0 place-items-center rounded-lg transition-colors" aria-hidden>
             <ClipboardPaste className="size-4" />
           </span>
@@ -572,7 +572,7 @@ function JsonView({ config, onSave }: { config: McpServersResponse["config"] | n
     );
   }
   return (
-    <div className="bg-card overflow-hidden rounded-xl border shadow-e1">
+    <div className="surface overflow-hidden rounded-xl">
       <div className="bg-muted/30 flex flex-wrap items-center gap-1.5 border-b px-3 py-2 sm:px-4">
         <span className="stamp text-muted-foreground min-w-0 truncate">~/.agent-sandbox/mcp.json</span>
         <Tooltip>

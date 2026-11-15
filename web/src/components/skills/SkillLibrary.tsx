@@ -219,7 +219,7 @@ export function TemplateStrip({ existing, onPick, onNew }: { existing: Record<st
               <button
                 type="button"
                 onClick={onNew}
-                className="text-muted-foreground hover:text-foreground hover:border-line-strong flex h-full min-h-[7.5rem] w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-meta transition-colors"
+                className="surface surface-hover text-muted-foreground hover:text-foreground flex h-full min-h-[7.5rem] w-full cursor-pointer flex-col items-center justify-center gap-2 p-4 text-meta"
               >
                 <Plus className="size-4" />
                 Blank skill
@@ -298,7 +298,7 @@ export function EmptyState({ onPick, onNew, onImport }: { onPick: (d: Draft) => 
             <button
               type="button"
               onClick={onNew}
-              className="text-muted-foreground hover:text-foreground hover:border-line-strong flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed py-3 text-meta transition-colors"
+              className="surface surface-hover text-muted-foreground hover:text-foreground flex w-full cursor-pointer items-center justify-center gap-2 py-3 text-meta"
             >
               <Plus className="size-4" />
               Blank skill

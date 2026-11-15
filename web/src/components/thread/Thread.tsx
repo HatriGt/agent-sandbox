@@ -1509,7 +1509,7 @@ function IdleEmpty({ box, onNew, onPick }: { box: BoxView; onNew: () => void; on
       {/* One list, not four equal cards: the starters are a menu of first lines for the composer, so
           they read as rows (mark, name, what it sends) with one frame around the lot. The arrow
           says where a pick goes: up into the composer, to be edited before it is sent. */}
-      <ul className="bg-card divide-border w-full max-w-[40rem] divide-y overflow-hidden rounded-xl border">
+      <ul className="bg-card divide-border w-full max-w-[40rem] surface divide-y overflow-hidden rounded-xl">
         {STARTERS.map((st, i) => (
           <li key={st.title} className="stagger-item" style={{ "--i": i } as React.CSSProperties}>
             <button

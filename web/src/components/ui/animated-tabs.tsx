@@ -66,7 +66,7 @@ export function AnimatedTabs<T extends string>({
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={cn("bg-muted inline-flex items-center gap-0.5 rounded-md p-0.5", size === "sm" ? "h-7" : "h-9", className)}
+      className={cn("bg-foreground/5 inline-flex items-center gap-0.5 rounded-full p-0.5", size === "sm" ? "h-7" : "h-9", className)}
     >
       {items.map((it, i) => {
         const on = it.value === value;
@@ -87,15 +87,15 @@ export function AnimatedTabs<T extends string>({
             onClick={() => onChange(it.value)}
             onKeyDown={(e) => onKey(e, i)}
             className={cn(
-              "relative isolate flex cursor-pointer items-center gap-1 rounded font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
-              size === "sm" ? "h-6 px-2 text-micro" : "h-8 px-3 text-meta",
+              "relative isolate flex cursor-pointer items-center gap-1 rounded-full font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+              size === "sm" ? "h-6 px-2.5 text-micro" : "h-8 px-3.5 text-meta",
               on ? "text-foreground" : "text-muted-foreground hover:text-foreground"
             )}
           >
             {on && (
               <motion.span
                 layoutId={`${base}-pill`}
-                className="bg-card shadow-e1 absolute inset-0 -z-10 rounded"
+                className="bg-(--viz-tile) shadow-e1 absolute inset-0 -z-10 rounded-full"
                 transition={reduce ? { duration: 0 } : SPRING}
                 aria-hidden
               />

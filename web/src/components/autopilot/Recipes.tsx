@@ -35,10 +35,10 @@ export function RecipeGallery({ recipes, onPick, className, heading = "Start fro
               <button
                 type="button"
                 onClick={() => onPick(r.id)}
-                className="group bg-card hover:border-foreground/25 focus-visible:ring-ring flex h-full w-full cursor-pointer flex-col rounded-xl border p-3.5 text-left outline-none transition-[border-color,transform] duration-150 focus-visible:ring-2 active:scale-[0.985]"
+                className="group surface surface-hover focus-visible:ring-ring flex h-full w-full cursor-pointer flex-col p-3.5 text-left outline-none transition-[background-color,transform] duration-150 focus-visible:ring-2 active:scale-[0.985]"
               >
                 <span className="flex w-full items-center gap-2.5">
-                  <span className="bg-muted text-foreground grid size-8 shrink-0 place-items-center rounded-lg" aria-hidden>
+                  <span className="tile text-foreground grid size-8 shrink-0 place-items-center rounded-lg shadow-e1" aria-hidden>
                     <Icon className="size-4" strokeWidth={1.75} />
                   </span>
                   <span className="text-foreground min-w-0 flex-1 truncate text-meta font-medium">{r.title}</span>
@@ -46,8 +46,8 @@ export function RecipeGallery({ recipes, onPick, className, heading = "Start fro
                 </span>
                 <span className="text-muted-foreground mt-2 line-clamp-2 text-micro leading-relaxed">{r.line}</span>
                 <span className="mt-auto flex flex-wrap items-center gap-1.5 pt-3">
-                  <span className="text-muted-foreground bg-muted/60 rounded-full px-2 py-0.5 font-mono text-micro">{r.trigger}</span>
-                  {r.quiet && <span className="text-faint rounded-full border px-2 py-0.5 text-micro">quiet</span>}
+                  <span className="tile text-muted-foreground rounded-full px-2 py-0.5 font-mono text-micro">{r.trigger}</span>
+                  {r.quiet && <span className="bg-foreground/6 text-muted-foreground rounded-full px-2 py-0.5 text-micro">quiet</span>}
                 </span>
               </button>
             </li>

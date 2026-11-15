@@ -33,7 +33,7 @@ export function MemoryOverview({
   const stale = live.filter((n) => n.stale).length;
 
   return (
-    <section aria-label="Memory overview" className="bg-card overflow-hidden rounded-xl border">
+    <section aria-label="Memory overview" className="surface overflow-hidden rounded-xl">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 pt-3.5">
         <p className="text-foreground text-body font-medium tabular-nums">
           {live.length ? plural(live.length, "note") : "Nothing remembered yet"}

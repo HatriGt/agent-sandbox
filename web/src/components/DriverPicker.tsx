@@ -13,10 +13,10 @@ function Badge({ children, tone = "muted" }: { children: React.ReactNode; tone?:
   return (
     <span
       className={cn(
-        "rounded-full border px-1.5 py-px text-micro font-normal whitespace-nowrap",
-        tone === "ok" && "border-ok/40 text-ok",
-        tone === "attention" && "border-attention/50 text-attention",
-        tone === "muted" && "border-line-strong text-muted-foreground"
+        "rounded-full px-1.5 py-px text-micro font-normal whitespace-nowrap",
+        tone === "ok" && "bg-ok/12 text-ok",
+        tone === "attention" && "bg-attention/10 text-attention-text",
+        tone === "muted" && "bg-foreground/6 text-muted-foreground"
       )}
     >
       {children}

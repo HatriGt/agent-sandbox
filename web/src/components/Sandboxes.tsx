@@ -191,8 +191,8 @@ export function Sandboxes({
             {loading ? (
               <MachineTable boxes={[]} grouped={false} lifecycle={lifecycle} loading onOpen={onOpen} onDestroyed={onDestroyed} />
             ) : !sorted.length ? (
-              <div className="flex flex-col items-center rounded-xl border border-dashed px-6 py-14 text-center">
-                <span className="bg-muted text-muted-foreground mb-4 grid size-12 place-items-center rounded-full" aria-hidden>
+              <div className="surface flex flex-col items-center px-6 py-14 text-center">
+                <span className="tile text-muted-foreground mb-4 grid size-12 place-items-center rounded-full shadow-e1" aria-hidden>
                   <Server className="size-5" />
                 </span>
                 <p className="text-foreground text-lead font-medium">Nothing is up</p>
@@ -203,7 +203,7 @@ export function Sandboxes({
                 </Button>
               </div>
             ) : !visible.length ? (
-              <div className="rounded-xl border border-dashed py-12 text-center">
+              <div className="surface py-12 text-center">
                 <p className="text-foreground text-lead font-medium">Nothing matches</p>
                 <p className="text-muted-foreground mt-1 text-meta">
                   {q ? <>No machine matches “{query.trim()}”{filter !== "all" && <> in {GROUP_LABEL[filter as Exclude<Filter, "all">].toLowerCase()}</>}.</> : <>No machines are {GROUP_LABEL[filter as Exclude<Filter, "all">].toLowerCase()} right now.</>}

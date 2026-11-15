@@ -241,7 +241,7 @@ export function DataTable<T>({
                   <button
                     type="button"
                     onClick={() => cycle(c.id)}
-                    className={cn("hover:text-foreground group/sort press-small -mx-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 uppercase", on && "text-foreground", c.align === "end" && "flex-row-reverse")}
+                    className={cn("hover:text-foreground group/sort press-small -mx-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5", on && "text-foreground", c.align === "end" && "flex-row-reverse")}
                   >
                     {c.header}
                     <span className="relative inline-grid size-3 place-items-center">
@@ -314,7 +314,7 @@ export function DataTable<T>({
               <React.Fragment key={`${epoch}:${key}`}>
                 {head && (
                   <TableRow className="hover:bg-(--table-bg)" data-enter={motion["data-enter"]} style={motion.style}>
-                    <TableCell colSpan={span} className="text-faint bg-(--table-head-bg,var(--table-bg)) h-auto py-2 pt-4 text-[11px] font-medium tracking-[0.05em] uppercase">
+                    <TableCell colSpan={span} className="text-muted-foreground bg-(--table-head-bg,var(--table-bg)) h-auto py-2 pt-4 text-micro font-medium">
                       {g}
                     </TableCell>
                   </TableRow>

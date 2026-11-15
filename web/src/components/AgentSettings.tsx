@@ -122,7 +122,7 @@ export function AgentSettings({ harnesses = [] }: { harnesses?: HarnessView[] })
                   disabled={busy !== null}
                   className={cn(
                     "flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-left transition-[border-color,background-color,box-shadow] duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-default",
-                    active ? "border-ring bg-card raised" : "border-border hover:border-line-strong hover:bg-muted/40"
+                    active ? "border-ring bg-(--viz-tile) raised" : "surface surface-hover border-transparent"
                   )}
                 >
                   <span aria-hidden className={cn("mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border transition-colors duration-150", active ? "border-ring" : "border-line-strong")}>
@@ -132,7 +132,7 @@ export function AgentSettings({ harnesses = [] }: { harnesses?: HarnessView[] })
                     <span className="text-foreground flex flex-wrap items-center gap-2 text-meta font-medium">
                       {a.label}
                       {a.id === FACTORY && <span className="text-faint text-micro font-normal">default</span>}
-                      {a.id !== "claude" && <span className="border-line-strong text-muted-foreground rounded-full border px-1.5 py-px text-micro font-normal">beta</span>}
+                      {a.id !== "claude" && <span className="bg-foreground/6 text-muted-foreground rounded-full px-1.5 py-px text-micro font-normal">beta</span>}
                       {pinned > 0 && <span className="text-faint ml-auto text-micro font-normal tabular-nums">{pinned} harness{pinned === 1 ? "" : "es"}</span>}
                     </span>
                     <span className="text-muted-foreground mt-0.5 block text-micro">{DESC[a.id] ?? ""}</span>

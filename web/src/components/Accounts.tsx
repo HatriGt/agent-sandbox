@@ -41,7 +41,7 @@ export function Accounts({ embedded = false, query = "", onCount }: { embedded?:
 
   return (
     <div className={cn(!embedded && "mx-auto max-w-3xl px-5 py-7")}>
-      <div className="bg-card overflow-hidden rounded-xl border">
+      <div className="surface overflow-hidden rounded-xl">
         <Collapse open={!!error && error !== dismissed}>
           <div role="alert" className="bg-destructive/10 text-destructive flex items-start gap-2 border-b px-4 py-2.5 text-meta">
             <span className="min-w-0 flex-1">{error}</span>
@@ -64,7 +64,7 @@ export function Accounts({ embedded = false, query = "", onCount }: { embedded?:
               ))}
             </div>
           ) : state === "empty" ? (
-            <div className="m-3 flex flex-col items-center rounded-lg border border-dashed px-6 py-8 text-center">
+            <div className="surface m-3 flex flex-col items-center rounded-xl px-6 py-8 text-center">
               <Github className="text-muted-foreground size-5" aria-hidden />
               <p className="text-foreground mt-2.5 text-meta font-medium">No account connected</p>
               <p className="text-muted-foreground mt-0.5 text-meta">Sandboxes can only reach public repositories until you add one.</p>

@@ -262,7 +262,7 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
 
         <Swap state={error ? "error" : rows === null ? "loading" : !rows.length && !liveRows.length ? "empty" : !tableRows.length ? `none-${filter}` : "list"}>
           {error ? (
-            <div className="border-destructive/30 bg-destructive/5 rounded-xl border border-dashed py-12 text-center" role="alert">
+            <div className="surface bg-destructive/5 py-12 text-center" role="alert">
               <p className="text-destructive text-lead font-medium">Could not load history</p>
               <p className="text-muted-foreground mt-1 text-meta">{error}</p>
               <Button size="sm" variant="outline" className="mt-3" onClick={() => setAttempt((n) => n + 1)}>
@@ -271,7 +271,7 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
               </Button>
             </div>
           ) : rows === null ? (
-            <div className="overflow-hidden rounded-xl border" aria-busy="true">
+            <div className="surface overflow-hidden rounded-xl" aria-busy="true">
               {[0, 1, 2, 3].map((i) => (
                 <div key={i} className="flex items-center gap-4 border-b px-4 py-4 last:border-b-0">
                   <Bar className="h-2.5 w-14" />
@@ -283,7 +283,7 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
           ) : !rows.length && filtered ? (
             <>
               <div className="mb-3 flex flex-wrap items-center justify-end gap-2">{filters}</div>
-              <div className="rounded-xl border border-dashed py-12 text-center">
+              <div className="surface py-12 text-center">
                 <p className="text-foreground text-lead font-medium">Nothing matches</p>
                 <p className="text-muted-foreground mt-1 text-meta">No finished run fits these filters.</p>
                 <Button size="sm" variant="ghost" className="text-live mt-2" onClick={() => setLf(NO_FILTERS)}>
@@ -292,7 +292,7 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
               </div>
             </>
           ) : !rows.length && !liveRows.length ? (
-            <div className="rounded-xl border border-dashed py-14 text-center">
+            <div className="surface py-14 text-center">
               <p className="text-foreground text-lead font-medium">Nothing here yet</p>
               <p className="text-muted-foreground mx-auto mt-1 max-w-sm text-meta">
                 When a run finishes, its receipt is kept even after the machine is reaped.
@@ -301,7 +301,7 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
           ) : !tableRows.length ? (
             <>
               <div className="mb-3 flex flex-wrap items-center justify-end gap-2">{filters}</div>
-              <div className="rounded-xl border border-dashed py-12 text-center">
+              <div className="surface py-12 text-center">
                 <p className="text-foreground text-lead font-medium">Nothing matches</p>
                 <p className="text-muted-foreground mt-1 text-meta">No {filter} runs among the loaded records.</p>
                 <Button size="sm" variant="ghost" className="text-live mt-2" onClick={() => setFilter("all")}>

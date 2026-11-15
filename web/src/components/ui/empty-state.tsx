@@ -5,8 +5,8 @@ import { cn } from "@/lib/utils";
 /**
  * A page-level empty state that teaches: a glyph, what this surface will hold, how it gets filled,
  * and the one action that fills it. Optional `facts` — short "what happens next" rows — turn a
- * blank into an explanation (a "how it works" card, not a sad face). Dashed hairline so it reads
- * as a placeholder for content, never as content. `ListEmpty` is the inline-list sibling.
+ * blank into an explanation (a "how it works" card, not a sad face). A tonal surface, the glyph on a
+ * tile, so it reads as the place content will fill. `ListEmpty` is the inline-list sibling.
  */
 export function EmptyState({
   icon: Icon,
@@ -28,9 +28,9 @@ export function EmptyState({
   return (
     <div
       role={tone === "destructive" ? "alert" : undefined}
-      className={cn("enter flex flex-col items-center rounded-xl border border-dashed px-6 py-12 text-center", tone === "destructive" && "border-destructive/30 bg-destructive/5", className)}
+      className={cn("enter surface flex flex-col items-center px-6 py-12 text-center", tone === "destructive" && "bg-destructive/5", className)}
     >
-      <span className={cn("grid size-11 place-items-center rounded-full", tone === "destructive" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground")} aria-hidden>
+      <span className={cn("grid size-11 place-items-center rounded-full", tone === "destructive" ? "bg-destructive/10 text-destructive" : "tile text-muted-foreground shadow-e1")} aria-hidden>
         <Icon className="size-5" strokeWidth={1.75} />
       </span>
       <p className={cn("mt-4 text-lead font-medium", tone === "destructive" ? "text-destructive" : "text-foreground")}>{title}</p>
@@ -41,7 +41,7 @@ export function EmptyState({
           {facts.map((f, i) => {
             const FIcon = f.icon;
             return (
-              <li key={i} className="bg-card flex items-start gap-3 rounded-lg border px-3 py-2.5 text-meta">
+              <li key={i} className="tile flex items-start gap-3 rounded-lg px-3 py-2.5 text-meta">
                 <span className="text-muted-foreground mt-0.5 shrink-0">
                   <FIcon className="size-3.5" aria-hidden />
                 </span>

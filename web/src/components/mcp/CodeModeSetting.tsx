@@ -61,7 +61,7 @@ export function CodeModeSetting({ data, enabledServers }: { data: McpServersResp
             <span id="code-mode-h" className="text-foreground text-meta font-medium">
               Code mode
             </span>
-            <span className="border-line-strong text-muted-foreground rounded-full border px-1.5 py-px text-micro">beta</span>
+            <span className="bg-foreground/6 text-muted-foreground rounded-full px-1.5 py-px text-micro">beta</span>
           </div>
           <p className="text-muted-foreground mt-0.5 text-micro">
             Claude reaches your MCP servers through one script tool instead of calling each tool directly, and filters results inside the script, so only what the task needs enters the conversation.

@@ -116,11 +116,17 @@ export function SettingsSection({
   );
 }
 
-/** The bordered surface a section's list or form sits in. One elevation: border, no shadow. */
-export function Panel({ className, children, ...props }: React.ComponentProps<"div">) {
+/**
+ * The surface a section's list or form sits in: a tonal frame with the lighter tile set 4px into
+ * it (the transcript's block card, at page scale). No outline, no shadow. `className` styles the
+ * tile (dividers, padding); `frameClassName` the frame (margins).
+ */
+export function Panel({ className, frameClassName, children, ...props }: React.ComponentProps<"div"> & { frameClassName?: string }) {
   return (
-    <div className={cn("bg-card overflow-hidden rounded-xl border", className)} {...props}>
-      {children}
+    <div className={cn("surface p-1", frameClassName)}>
+      <div className={cn("tile overflow-hidden rounded-xl", className)} {...props}>
+        {children}
+      </div>
     </div>
   );
 }

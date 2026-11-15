@@ -873,9 +873,9 @@ export function Hub({
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-            className="rounded-xl border border-dashed px-6 py-9 text-center"
+            className="surface px-6 py-9 text-center"
           >
-            <span className="bg-muted text-muted-foreground mx-auto mb-3 grid size-10 place-items-center rounded-full" aria-hidden>
+            <span className="tile text-muted-foreground mx-auto mb-3 grid size-10 place-items-center rounded-full shadow-e1" aria-hidden>
               <Layers className="size-4" />
             </span>
             <p className="text-foreground text-meta font-medium">Nothing running</p>
@@ -905,7 +905,7 @@ export function Hub({
               </h2>
               {loading ? <Bar className="h-3 w-20" /> : <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />}
             </div>
-            <ul className="@container/live bg-card divide-y overflow-hidden rounded-xl border">
+            <ul className="@container/live surface divide-y overflow-hidden rounded-xl">
               <AnimatePresence initial={false}>
               {loading
                 ? [0, 1, 2].map((i) => (

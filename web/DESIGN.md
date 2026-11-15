@@ -40,6 +40,22 @@
 Consult these before a UI polish pass — borrow taste and interaction patterns, never code. When the
 brief is "more modern", "smoother" or "premium", start here rather than inventing from scratch.
 
+**The expensive-UI references (2026-11-16).** Five libraries whose screens read as expensive; open
+them before any design or polish work and compare the screen in hand against them. What they share
+is written down as the **Surfaces** section below and lives in `index.css` as `.surface`, `.tile`
+and `.pill`.
+
+- [hyperiux vault](https://vault.hyperiux.com) — @_hyperiux_. Dark dot-grid grounds, source-first
+  interaction effects; "if motion does not earn its place, it does not belong".
+- [vanta ui](https://vantaui.com) — @vanta_ui. Recreations of shipped SaaS dashboards (Twenty, Wise,
+  Dropbox, OpenAI): soft grey tonal cards on white, how a real product spaces and weights things.
+- [bencho](https://bencho.dev) — @cabralorenzo. `#0a0a0a` ground, `#141414` borderless cards with
+  lighter widgets set into them, pill segmented controls, headline numbers; every block live.
+- [obsidian ui](https://obsidianui.dev) — @athrix_codes. Borderless dark tiles, pill buttons, motion
+  on ordinary controls.
+- [beste](https://ui.beste.co) — @withbeste. Grey tonal cards on white with white inner tiles, dashed
+  chart grids, tabular numerals, big stats; every motion piece declares a reduced-motion fallback.
+
 **Component libraries and kits (settings surfaces, sheets, segmented controls, list states)**
 
 - [skiper ui](https://skiper-ui.com) — @Gur__vi. The bouncy accordion in the app is credited to it.
@@ -96,10 +112,12 @@ brief is "more modern", "smoother" or "premium", start here rather than inventin
   (180ms) and re-staggers the survivors with the sort stagger; the "n of m" count springs
   (`NumberTicker`). Polls never replay entrances. Reduced motion (`[data-motion="reduced"]`) drops
   all movement.
-- `DataTable` props beyond rows/columns: `bordered` (default **true**: `rounded-xl border bg-card
-  shadow-xs`, head row at muted/40, last row without a bottom hairline; skeleton rows sit in the same
-  card) — pass `bordered={false}` only where the table already lives inside another surface, never
-  wrap a bordered table in a Card/Panel. `search={{ placeholder, text }}` adds a toolbar above the
+- `DataTable` props beyond rows/columns: `bordered` (default **true**: the table's `surface` frame —
+  a tonal ground with 4px padding around a `tile` that holds the rows, head row 2.5% ink over the
+  tile, last row without a bottom hairline; skeleton rows sit in the same frame) — pass
+  `bordered={false}` only where the table already lives inside another surface, never wrap a
+  framed table in a Card/Panel. Column and group labels are sentence case `text-micro font-medium`
+  in muted ink (no uppercase tracking). `search={{ placeholder, text }}` adds a toolbar above the
   card: search input (`/` focuses, Esc clears), live "n of m", and a "No rows match … · Clear search"
   row. `toolbar` puts extra controls (filter chips, buttons) at the right of that toolbar.
   `actions={(row) => …}` adds a right-aligned trailing cell that fades in on row hover/focus (always
@@ -151,6 +169,34 @@ brief is "more modern", "smoother" or "premium", start here rather than inventin
 - [designbookmark.com](https://designbookmark.com) — directory of 2,500+ design tools and galleries;
   start here when a reference above goes stale.
 
+## Surfaces
+
+The grammar the expensive-UI references share, applied to every block the transcript draws and to
+every page. Three tokens (`--viz-ground`, `--viz-tile`, `--viz-hairline`; 4.5% / card / 6% ink in
+light, 5% / 10% / 7% in dark) and three classes in `index.css`:
+
+- **`.surface`** — a tonal card: a few percent of ink mixed over the page, 16px radius, **no
+  outline, no shadow**. Lists, panels, empty states, recipe and option cards, the transcript's
+  block card (`.viz-card` is the same class). Hairlines inside it re-scope `--border` to the lighter
+  hairline, so `divide-y` rows and `border-t` footers need nothing extra. Never nest a surface in a
+  surface — the inner one disappears; use a tile.
+- **`.tile`** — the lighter sheet set 4px into a surface (`.viz-tile`): the rows of a `Panel` or a
+  framed `DataTable`, the selected option card, an icon chip, the empty-state glyph circle. A tile
+  may carry `shadow-e1` when it has to read as lifted (the active segment, the glyph).
+- **`.pill`** — a tonal control (`.viz-pill`): 5% ink at rest, 9% on hover, 12% pressed/open; the
+  shape is `rounded-full`. Filter chips, level chips, badges, the header tools in a block; the
+  segmented control and `AnimatedTabs` are a 5%-ink pill track with the tile as the sliding thumb.
+  `.surface-hover` deepens a clickable surface to 7.5% on hover.
+- **What keeps a line.** Inputs (hairline + ring), the attention cards (ink hairline, principle 1),
+  the side-question dash, dashed drop zones that accept a file. A card never has both a line and a
+  fill; an empty state is a surface, not a dashed box.
+- **Labels** inside surfaces are sentence case; column heads and group heads are `text-micro
+  font-medium` muted ink. Chips inside a card are washes (`bg-foreground/6`, `bg-ok/12`,
+  `.viz-tone`), never outlined.
+- **Both schemes** must be checked: in dark the tile is lighter than the surface, in light it is
+  whiter; a chip that reads on one and vanishes on the other is wrong (`.shots/pages-tour.mjs
+  [--dark]`, `.shots/qa-fix.mjs --scene=blocks [--dark]`).
+
 ## Layout
 
 A framed console. The rail, the shell bar and the status bar share one tinted tone (`--sidebar`);
@@ -192,8 +238,11 @@ themes override a subset of these in `:root[data-theme="…"]` blocks; see **The
 | `--destructive` | red | red | failed, destroy |
 | `--trace` / `--trace-fg` | near-black / light | darker / light | terminal panels (dark in both themes) |
 
-Radius base `0.5rem`; pills for state and small controls; `rounded-2xl` composer; `rounded-xl` cards.
-Elevation is declared once per surface — border **or** `shadow-xs`, never both.
+Radius base `0.5rem`; pills for state and small controls; `rounded-2xl` composer; 16px `.surface`
+cards with 12px `.tile`s inside. Elevation is tonal: a surface is a few percent of ink over the page
+and has no outline; a tile is the lighter sheet set into it (`shadow-e1` only when it must float,
+as the active pill or the empty-state glyph). Borders are for inputs, the attention hairline and
+the side-question dash — not for cards. See **Surfaces**.
 
 ### `cn()` and the type scale
 

@@ -42,7 +42,7 @@ export function Segmented<T extends string>({
     }
   };
   return (
-    <div role="radiogroup" aria-label={ariaLabel} className={cn("bg-muted inline-flex items-center gap-0.5 rounded-md p-0.5", size === "xs" ? "h-6" : "h-7", disabled && "opacity-50", className)}>
+    <div role="radiogroup" aria-label={ariaLabel} className={cn("bg-foreground/5 inline-flex items-center gap-0.5 rounded-full p-0.5", size === "xs" ? "h-6" : "h-7", disabled && "opacity-50", className)}>
       {options.map((o, i) => {
         const on = o.value === value;
         return (
@@ -65,12 +65,12 @@ export function Segmented<T extends string>({
               e.preventDefault();
             }}
             className={cn(
-              "relative isolate flex h-full cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium whitespace-nowrap outline-none transition-[color,opacity] duration-150 focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed",
+              "relative isolate flex h-full cursor-pointer items-center gap-1 rounded-full px-2.5 text-micro font-medium whitespace-nowrap outline-none transition-[color,opacity] duration-150 focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed",
               on ? "text-foreground" : "text-muted-foreground hover:text-foreground",
               busy === o.value && "opacity-60"
             )}
           >
-            {on && <motion.span layoutId={`${id}-pill`} className="bg-card shadow-e1 absolute inset-0 -z-10 rounded" transition={still ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 42, mass: 0.7 }} aria-hidden />}
+            {on && <motion.span layoutId={`${id}-pill`} className="bg-(--viz-tile) shadow-e1 absolute inset-0 -z-10 rounded-full" transition={still ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 42, mass: 0.7 }} aria-hidden />}
             {o.icon}
             {o.label}
           </button>

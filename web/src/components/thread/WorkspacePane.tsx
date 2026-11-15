@@ -1384,7 +1384,7 @@ function QuickOpen({ paths, recent, activePath, editor, initial, onPick, onClose
         initial={still ? false : { opacity: 0, y: -6, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.16, ease: EASE }}
-        className="bg-popover text-popover-foreground shadow-e3 absolute top-3 left-1/2 flex w-[min(37.5rem,calc(100%-2rem))] -translate-x-1/2 flex-col overflow-hidden rounded-xl border"
+        className="bg-popover text-popover-foreground shadow-e3 absolute top-3 left-1/2 flex w-[min(37.5rem,calc(100%-2rem))] -translate-x-1/2 flex-col surface overflow-hidden rounded-xl"
       >
         <label className="flex h-10 items-center gap-2 border-b px-3">
           <Search className="text-muted-foreground size-4" aria-hidden />

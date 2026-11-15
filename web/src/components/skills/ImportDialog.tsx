@@ -158,7 +158,7 @@ function SkillPreview({ draft, files, existing, loading }: { draft: Draft | null
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, transition: { duration: 0.1 } }}
           transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-          className="bg-muted/30 overflow-hidden rounded-xl border"
+          className="bg-muted/30 surface overflow-hidden rounded-xl"
           aria-busy={loading || undefined}
         >
           <div className="flex items-center gap-3 px-3.5 py-3">
@@ -388,7 +388,7 @@ function GitHubStep({ existing, onClose, onImported, onEditOne, preset }: { exis
                     setInput(f.repo);
                     void browse(f.repo);
                   }}
-                  className="group bg-card hover:border-line-strong flex w-full cursor-pointer items-start gap-3 rounded-xl border p-3.5 text-left transition-[border-color,transform,box-shadow] duration-150 ease-out active:scale-[0.985] [@media(hover:hover)]:hover:shadow-e1"
+                  className="group surface surface-hover flex w-full cursor-pointer items-start gap-3 p-3.5 text-left transition-[background-color,transform,box-shadow] duration-150 ease-out active:scale-[0.985] [@media(hover:hover)]:hover:shadow-e1"
                 >
                   <span className="bg-muted text-muted-foreground group-hover:text-foreground grid size-8 shrink-0 place-items-center rounded-lg transition-colors" aria-hidden>
                     <Github className="size-4" />
@@ -406,7 +406,7 @@ function GitHubStep({ existing, onClose, onImported, onEditOne, preset }: { exis
       )}
 
       {loading && (
-        <div className="divide-y overflow-hidden rounded-xl border" aria-busy="true">
+        <div className="surface divide-y overflow-hidden rounded-xl" aria-busy="true">
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex items-center gap-3 px-3 py-2.5">
               <span className="shimmer size-4 rounded-[3px]" />

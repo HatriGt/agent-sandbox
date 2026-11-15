@@ -45,9 +45,9 @@ export function FilterChip({
       onClick={onClick}
       disabled={count === 0 && !active}
       className={cn(
-        "relative isolate flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-meta font-medium outline-none",
+        "relative isolate flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 text-meta font-medium outline-none transition-[background-color,color] duration-150",
         "focus-visible:ring-ring/40 focus-visible:ring-2 disabled:cursor-default disabled:opacity-45",
-        active ? "border-foreground/20 text-background" : "bg-card text-muted-foreground hover:text-foreground hover:border-line-strong",
+        active ? "text-background" : "bg-foreground/5 text-muted-foreground hover:bg-foreground/9 hover:text-foreground",
         active && !group && "bg-foreground",
         className
       )}

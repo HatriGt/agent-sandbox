@@ -73,7 +73,7 @@ export function UpNext({ rows, glyph, label, onOpen }: { rows: readonly Automati
   const lanes = Math.max(...placed.map((p) => p.lane)) + 1;
   const railRem = (lanes - 1) * 1.25 + 1.5 + 0.75 + 1.25;
   return (
-    <section aria-labelledby="upnext-title" className="bg-card enter mb-5 overflow-hidden rounded-xl border">
+    <section aria-labelledby="upnext-title" className="bg-card enter mb-5 surface overflow-hidden rounded-xl">
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 pt-3.5">
         <h2 id="upnext-title" className="text-foreground text-meta font-medium">
           Up next

@@ -179,7 +179,7 @@ export function AutomationRunsPage({ id, onBack, onOpenBox }: { id: string; onBa
               }
             />
           ) : deliveries === null ? (
-            <div className="bg-card overflow-hidden rounded-xl border" aria-busy="true" aria-label="Loading runs">
+            <div className="surface overflow-hidden rounded-xl" aria-busy="true" aria-label="Loading runs">
               {[0, 1, 2, 3].map((i) => (
                 <div key={i} className="flex items-center gap-4 border-b px-4 py-3.5 last:border-b-0">
                   <Bar className="size-2 rounded-full" />

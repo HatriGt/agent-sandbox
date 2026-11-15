@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 export function TestResultsCard({ report, onRaw, rawOpen }: { report: TestReport; onRaw?: () => void; rawOpen?: boolean }) {
   const total = report.passed + report.failed + report.skipped;
   return (
-    <div className="bg-card overflow-hidden rounded-xl border shadow-e1">
+    <div className="surface overflow-hidden rounded-xl">
       <div className="flex flex-wrap items-center gap-2 border-b px-3.5 py-2.5">
         <Chip status="pass" n={report.passed} label="passed" />
         {report.failed > 0 && <Chip status="fail" n={report.failed} label="failed" />}

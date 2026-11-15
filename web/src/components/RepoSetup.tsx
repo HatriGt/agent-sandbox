@@ -139,7 +139,7 @@ function SetupForm({ repo, profile: p, onDone, onChange }: { repo: string; profi
     }
   };
   return (
-    <form onSubmit={(e) => void save(e)} className="border-ring bg-card flex flex-col gap-2 rounded-lg border p-3">
+    <form onSubmit={(e) => void save(e)} className="border-ring bg-(--viz-tile) flex flex-col gap-2 rounded-xl border p-3">
       <div className="text-foreground text-meta font-medium">{repo}</div>
       {CMDS.map((k) => (
         <label key={k} className="grid grid-cols-[4.5rem_1fr] items-center gap-2 text-micro">

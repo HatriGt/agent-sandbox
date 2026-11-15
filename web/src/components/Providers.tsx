@@ -197,7 +197,7 @@ function ProviderForm({ kinds, onDone }: { kinds: ProvidersResponse["kinds"]; on
   };
   const kindInfo = kinds.find((k) => k.id === kind);
   return (
-    <form onSubmit={(e) => void save(e)} className="border-ring bg-card flex flex-col gap-2 rounded-lg border p-3">
+    <form onSubmit={(e) => void save(e)} className="border-ring bg-(--viz-tile) flex flex-col gap-2 rounded-xl border p-3">
       <select value={kind} onChange={(e) => setKind(e.target.value as ProviderKind)} className={inputCls} aria-label="Provider kind">
         {kinds.map((k) => (
           <option key={k.id} value={k.id}>

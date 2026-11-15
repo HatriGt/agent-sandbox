@@ -172,7 +172,7 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
           {!!pr?.labels?.length && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {pr.labels.map((l) => (
-                <span key={l.name} className="label rounded-full border px-2 py-0.5" style={l.color ? { borderColor: `#${l.color}55`, color: `#${l.color}` } : undefined}>
+                <span key={l.name} className="label bg-foreground/6 rounded-full px-2 py-0.5" style={l.color ? { borderColor: `#${l.color}55`, color: `#${l.color}` } : undefined}>
                   {l.name}
                 </span>
               ))}
@@ -212,7 +212,7 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
 
         {!pr ? (
           error ? null : (
-          <div className="overflow-hidden rounded-xl border">
+          <div className="surface overflow-hidden rounded-xl">
             {[0, 1, 2].map((i) => (
               <div key={i} className="flex items-center gap-4 border-b px-4 py-4 last:border-b-0">
                 <Bar className="h-2.5 w-24" />
@@ -331,7 +331,7 @@ function Conversation({ pr, session, repo, number, onPosted }: { pr: PullDetail;
 /** One authored body — the PR description or a comment — rendered with the same markdown as chat. */
 function Comment({ author, at, body, verdict: v }: { author?: string; at?: string; body: string; verdict?: string }) {
   return (
-    <article className="overflow-hidden rounded-xl border">
+    <article className="surface overflow-hidden rounded-xl">
       <div className="flex items-center gap-2 border-b px-3.5 py-2">
         {author && <img src={`https://github.com/${encodeURIComponent(author)}.png?size=40`} alt="" width={20} height={20} className="bg-muted size-5 rounded-full" loading="lazy" />}
         <span className="text-foreground text-meta font-medium">{author ?? "unknown"}</span>
@@ -364,7 +364,7 @@ function relativeTime(at: string): string {
 function Commits({ pr, repo }: { pr: PullDetail; repo: string }) {
   if (!pr.commits?.length) return <Empty>No commits on this pull request.</Empty>;
   return (
-    <ul className="divide-y overflow-hidden rounded-xl border">
+    <ul className="surface divide-y overflow-hidden rounded-xl">
       {pr.commits.map((c) => {
         const subject = c.message.split("\n")[0];
         return (
@@ -400,7 +400,7 @@ function Files({ pr }: { pr: PullDetail }) {
         {pr.files.length} {pr.files.length === 1 ? "file" : "files"} · <span className="text-ok">+{pr.additions}</span> <span className="text-destructive">−{pr.deletions}</span>
         {pr.truncated && <span className="text-attention-text"> · truncated, open on GitHub for the rest</span>}
       </p>
-      <div className="divide-y overflow-hidden rounded-xl border">
+      <div className="surface divide-y overflow-hidden rounded-xl">
         {pr.files.map((f) => {
           const on = open === f.path;
           return (
@@ -457,7 +457,7 @@ function FilePatch({ file }: { file: NonNullable<PullDetail["files"]>[number] })
 function Checks({ pr }: { pr: PullDetail }) {
   if (!pr.checkRuns?.length) return <Empty>No checks reported on the head commit.</Empty>;
   return (
-    <ul className="divide-y overflow-hidden rounded-xl border">
+    <ul className="surface divide-y overflow-hidden rounded-xl">
       {pr.checkRuns.map((c, i) => {
         const running = c.status !== "completed";
         const ok = ["success", "neutral", "skipped"].includes(c.conclusion ?? "");
@@ -495,7 +495,7 @@ function Checks({ pr }: { pr: PullDetail }) {
 
 function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-dashed py-12 text-center">
+    <div className="surface py-12 text-center">
       <p className="text-muted-foreground text-meta">{children}</p>
     </div>
   );

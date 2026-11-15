@@ -42,7 +42,7 @@ const tableVariants = cva(
       variant: {
         plain: "border-t border-(--table-line) [--table-head-bg:var(--background)]",
         surface:
-          "isolate overflow-hidden rounded-xl border bg-card shadow-xs [--table-bg:var(--card)] [--table-head-bg:color-mix(in_oklab,var(--muted)_40%,var(--card))]",
+          "surface isolate p-1 [--table-bg:var(--viz-tile)] [--table-head-bg:color-mix(in_oklab,var(--foreground)_2.5%,var(--viz-tile))]",
       },
       size: {
         sm: "[--table-cell-px:--spacing(2)] [--table-cell-py:--spacing(1.5)] [--table-head-h:--spacing(7.5)] [--table-row-h:34px]",
@@ -69,7 +69,8 @@ function Table({ className, variant, size, stickyHeader, containerClassName, ...
         data-slot="table-container"
         data-sticky-header={stickyHeader ? "" : undefined}
         className={cn(
-          "relative w-full overflow-x-auto overscroll-x-none rounded-[inherit] data-sticky-header:overflow-y-auto",
+          "relative w-full overflow-x-auto overscroll-x-none data-sticky-header:overflow-y-auto",
+          variant === "surface" ? "tile rounded-xl" : "rounded-[inherit]",
           containerClassName
         )}
       >
@@ -116,7 +117,7 @@ function TableHead({ className, align, ...props }: Omit<React.ComponentProps<"th
       scope="col"
       className={cn(
         cellBase,
-        "text-faint h-(--table-head-h) bg-(--table-head-bg,var(--table-bg)) px-(--table-cell-px) text-start text-[11px] font-medium tracking-[0.05em] uppercase",
+        "text-muted-foreground h-(--table-head-h) bg-(--table-head-bg,var(--table-bg)) px-(--table-cell-px) text-start text-micro font-medium",
         "in-data-scrolled-top:shadow-[inset_0_-1px_0_var(--border)] in-data-sticky-header:sticky in-data-sticky-header:top-0 in-data-sticky-header:z-2",
         className
       )}

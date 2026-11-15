@@ -394,7 +394,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
               }
             />
           ) : rows === null ? (
-            <div className="overflow-hidden rounded-xl border" aria-busy="true">
+            <div className="surface overflow-hidden rounded-xl" aria-busy="true">
               {[0, 1, 2].map((i) => (
                 <div key={i} className="flex items-center gap-4 border-b px-4 py-4 last:border-b-0">
                   <Bar className="size-8 rounded-lg" />

@@ -61,7 +61,7 @@ export function AutopilotPage({
         <div
           role="tablist"
           aria-label="Autopilot"
-          className="bg-muted/60 mb-6 grid grid-cols-2 gap-1 rounded-xl p-1 @2xl:inline-grid @2xl:min-w-[34rem]"
+          className="bg-foreground/5 mb-6 grid grid-cols-2 gap-1 rounded-2xl p-1 @2xl:inline-grid @2xl:min-w-[34rem]"
           onKeyDown={(e) => {
             if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
             e.preventDefault();
@@ -89,11 +89,11 @@ export function AutopilotPage({
                 {on && (
                   <motion.span
                     layoutId="autopilot-tab"
-                    className="bg-card absolute inset-0 rounded-lg border shadow-xs"
+                    className="bg-(--viz-tile) absolute inset-0 rounded-xl shadow-e1"
                     transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 40 }}
                   />
                 )}
-                <span className={cn("relative grid size-8 shrink-0 place-items-center rounded-lg transition-colors", on ? "bg-foreground text-background" : "bg-background/70 border")} aria-hidden>
+                <span className={cn("relative grid size-8 shrink-0 place-items-center rounded-lg transition-colors", on ? "bg-foreground text-background" : "bg-(--viz-tile)/60")} aria-hidden>
                   {t.icon}
                 </span>
                 <span className="relative min-w-0">

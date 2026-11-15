@@ -45,7 +45,7 @@ export function CompareLauncher({ harnesses, onCancel, onStarted }: { harnesses:
     </Field>
   );
   return (
-    <Panel className="mb-4">
+    <Panel frameClassName="mb-4">
       <div className="flex flex-col gap-4 p-4">
         <Field label="Task">
           {(w) => <textarea {...w} className={cn(inputClass, "h-24 py-2")} value={task} onChange={(e) => setTask(e.target.value)} placeholder="Add input validation to the signup form" />}

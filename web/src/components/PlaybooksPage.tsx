@@ -257,7 +257,7 @@ export function PlaybooksPage({ boxes, onAutomate }: { boxes: BoxView[]; onAutom
                       key={t.name}
                       type="button"
                       onClick={() => setEditing({ yaml: t.yaml })}
-                      className="group bg-card hover:border-foreground/25 focus-visible:ring-ring flex flex-col rounded-xl border p-3.5 text-left outline-none transition-[border-color,transform] duration-150 focus-visible:ring-2 active:scale-[0.985]"
+                      className="group surface surface-hover focus-visible:ring-ring flex flex-col p-3.5 text-left outline-none transition-[background-color,transform] duration-150 focus-visible:ring-2 active:scale-[0.985]"
                     >
                       <span className="flex items-baseline justify-between gap-3">
                         <span className="text-foreground text-meta font-medium">{t.name}</span>

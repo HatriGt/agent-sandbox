@@ -1647,25 +1647,38 @@
     color: var(--tone-ink, var(--tone));
     background-color: color-mix(in oklab, var(--tone) 12%, transparent);
   }
-  /* The block card and the tile inside it (VizFrame, the fullscreen sheet, the self-drawn list
-     cards). Hairlines on a tile are lighter than the page's: the tile already separates. */
+  /* One surface grammar for the console (DESIGN.md "Surfaces"): a .surface is a tonal card a few
+     percent of ink over the page with no outline; a .tile is the lighter sheet set into it (rows,
+     forms, the selected card); a .pill is a tonal control. Hairlines inside either are lighter
+     than the page's, because the surface already separates. The viz-* names are the same classes. */
+  .surface,
   .viz-card {
+    --border: var(--viz-hairline);
     background: var(--viz-ground);
     border-radius: 1rem;
   }
+  .surface-hover {
+    transition: background-color var(--dur-fast) var(--viz-ease), box-shadow var(--dur-fast) var(--viz-ease), translate var(--dur-fast) var(--viz-ease);
+  }
+  .surface-hover:hover {
+    background: color-mix(in oklab, var(--foreground) 7.5%, var(--background));
+  }
+  .tile,
   .viz-tile {
     --border: var(--viz-hairline);
     background: var(--viz-tile);
   }
-  /* A tonal pill control (level chips, status badges, the sheet's tools): rests at a few percent
-     of ink, deepens on hover, the pressed one holds more. */
+  .pill,
   .viz-pill {
     background-color: color-mix(in oklab, var(--foreground) 5%, transparent);
     transition: color var(--dur-fast) var(--viz-ease), background-color var(--dur-fast) var(--viz-ease);
   }
+  .pill:hover,
   .viz-pill:hover {
     background-color: color-mix(in oklab, var(--foreground) 9%, transparent);
   }
+  .pill[aria-pressed="true"],
+  .pill[data-state="open"],
   .viz-pill[aria-pressed="true"],
   .viz-pill[data-state="open"] {
     background-color: color-mix(in oklab, var(--foreground) 12%, transparent);
