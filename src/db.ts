@@ -455,6 +455,29 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (owner, target)
   );
   `,
+  `
+  -- Organisations (src/orgs.ts): one owner, people invited by email. An org's MCP servers, skills
+  -- and memory live in user_blobs under the org's own owner key ("org_…") and are merged into every
+  -- member's runs. A member row is an invite until a user with that email signs in (user_id, joined_at).
+  CREATE TABLE IF NOT EXISTS orgs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS org_members (
+    org_id TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+    role TEXT NOT NULL DEFAULT 'member',
+    invited_by TEXT,
+    invited_at TEXT NOT NULL,
+    joined_at TEXT,
+    PRIMARY KEY (org_id, email)
+  );
+  CREATE INDEX IF NOT EXISTS org_members_user ON org_members(user_id);
+  CREATE INDEX IF NOT EXISTS orgs_owner ON orgs(owner_id);
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

@@ -36,9 +36,12 @@ export function ImportDialog({
   onImported,
   onEditOne,
   presetRepo,
+  mutate = (b) => api.skillMutate(b),
 }: {
   open: boolean;
   existing: Record<string, true>;
+  /** Where imported skills are saved — an organisation's store on the org page; the caller's own by default. */
+  mutate?: (body: Record<string, unknown>) => Promise<unknown>;
   /** Open straight onto a repository's listing (the library's curated teaser). */
   presetRepo?: string;
   onClose: () => void;
@@ -62,7 +65,7 @@ export function ImportDialog({
     let saved = 0;
     for (const d of drafts) {
       try {
-        await api.skillMutate({ action: "upsert", skill: { ...d, enabled: true } });
+        await mutate({ action: "upsert", skill: { ...d, enabled: true } });
         saved++;
       } catch (e) {
         toast.error(`Could not import /${d.name}`, { description: e instanceof Error ? e.message : String(e) });
@@ -101,7 +104,7 @@ export function ImportDialog({
         />
         <TabPanel value={source} order={ORDER} idBase="import-src" className="min-h-[18rem]">
           {source === "github" ? (
-            <GitHubStep existing={existing} onClose={onClose} onImported={onImported} onEditOne={onEditOne} preset={presetRepo} />
+            <GitHubStep existing={existing} onClose={onClose} onImported={onImported} onEditOne={onEditOne} preset={presetRepo} mutate={mutate} />
           ) : source === "paste" ? (
             <PasteStep onEditOne={onEditOne} />
           ) : (
@@ -247,7 +250,7 @@ function PasteStep({ onEditOne }: { onEditOne: (d: Draft) => void }) {
  * a saved GitHub token when one covers the repo, so private repositories work too. Picking exactly
  * one loads a preview; several import in one go.
  */
-function GitHubStep({ existing, onClose, onImported, onEditOne, preset }: { existing: Record<string, true>; onClose: () => void; onImported: (count: number) => void | Promise<void>; onEditOne: (d: Draft) => void; preset?: string }) {
+function GitHubStep({ existing, onClose, onImported, onEditOne, preset, mutate }: { existing: Record<string, true>; onClose: () => void; onImported: (count: number) => void | Promise<void>; onEditOne: (d: Draft) => void; preset?: string; mutate: (body: Record<string, unknown>) => Promise<unknown> }) {
   const [input, setInput] = React.useState(preset ?? "");
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
@@ -331,7 +334,7 @@ function GitHubStep({ existing, onClose, onImported, onEditOne, preset }: { exis
       let saved = 0;
       for (const d of drafts) {
         try {
-          await api.skillMutate({ action: "upsert", skill: { ...d, enabled: true } });
+          await mutate({ action: "upsert", skill: { ...d, enabled: true } });
           saved++;
         } catch (e) {
           toast.error(`Could not import /${d.name}`, { description: e instanceof Error ? e.message : String(e) });

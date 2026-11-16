@@ -10,7 +10,8 @@
  * `/name` from chat or trigger them itself from the description. Pure parsing/shaping here; IO at
  * the bottom, mirroring mcp-store.
  */
-import { hasUserStoreBackend, loadBlob, saveBlob, ownerKey } from "./user-store.js";
+import { hasUserStoreBackend, loadBlob, saveBlob, ownerKey, sharedOwners, withOwner } from "./user-store.js";
+import { mergeSkillStores } from "./orgs.js";
 import type { Config } from "./config.js";
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
@@ -327,6 +328,22 @@ export async function loadSkillStore(cfg: Config): Promise<SkillStore> {
   const store = parseSkillStore(r.stdout ?? "");
   cachedFile = { store: structuredClone(store), at: Date.now() };
   return store;
+}
+
+/** What a run installs: own skills plus every organisation's enabled ones (src/orgs.ts mergeSkillStores). */
+export async function loadEffectiveSkillStore(cfg: Config): Promise<SkillStore> {
+  const own = await loadSkillStore(cfg);
+  const orgs = sharedOwners();
+  if (!orgs.length) return own;
+  const shared: SkillStore[] = [];
+  for (const org of orgs) {
+    try {
+      shared.push(await withOwner(org, () => loadSkillStore(cfg)));
+    } catch (e) {
+      console.error(`[skills] could not load ${org}'s skills:`, (e as Error).message);
+    }
+  }
+  return mergeSkillStores(own, shared);
 }
 
 export async function saveSkillStore(cfg: Config, store: SkillStore): Promise<void> {

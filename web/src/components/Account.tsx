@@ -21,6 +21,7 @@ import { Swap } from "@/components/ui/swap";
 import { ApiKeys } from "@/components/ApiKeys";
 import { NotifySettings } from "@/components/NotifySettings";
 import { Sessions } from "@/components/Sessions";
+import { OrgList } from "@/components/org/OrgList";
 import { cn } from "@/lib/utils";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -294,6 +295,7 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
         </SettingsSection>
       )}
 
+      {user && me?.mode === "saas" && <OrgList />}
       <AppearanceSettings />
       <NotifySettings />
       {user && <ApiKeys />}

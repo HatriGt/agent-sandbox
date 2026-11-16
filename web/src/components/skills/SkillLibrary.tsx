@@ -18,7 +18,7 @@ import { byteLength, type Draft, fmtKb, type Mutate, type SkillSource, sourceOf,
 /** SKILL.md plus every attached file, in bytes. */
 const sizeOf = (s: SkillView) => byteLength(s.content) + (s.files ?? []).reduce((n, f) => n + byteLength(f.content), 0);
 
-const COLUMNS: Column<SkillView>[] = [
+const columnsFor = (owner: string): Column<SkillView>[] => [
   {
     id: "name",
     header: "Name",
@@ -40,7 +40,7 @@ const COLUMNS: Column<SkillView>[] = [
     width: "w-28",
     hideBelow: "md",
     sort: (s) => sourceOf(s.name),
-    cell: (s) => (sourceOf(s.name) === "starter" ? <SourceBadge source="starter" /> : <span>Yours</span>),
+    cell: (s) => (sourceOf(s.name) === "starter" ? <SourceBadge source="starter" /> : <span className="truncate">{owner}</span>),
   },
   {
     id: "scope",
@@ -83,19 +83,22 @@ const COLUMNS: Column<SkillView>[] = [
  * The library as a table: `/name` with its glyph and "when" line, source, scope, files + weight,
  * last edit. The row opens the editor; the trailing cell holds Edit and the on/off switch.
  */
-export function SkillTable({ skills, loading, onOpen, onMutate, toolbar, empty }: { skills: SkillView[]; loading?: boolean; onOpen: (s: SkillView) => void; onMutate: Mutate; toolbar?: React.ReactNode; empty?: React.ReactNode }) {
+const PERSONAL = columnsFor("Yours");
+
+export function SkillTable({ skills, loading, onOpen, onMutate, toolbar, empty, readOnly, owner }: { skills: SkillView[]; loading?: boolean; onOpen: (s: SkillView) => void; onMutate: Mutate; toolbar?: React.ReactNode; empty?: React.ReactNode; readOnly?: boolean; /** Who a custom skill belongs to in the Source column; "Yours" by default. */ owner?: string }) {
+  const columns = React.useMemo(() => (owner ? columnsFor(owner) : PERSONAL), [owner]);
   return (
     <DataTable
       aria-label="Skills"
       rows={skills}
-      columns={COLUMNS}
+      columns={columns}
       rowKey={(s) => s.name}
       onRowClick={onOpen}
       rowLabel={(s) => `Edit skill ${s.name}`}
       loading={loading}
       search={{ placeholder: "Search skills", text: (s) => `${s.name} ${s.description}` }}
       toolbar={toolbar}
-      actions={(s) => <SkillActions skill={s} onOpen={() => onOpen(s)} onMutate={onMutate} />}
+      actions={readOnly ? undefined : (s) => <SkillActions skill={s} onOpen={() => onOpen(s)} onMutate={onMutate} />}
       empty={empty}
       minWidth="min-w-[40rem]"
     />

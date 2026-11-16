@@ -36,7 +36,8 @@ import {
 } from "./identity.js";
 import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
-import { allBlobs, loadBlob, ownerKey, registerUserStoreBackend, saveBlob, withOwner, OPERATOR_OWNER } from "./user-store.js";
+import { allBlobs, loadBlob, ownerKey, registerSharedOwners, registerUserStoreBackend, saveBlob, withOwner, OPERATOR_OWNER } from "./user-store.js";
+import { addMembers, canManage, createOrg, deleteOrg, getOrg, leaveOrg, listMembers, orgRole, orgsOf, removeMember, renameOrg, setMemberRole, sharedOrgIds, transferOrg, type OrgRole } from "./orgs.js";
 import { detectTransitions, formatNotification, makeNotifier, shouldNotify, toggleFor, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { StartFailureStreak, isStartFailure, logTail, startFailureAlertText } from "./run-health.js";
 import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, type CanaryResult } from "./canary.js";
@@ -155,6 +156,9 @@ const db = openDb(cfg.dataDir);
 // operator's row is seeded from the legacy shared files on first read.
 const secretBox = makeSecretBox(keyFromEnvOrFile(process.env.SECRETS_KEY, cfg.dataDir));
 registerUserStoreBackend({ db, box: secretBox });
+// Organisations (src/orgs.ts): whose stores a member's runs merge in. Resolved per install, so a
+// new invite reaches the member's very next turn.
+registerSharedOwners((owner) => sharedOrgIds(db, owner));
 const ownership = makeOwnership(db, cfg);
 const deps = guardDeps(rawDeps, ownership);
 const SAAS = cfg.authMode === "saas";
@@ -1612,7 +1616,7 @@ app.get("/me.json", (req: Request, res: Response) => {
   }
   const u = getUser(db, p.userId);
   const plan = u ? planOf(u) : { plan: "free" as const, trialEndsAt: null, daysLeft: null, expired: false };
-  res.json({ kind: "user", mode: cfg.authMode, id: p.userId, login: p.login, name: u?.name ?? null, role: p.role, via: p.via, email: u?.email ?? null, avatarUrl: u?.avatar_url ?? null, github: !!u?.github_id, hasPassword: !!u?.password_hash, maxBoxes: u?.max_boxes ?? cfg.userMaxBoxes, ...plan, billingUrl: cfg.billingUrl ?? null });
+  res.json({ kind: "user", mode: cfg.authMode, id: p.userId, login: p.login, name: u?.name ?? null, role: p.role, via: p.via, email: u?.email ?? null, avatarUrl: u?.avatar_url ?? null, github: !!u?.github_id, hasPassword: !!u?.password_hash, maxBoxes: u?.max_boxes ?? cfg.userMaxBoxes, ...plan, billingUrl: cfg.billingUrl ?? null, orgs: orgsOf(db, p.userId).map((o) => ({ id: o.id, name: o.name, role: o.role, members: o.members, pending: o.pending })) });
 });
 // Users — operator/admin only. Self-hosting without OAuth: an admin creates the account and hands
 // over its first access token (shown once); the person signs in with it and can mint their own keys.
@@ -2280,6 +2284,172 @@ app.post("/repos/attach.json", async (req: Request, res: Response) => {
   }
 });
 
+/* ───────────────────────────── organisations (src/orgs.ts) ───────────────────────────── */
+
+/** Signed-in people only: the operator token has no email, no org, nothing to share. */
+function userOf(res: Response): Extract<Principal, { kind: "user" }> | null {
+  const p = principalOf(res);
+  if (p.kind !== "user") {
+    res.status(403).json({ error: "organisations belong to signed-in people — sign in to use them" });
+    return null;
+  }
+  return p;
+}
+/** The org a request names plus the caller's role in it; 404 when either is missing (no existence oracle). */
+function orgOf(req: Request, res: Response, need: "member" | "manage" | "owner"): { id: string; role: OrgRole } | null {
+  const p = userOf(res);
+  if (!p) return null;
+  const raw = (req.body as { org?: unknown } | undefined)?.org ?? req.query.org;
+  const id = typeof raw === "string" ? raw : "";
+  const role = id ? orgRole(db, id, p.userId) : null;
+  if (!role || (need === "manage" && !canManage(role)) || (need === "owner" && role !== "owner")) {
+    res.status(role ? 403 : 404).json({ error: role ? "only the organisation's owner or an admin can do that" : "no such organisation" });
+    return null;
+  }
+  return { id, role };
+}
+/**
+ * `?org=` (or `org` in the body) on the MCP, skills and memory routes scopes them to an
+ * organisation's stores: the same routes, under the org's owner key. Reads need membership, writes
+ * an admin. The audit row keeps the real person (res.locals.principal); only the ambient owner
+ * the stores read changes.
+ */
+const ORG_SCOPED = ["/mcp-servers.json", "/mcp-servers/test.json", "/skills.json", "/memory-notes.json", "/memory-import.json", "/memory-export.md", "/memory-promote.json"];
+app.use(ORG_SCOPED, (req: Request, res: Response, next) => {
+  const raw = (MUTATING.has(req.method) ? (req.body as { org?: unknown } | undefined)?.org : undefined) ?? req.query.org;
+  if (typeof raw !== "string" || !raw) return next();
+  if (!dashAuthed(req, res)) return;
+  const scope = orgOf(req, res, MUTATING.has(req.method) ? "manage" : "member");
+  if (!scope) return;
+  res.locals.orgScope = scope;
+  withPrincipal({ kind: "user", userId: scope.id, login: "", role: "user", via: "apikey" }, next);
+});
+/** For a signed-in member on an unscoped list: each organisation's view of the same store. */
+async function sharedViews<T>(res: Response, view: () => Promise<T> | T): Promise<Array<{ org: { id: string; name: string; role: OrgRole }; data: T }>> {
+  const p = principalOf(res);
+  if (p.kind !== "user" || res.locals.orgScope) return [];
+  const out: Array<{ org: { id: string; name: string; role: OrgRole }; data: T }> = [];
+  for (const o of orgsOf(db, p.userId)) {
+    try {
+      out.push({ org: { id: o.id, name: o.name, role: o.role }, data: await withOwner(o.id, () => Promise.resolve(view())) });
+    } catch (e) {
+      console.error(`[orgs] could not read ${o.id}:`, (e as Error).message);
+    }
+  }
+  return out;
+}
+app.get("/orgs.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = userOf(res);
+  if (!p) return;
+  res.json({ orgs: orgsOf(db, p.userId) });
+});
+app.post("/orgs.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = userOf(res);
+  if (!p) return;
+  try {
+    const o = createOrg(db, p.userId, (req.body as { name?: unknown } | undefined)?.name);
+    res.locals.auditAction = "org.create";
+    const orgs = orgsOf(db, p.userId);
+    res.json({ org: orgs.find((x) => x.id === o.id), orgs });
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  }
+});
+app.post("/orgs/update.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const scope = orgOf(req, res, "manage");
+  if (!scope) return;
+  try {
+    renameOrg(db, scope.id, (req.body as { name?: unknown }).name);
+    res.locals.auditAction = "org.rename";
+    res.json({ ok: true, orgs: orgsOf(db, userOf(res)!.userId) });
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  }
+});
+app.delete("/orgs.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const scope = orgOf(req, res, "owner");
+  if (!scope) return;
+  deleteOrg(db, scope.id);
+  res.locals.auditAction = "org.delete";
+  res.json({ ok: true, orgs: orgsOf(db, userOf(res)!.userId) });
+});
+app.get("/orgs/members.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const scope = orgOf(req, res, "member");
+  if (!scope) return;
+  const org = getOrg(db, scope.id)!;
+  res.json({ org: { id: org.id, name: org.name, role: scope.role, ownerId: org.owner_id }, members: listMembers(db, scope.id) });
+});
+app.post("/orgs/members.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const scope = orgOf(req, res, "manage");
+  if (!scope) return;
+  const { emails, role } = req.body as { emails?: unknown; role?: unknown };
+  try {
+    const r = addMembers(db, scope.id, String(emails ?? ""), userOf(res)!.userId, role === "admin" ? "admin" : "member");
+    res.locals.auditAction = "org.invite";
+    res.json({ ...r, members: listMembers(db, scope.id) });
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  }
+});
+app.delete("/orgs/members.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const scope = orgOf(req, res, "manage");
+  if (!scope) return;
+  const email = String((req.body as { email?: unknown }).email ?? "");
+  // An admin may not remove another admin — that is the owner's call.
+  const target = listMembers(db, scope.id).find((m) => m.email === email.toLowerCase());
+  if (target?.role === "admin" && scope.role !== "owner") {
+    res.status(403).json({ error: "only the owner can remove an admin" });
+    return;
+  }
+  removeMember(db, scope.id, email);
+  res.locals.auditAction = "org.remove";
+  res.json({ ok: true, members: listMembers(db, scope.id) });
+});
+app.post("/orgs/members/role.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const scope = orgOf(req, res, "owner");
+  if (!scope) return;
+  const { email, role } = req.body as { email?: unknown; role?: unknown };
+  if (role !== "admin" && role !== "member") {
+    res.status(400).json({ error: "role must be admin or member" });
+    return;
+  }
+  setMemberRole(db, scope.id, String(email ?? ""), role);
+  res.locals.auditAction = "org.role";
+  res.json({ ok: true, members: listMembers(db, scope.id) });
+});
+app.post("/orgs/leave.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const scope = orgOf(req, res, "member");
+  if (!scope) return;
+  if (scope.role === "owner") {
+    res.status(400).json({ error: "the owner cannot leave — hand the organisation to someone or delete it" });
+    return;
+  }
+  leaveOrg(db, scope.id, userOf(res)!.userId);
+  res.locals.auditAction = "org.leave";
+  res.json({ ok: true, orgs: orgsOf(db, userOf(res)!.userId) });
+});
+app.post("/orgs/transfer.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const scope = orgOf(req, res, "owner");
+  if (!scope) return;
+  const to = String((req.body as { userId?: unknown }).userId ?? "");
+  if (!transferOrg(db, scope.id, to)) {
+    res.status(400).json({ error: "hand-over needs a member who has already signed in" });
+    return;
+  }
+  res.locals.auditAction = "org.transfer";
+  res.json({ ok: true, orgs: orgsOf(db, userOf(res)!.userId) });
+});
+
 // MCP servers for the sandbox agent. GET lists (secrets masked); POST mutates:
 //   {action:"upsert", server:{name,type,command,args,url,env,headers,enabled}}
 //   {action:"import", json:"<{mcpServers:{...}}>"}  {action:"remove", name}  {action:"toggle", name, enabled}
@@ -2302,7 +2472,9 @@ app.get("/mcp-servers.json", async (req: Request, res: Response) => {
       const excluded = boxExclusion(store.servers[s.name], policy);
       return { ...s, ...(spec && known ? { provision: provisionOf(spec, baked, last) } : {}), ...(excluded ? { excluded } : {}) };
     });
-    res.json({ servers, config: toEditableConfig(store), baked, lastProvision: last });
+    // A member also sees what each organisation shares with them, read-only, under the org's key.
+    const shared = (await sharedViews(res, async () => viewServers(await loadMcpStore(cfg)))).map((s) => ({ org: s.org, servers: s.data }));
+    res.json({ servers, config: toEditableConfig(store), baked, lastProvision: last, ...(shared.length ? { shared } : {}) });
   } catch (e) {
     failWith(res, e);
   }
@@ -2650,7 +2822,8 @@ app.post("/push/unregister.json", (req: Request, res: Response) => {
 app.get("/skills.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   try {
-    res.json({ skills: viewSkills(await loadSkillStore(cfg)) });
+    const shared = (await sharedViews(res, async () => viewSkills(await loadSkillStore(cfg)))).map((s) => ({ org: s.org, skills: s.data }));
+    res.json({ skills: viewSkills(await loadSkillStore(cfg)), ...(shared.length ? { shared } : {}) });
   } catch (e) {
     failWith(res, e);
   }
@@ -2696,10 +2869,8 @@ app.post("/skills.json", async (req: Request, res: Response) => {
 // /memory.json — that one is the VM's RAM. Every mutation is one synchronous load→mutate→save inside
 // the owner's store lock; the harvester is told about keeps/edits/forgets so the thread's toasts
 // (WatchSnapshot.memoryNew) match the store at the next read.
-const memoryOwner = (res: Response): string => {
-  const p = principalOf(res);
-  return p.kind === "user" ? p.userId : OPERATOR_OWNER;
-};
+// The ambient owner: the person, or — on a request scoped with ?org= — the organisation.
+const memoryOwner = (_res: Response): string => ownerKey();
 // A revised note carries its earlier versions (capped at 10); every other note stays as it is.
 const memoryView = (store: MemoryStore) => ({
   enabled: store.enabled,
@@ -2712,10 +2883,16 @@ const memoryView = (store: MemoryStore) => ({
     return history.length ? { ...n, history } : n;
   }),
 });
-app.get("/memory-notes.json", (req: Request, res: Response) => {
+app.get("/memory-notes.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   try {
-    res.json(memoryView(loadMemoryStore(memoryOwner(res))));
+    const shared = (
+      await sharedViews(res, () => {
+        const s = loadMemoryStore();
+        return { enabled: s.enabled, notes: viewMemory(s) };
+      })
+    ).map((s) => ({ org: s.org, ...s.data }));
+    res.json({ ...memoryView(loadMemoryStore(memoryOwner(res))), ...(shared.length ? { shared } : {}) });
   } catch (e) {
     failWith(res, e);
   }

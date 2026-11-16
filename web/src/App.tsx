@@ -1,7 +1,7 @@
 import * as React from "react";
 import { lazyRetry } from "@/lib/lazy-retry";
 import { Link, useLocation, useNavigationType } from "react-router";
-import { Activity as ActivityIcon, ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Cpu, FileSearch, GitCompare, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, MessageCircleQuestion, Moon, MoonStar, Palette, PanelLeftClose, PanelLeftOpen, PanelRight, Pause, Pin, PinOff, Plug, PlugZap, Plus, Search, Shield, Sparkles, Square, Sun, SunMedium, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
+import { Activity as ActivityIcon, ArrowRight, Bell, BellOff, Brain, Building2, ChevronRight, Clock, Cpu, FileSearch, GitCompare, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, MessageCircleQuestion, Moon, MoonStar, Palette, PanelLeftClose, PanelLeftOpen, PanelRight, Pause, Pin, PinOff, Plug, PlugZap, Plus, Search, Shield, Sparkles, Square, Sun, SunMedium, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/lib/motion-pref";
 import { THEMES, setTheme, toggleScheme, useTheme } from "@/lib/theme";
@@ -59,6 +59,7 @@ const Sandboxes = React.lazy(lazyRetry(() => import("@/components/Sandboxes").th
 const Integrations = React.lazy(lazyRetry(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations }))));
 const SkillsPage = React.lazy(lazyRetry(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage }))));
 const MemoryPage = React.lazy(lazyRetry(() => import("@/components/Memory").then((m) => ({ default: m.MemoryPage }))));
+const Organisation = React.lazy(lazyRetry(() => import("@/components/Organisation").then((m) => ({ default: m.Organisation }))));
 const AutopilotPage = React.lazy(lazyRetry(() => import("@/components/AutopilotPage").then((m) => ({ default: m.AutopilotPage }))));
 const AutomationRunsPage = React.lazy(lazyRetry(() => import("@/components/AutomationRunsPage").then((m) => ({ default: m.AutomationRunsPage }))));
 const HarnessesPage = React.lazy(lazyRetry(() => import("@/components/HarnessesPage").then((m) => ({ default: m.HarnessesPage }))));
@@ -314,6 +315,10 @@ export default function App() {
     go({ view: "admin" });
     setMobileRail(false);
   }, [go]);
+  const showOrg = React.useCallback(() => {
+    go({ view: "org" });
+    setMobileRail(false);
+  }, [go]);
   const showConnect = React.useCallback(() => {
     go({ view: "connect" });
     setMobileRail(false);
@@ -405,6 +410,7 @@ export default function App() {
       { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, group: "Go to", keywords: "accounts providers secrets github mcp", run: showIntegrations },
       { id: "account", label: "Account", icon: <UserRound />, group: "Go to", keywords: "settings profile keys notifications", run: showAccount },
       ...(getMe()?.mode === "saas" && getMe()?.role === "admin" ? [{ id: "admin", label: "Admin · users", icon: <Shield />, group: "Go to", keywords: "people members", run: showAdmin }] : []),
+      ...(getMe()?.mode === "saas" && getMe()?.kind === "user" ? [{ id: "org", label: "Organisation", icon: <Building2 />, group: "Go to", keywords: "team org company share members invite", run: showOrg }] : []),
       { id: "connect", label: "Connect an IDE", icon: <PlugZap />, group: "Go to", keywords: "cursor claude code mcp api key", run: showConnect },
       ...playbookActions,
       { id: "theme", label: dark ? "Switch to light theme" : "Switch to dark theme", icon: dark ? <Sun /> : <Moon />, keywords: "theme dark light mode appearance toggle", run: toggleScheme },
@@ -428,7 +434,7 @@ export default function App() {
       { id: "sidebar", label: collapsed ? "Expand sidebar" : "Collapse sidebar", icon: collapsed ? <PanelLeftOpen /> : <PanelLeftClose />, keywords: "rail navigation", run: () => setCollapsed(!collapsed) },
       { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, keywords: "help keys", run: () => setShortcuts(true) },
     ],
-    [threadActions, playbookActions, showFleet, showAutomations, showHistory, showActivity, showSkills, showMemory, showHarnesses, showPlaybooks, showIntegrations, showAccount, showAdmin, showConnect, dark, theme.id, collapsed, setCollapsed, motionPref]
+    [threadActions, playbookActions, showFleet, showAutomations, showHistory, showActivity, showSkills, showMemory, showHarnesses, showPlaybooks, showIntegrations, showAccount, showAdmin, showOrg, showConnect, dark, theme.id, collapsed, setCollapsed, motionPref]
   );
 
   React.useEffect(() => {
@@ -561,6 +567,8 @@ export default function App() {
       case "welcome":
       case "admin":
         return route.view;
+      case "org":
+        return route.id ? `org:${route.id}` : "org";
       default:
         return route satisfies never;
     }
@@ -650,6 +658,8 @@ export default function App() {
                   ? [{ label: "Fleet view" }]
                   : route.view === "admin"
                     ? [{ label: "Account", onClick: showAccount }, { label: "Admin" }]
+                    : route.view === "org"
+                      ? [{ label: "Account", onClick: showAccount }, { label: "Organisation" }]
                     : route.view === "connect"
                       ? [{ label: "Account", onClick: showAccount }, { label: "Connect an IDE" }]
                       : [{ label: { history: "History", activity: "Activity", skills: "Skills", memory: "Memory", harnesses: "Harnesses", integrations: "Integrations", account: "Account", welcome: "Welcome" }[route.view] }];
@@ -933,7 +943,7 @@ export default function App() {
                 <RailIcon active={view === "integrations"} flash={flash === "integrations"} onClick={showIntegrations} icon={<Plug />} label="Integrations" shortcut="g a" />
               </span>
               <div className="mt-auto flex flex-col items-center gap-1.5">
-                <RailIcon active={view === "account" || view === "connect" || view === "admin" || view === "welcome"} onClick={showAccount} icon={<UserRound />} label={getMe()?.kind === "user" ? "Account" : "Operator"} />
+                <RailIcon active={view === "account" || view === "connect" || view === "admin" || view === "welcome" || view === "org"} onClick={showAccount} icon={<UserRound />} label={getMe()?.kind === "user" ? "Account" : "Operator"} />
                 <ThemePicker side="right" align="end">
                   <RailIcon icon={<Palette />} label={`Theme: ${theme.label}`} />
                 </ThemePicker>
@@ -1037,6 +1047,10 @@ export default function App() {
                 ) : view === "admin" ? (
                   <PageEnter className="h-full min-h-0">
                     <Admin onBack={showAccount} />
+                  </PageEnter>
+                ) : route.view === "org" ? (
+                  <PageEnter className="h-full min-h-0">
+                    <Organisation id={route.id} onBack={showAccount} />
                   </PageEnter>
                 ) : view === "connect" ? (
                   <PageEnter className="h-full min-h-0">

@@ -8,7 +8,8 @@
  * with `--mcp-config`, so the agent has Jira, Slack, a database… without the operator ever being
  * asked mid-run. Pure parsing/shaping here; IO at the bottom.
  */
-import { hasUserStoreBackend, loadBlob, saveBlob, ownerKey, OPERATOR_OWNER } from "./user-store.js";
+import { hasUserStoreBackend, loadBlob, saveBlob, ownerKey, OPERATOR_OWNER, sharedOwners, withOwner } from "./user-store.js";
+import { mergeMcpStores } from "./orgs.js";
 import type { Config } from "./config.js";
 
 /** The box policy for this controller: its own tokens stay out of boxes unless BOX_SELF_MCP=1. */
@@ -489,6 +490,26 @@ export async function loadMcpStore(cfg: Config): Promise<McpStore> {
   const store = parseMcpStore(r.stdout ?? "");
   cached = { store: structuredClone(store), at: Date.now() };
   return store;
+}
+
+/**
+ * What a run installs: the owner's servers plus every organisation's they belong to (src/orgs.ts
+ * mergeMcpStores — own wins on a name clash, an org's disabled servers stay out). The dashboard
+ * lists and edits the plain store; only the box sees the merge.
+ */
+export async function loadEffectiveMcpStore(cfg: Config): Promise<McpStore> {
+  const own = await loadMcpStore(cfg);
+  const orgs = sharedOwners();
+  if (!orgs.length) return own;
+  const shared: McpStore[] = [];
+  for (const org of orgs) {
+    try {
+      shared.push(await withOwner(org, () => loadMcpStore(cfg)));
+    } catch (e) {
+      console.error(`[mcp] could not load ${org}'s servers:`, (e as Error).message);
+    }
+  }
+  return mergeMcpStores(own, shared);
 }
 
 export async function saveMcpStore(cfg: Config, store: McpStore): Promise<void> {

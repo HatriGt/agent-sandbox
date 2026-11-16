@@ -25,6 +25,30 @@ export function ownerKey(p: Principal = currentPrincipal()): string {
   return p.kind === "user" ? p.userId : OPERATOR_OWNER;
 }
 
+/**
+ * Organisations (src/orgs.ts): the owner keys whose stores are merged into this owner's runs. The
+ * HTTP controller registers the resolver (it needs the database); the stdio entry and tests have
+ * none, so sharing is simply off there. An org key never resolves to further orgs.
+ */
+let sharedResolver: ((owner: string) => string[]) | null = null;
+export function registerSharedOwners(fn: (owner: string) => string[]): void {
+  sharedResolver = fn;
+}
+export function sharedOwners(owner = ownerKey()): string[] {
+  if (!sharedResolver || owner === OPERATOR_OWNER) return [];
+  try {
+    return sharedResolver(owner);
+  } catch {
+    return []; // a lookup failure must never block a run; the member just gets their own stores
+  }
+}
+
+/** Every blob of an owner, gone — when an organisation is deleted. */
+export function deleteBlobs(owner: string): void {
+  if (!backend) return;
+  backend.db.prepare(`DELETE FROM user_blobs WHERE owner_id = ?`).run(owner);
+}
+
 /** Run `fn` as the owner of a box (background jobs: inbox delivery, credential broker, resumes). */
 export function withOwner<T>(ownerId: string | null | undefined, fn: () => T): T {
   if (!ownerId || ownerId === OPERATOR_OWNER) return withPrincipal({ kind: "operator" }, fn);

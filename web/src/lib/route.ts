@@ -31,6 +31,7 @@ export type ConsoleRoute =
   | { view: "playbooks" }
   | { view: "integrations" }
   | { view: "account" }
+  | { view: "org"; id?: string }
   | { view: "connect" }
   | { view: "welcome" }
   | { view: "admin" };
@@ -55,6 +56,8 @@ export function parseConsolePath(pathname: string): ConsoleRoute {
   if (/^\/autopilot\/playbooks\/?$/.test(rest)) return { view: "playbooks" };
   if (/^\/(accounts|integrations)\/?$/.test(rest)) return { view: "integrations" };
   if (/^\/account\/?$/.test(rest)) return { view: "account" };
+  const org = rest.match(/^\/org(?:\/([^/]+))?\/?$/);
+  if (org) return { view: "org", id: org[1] ? decodeURIComponent(org[1]) : undefined };
   if (/^\/connect\/?$/.test(rest)) return { view: "connect" };
   if (/^\/welcome\/?$/.test(rest)) return { view: "welcome" };
   if (/^\/admin\/?$/.test(rest)) return { view: "admin" };
@@ -91,6 +94,8 @@ export function consolePath(r: ConsoleRoute): string {
       return `${BASE}/integrations`;
     case "account":
       return `${BASE}/account`;
+    case "org":
+      return r.id ? `${BASE}/org/${encodeURIComponent(r.id)}` : `${BASE}/org`;
     case "connect":
       return `${BASE}/connect`;
     case "welcome":

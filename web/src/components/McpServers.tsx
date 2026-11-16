@@ -1,7 +1,8 @@
 import * as React from "react";
 import { Braces, Check, ClipboardPaste, Copy, List, Pencil, Plug, Plus, RotateCcw, Trash2, WandSparkles, X, Zap } from "lucide-react";
 import { toast } from "sonner";
-import { api, type McpServersResponse, type McpServerView } from "@/lib/api";
+import { api, type McpServersResponse, type McpServerView, type OrgRef } from "@/lib/api";
+import { SharedBy } from "@/components/org/SharedBy";
 import { useCached } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
@@ -43,8 +44,14 @@ import { describe, errMsg, statusOf, type Health, type Status } from "@/componen
 type View = "list" | "json";
 type Filter = "all" | "on" | "off" | "stdio" | "remote";
 
-export function McpServers() {
-  const cached = useCached("mcp", (signal) => api.mcpServers(signal));
+/**
+ * `scope` points the section at an organisation's servers instead of the caller's own (src/orgs.ts):
+ * the same list and sheet under the org's key. An org member who is not an admin sees it read-only.
+ */
+export function McpServers({ scope }: { scope?: { org: OrgRef } } = {}) {
+  const org = scope?.org.id;
+  const canEdit = !scope || scope.org.role !== "member";
+  const cached = useCached(org ? `mcp:${org}` : "mcp", (signal) => api.mcpServers(signal, org));
   const servers = cached.data?.servers ?? null;
   const config = cached.data?.config ?? null;
   const [view, setView] = React.useState<View>("list");
@@ -66,18 +73,18 @@ export function McpServers() {
 
   const mutate = React.useCallback<Mutate>(
     async (body, ok) => {
-      const r = await api.mcpMutate(body);
+      const r = await api.mcpMutate(body, org);
       cached.setData(r);
       if (ok) toast.success(ok);
       return r;
     },
-    [cached]
+    [cached, org]
   );
 
   const test = React.useCallback((name: string) => {
     setTesting((t) => ({ ...t, [name]: true }));
     return api
-      .mcpTest(name)
+      .mcpTest(name, org)
       .then((r) => {
         setHealth((h) => ({ ...h, [name]: { ...r, at: Date.now() } }));
         return r;
@@ -88,7 +95,7 @@ export function McpServers() {
         return r;
       })
       .finally(() => setTesting((t) => ({ ...t, [name]: false })));
-  }, []);
+  }, [org]);
   const dismiss = React.useCallback((name: string) => setHealth((h) => Object.fromEntries(Object.entries(h).filter(([k]) => k !== name))), []);
 
   const all = servers ?? [];
@@ -113,11 +120,12 @@ export function McpServers() {
 
   return (
     <SettingsSection
-      id="mcp"
+      id={scope ? "org-mcp" : "mcp"}
       title="MCP servers"
       meta={servers ? (servers.length === 0 ? "none yet" : `${counts.on} of ${servers.length} on`) : undefined}
+      purpose={scope ? (canEdit ? "Every member's sandbox gets these, from its next run or turn. A member's own server of the same name wins." : "Given to your sandboxes by the organisation. Only its admins change them.") : undefined}
       actions={
-        hasServers || view === "json" ? (
+        canEdit && (hasServers || view === "json") ? (
           <>
             <AnimatedTabs
               ariaLabel="View"
@@ -162,16 +170,20 @@ export function McpServers() {
         ) : servers === null ? (
           <ListSkeleton />
         ) : servers.length === 0 ? (
-          <EmptyState onAdd={() => setEditing({})} onPaste={() => setPasting(true)} />
+          canEdit ? (
+            <EmptyState onAdd={() => setEditing({})} onPaste={() => setPasting(true)} />
+          ) : (
+            <p className="text-muted-foreground px-1 text-meta">Nothing shared yet.</p>
+          )
         ) : (
           <div className="flex flex-col gap-3">
-            <CodeModeSetting data={cached.data ?? null} enabledServers={counts.on} />
+            {!scope && <CodeModeSetting data={cached.data ?? null} enabledServers={counts.on} />}
             <DataTable
               aria-label="MCP servers"
               rows={visible}
               columns={columns}
               rowKey={(s) => s.name}
-              onRowClick={(s) => setEditing({ server: s })}
+              onRowClick={canEdit ? (s) => setEditing({ server: s }) : undefined}
               rowLabel={(s) => `Open ${s.name}`}
               rowProps={(s) => ({ className: cn(!s.enabled && "[&_td]:text-muted-foreground") })}
               search={{ placeholder: "Search servers", text: (s) => [s.name, s.type, s.command, ...(s.args ?? []), s.url, ...Object.keys(s.env ?? {}), ...Object.keys(s.headers ?? {})].filter(Boolean).join(" ") }}
@@ -185,7 +197,7 @@ export function McpServers() {
                   <FilterChip group="mcp" active={filter === "remote"} onClick={() => setFilter("remote")} label="Remote" count={counts.remote} className="hidden sm:flex" />
                 </div>
               }
-              actions={(s) => <ServerActions server={s} health={health[s.name]} testing={!!testing[s.name]} onTest={() => void test(s.name)} onEdit={() => setEditing({ server: s })} onMutate={mutate} />}
+              actions={canEdit ? (s) => <ServerActions server={s} health={health[s.name]} testing={!!testing[s.name]} onTest={() => void test(s.name)} onEdit={() => setEditing({ server: s })} onMutate={mutate} /> : undefined}
               empty={
                 <span className="flex flex-col items-center gap-1">
                   <span className="text-foreground text-body font-medium">Nothing here</span>
@@ -206,11 +218,12 @@ export function McpServers() {
             </Collapse>
             <p className="text-faint flex items-center gap-2 px-1 text-micro">
               <Plug className="size-3" aria-hidden />
-              Every sandbox gets the servers that are on, from its next run or turn.
+              {scope ? "Every member's sandbox gets the servers that are on, from its next run or turn." : "Every sandbox gets the servers that are on, from its next run or turn."}
             </p>
           </div>
         )}
       </Swap>
+      {!scope && cached.data?.shared?.map((g) => <SharedBy key={g.org.id} org={g.org} kind="servers" items={g.servers.map((s) => ({ key: s.name, name: s.name, detail: s.type === "stdio" ? [s.command, ...(s.args ?? [])].join(" ") : (s.url ?? ""), kind: s.type === "stdio" ? "command" : s.type, on: s.enabled }))} />)}
 
       <Sheet open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         {shown && <ServerSheet key={shown.seq} initial={shown.server} health={shown.server ? health[shown.server.name] : undefined} testing={shown.server ? !!testing[shown.server.name] : false} onTest={test} onMutate={mutate} onClose={() => setEditing(null)} />}

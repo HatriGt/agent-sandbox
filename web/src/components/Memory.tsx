@@ -23,6 +23,7 @@ import { MemoryUse } from "@/components/memory/MemoryUse";
 import { areaId, sectionId } from "@/components/memory/MemoryGraph";
 import { Inline, NoteStatement, noteHeadline } from "@/components/memory/noteText";
 import { isOperatorKind, KIND_ICON, KIND_LABEL, KIND_PLURAL, KINDS, plural } from "@/components/memory/kinds";
+import { SharedBy } from "@/components/org/SharedBy";
 
 /**
  * Memory: what earlier runs left for future ones (src/memory-store.ts), typed and scoped.
@@ -411,6 +412,16 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                   ) : (
                     <p className="text-muted-foreground text-meta">{model.filtering ? "No preference or rule matches." : "No preferences yet — say how you like things done during a run, or add one above."}</p>
                   )}
+                  {data?.shared?.map((g) => (
+                    <SharedBy
+                      key={g.org.id}
+                      org={g.org}
+                      kind="notes"
+                      items={g.notes
+                        .filter((n) => n.until === undefined && n.status !== "pending")
+                        .map((n) => ({ key: n.id, name: <NoteStatement text={n.text} />, detail: n.why, kind: KIND_LABEL[n.kind], on: g.enabled ? undefined : false }))}
+                    />
+                  ))}
                 </SettingsSection>
               )}
 
@@ -582,7 +593,7 @@ function AreaHeader({ group: g, onArea, unfiled }: { group: AreaGroup; onArea: (
 }
 
 /** Add a preference, rule, or a piece of domain knowledge by hand. */
-function Composer({ id, onAdd, onCancel }: { id: string; onAdd: (add: { kind: MemoryKind; text: string; repo?: string; area?: string; paths?: string; links?: string }) => Promise<boolean>; onCancel: () => void }) {
+export function Composer({ id, onAdd, onCancel }: { id: string; onAdd: (add: { kind: MemoryKind; text: string; repo?: string; area?: string; paths?: string; links?: string }) => Promise<boolean>; onCancel: () => void }) {
   const [kind, setKind] = React.useState<"preference" | "rule" | "domain">("preference");
   const [text, setText] = React.useState("");
   const [repo, setRepo] = React.useState("");
@@ -685,7 +696,7 @@ function Composer({ id, onAdd, onCancel }: { id: string; onAdd: (add: { kind: Me
 }
 
 /** Kind marker: a glyph plus a short label. Never coloured — amber on this page means "action needed" only. */
-function KindGlyph({ kind }: { kind: MemoryKind }) {
+export function KindGlyph({ kind }: { kind: MemoryKind }) {
   const Icon = KIND_ICON[kind];
   return (
     <span className="text-muted-foreground mt-0.5 inline-flex w-24 shrink-0 items-center gap-1.5 text-micro font-medium whitespace-nowrap max-sm:w-auto" title={KIND_LABEL[kind]}>

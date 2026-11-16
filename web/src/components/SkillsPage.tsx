@@ -14,6 +14,7 @@ import { type Draft, type Mutate, sourceOf } from "@/components/skills/model";
 import { SkillEditor } from "@/components/skills/SkillEditor";
 import { EmptyState, SkillTable, TemplateStrip } from "@/components/skills/SkillLibrary";
 import { SkillRail } from "@/components/skills/SkillRail";
+import { SharedBy } from "@/components/org/SharedBy";
 import { fmtAgo } from "@/lib/format";
 
 /**
@@ -180,6 +181,9 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
                     />
                   )}
                   {skills && skills.length > 0 && skills.length <= 6 && !filtered && <TemplateStrip existing={existing} onPick={(d) => open({ draft: d })} onNew={newSkill} />}
+                  {cached.data?.shared?.map((g) => (
+                    <SharedBy key={g.org.id} org={g.org} kind="skills" items={g.skills.map((s) => ({ key: s.name, name: `/${s.name}`, detail: s.description, kind: sourceOf(s.name) === "starter" ? "starter" : undefined, on: s.enabled }))} />
+                  ))}
                 </div>
 
                 {skills && skills.length > 0 && <SkillRail skills={skills} onOpen={(s) => open({ initial: s })} onImport={(repo) => setImporting({ repo })} className="xl:sticky xl:top-2 xl:self-start" />}

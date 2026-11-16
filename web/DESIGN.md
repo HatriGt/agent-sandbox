@@ -1482,3 +1482,36 @@ and the button changed in the pane 45 s later.
 - **Rolling counts sit on the baseline.** The numbers in "3 files changed" and "4 of 4" were boxes
   with `overflow: hidden`, whose baseline is their bottom edge, so the digit hung below its words.
   They use `overflow: clip` and `align-baseline` now.
+
+## Organisations (2026-11-16)
+
+An organisation is a second owner of the same three stores a person has — MCP servers, skills,
+memory — and every member's runs get the union (own wins on a name clash; a server the org turned
+off is left out; what a run learns goes into the person's memory, never the org's). The UI says
+that in three places and nowhere else:
+
+- **Account → Organisations.** A list panel: crown (you own it), shield (admin) or building
+  (member) on a round tile, the role line and the counts, a chevron. The footer is the one way to
+  start one: a name and **Create**; hidden once a person owns five.
+- **`/dashboard/org/:id`.** A SettingsPage titled with the org's name; the purpose line is the
+  facts ("3 people · 2 invited · you own it"). The owner's actions are quiet ghosts — **Switch**
+  (when they are in more than one), **Rename** (inline: the title becomes the input), **Hand over**
+  (a menu of joined members, then an inline confirm), **Delete** (armed) — and a member sees
+  **Leave**. Below, four sections in the order a reader asks: *People* (DataTable; a round glyph
+  per role, `joined`/`invited · not signed in yet` as StatusDots, a Segmented Member/Admin for the
+  owner, Copy-invite and armed Remove on hover; the footer takes a pasted list of emails), then the
+  org's *MCP servers*, *Skills* and *Memory* — the same sections the personal pages draw, pointed
+  at the org's store (`<McpServers scope={{ org }} />`, `SkillTable owner={org.name}`, `OrgMemory`),
+  read-only for a member (no actions column, no footer, no toggles). The skill editor replaces the
+  page the way it does on Skills.
+- **"Shared by {org}" under your own list** on Integrations, Skills and Memory (`org/SharedBy`): a
+  small building tile, the name, a count, and **Manage** for admins. The rows are plain tiles with
+  no toggles or row actions, so an org's server is never mistaken for one of yours; off items are
+  dimmer so a member can see why a tool is missing. Note rows set the kind as a wash chip and the
+  rationale in quiet prose (not the stamp face, which is for URLs and commands).
+
+Nothing is emailed. Adding an address makes an invite row; the person is in the moment they sign
+in with that address (sign-up, GitHub, or a profile email change), so the only thing to send them
+is the note **Copy invite** puts on the clipboard. Verified with `.shots/org-fixture.mjs`
+(`--role=owner|member`, `--dark`): the org page top and bottom, the empty state, Account, and the
+three shared-by blocks.

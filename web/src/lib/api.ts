@@ -186,6 +186,8 @@ export type McpTransport = "stdio" | "http" | "sse";
 /** Servers for the list, plus the same data as the editable `{"mcpServers": …}` JSON (secrets masked). */
 export interface McpServersResponse {
   servers: McpServerView[];
+  /** What each organisation the caller belongs to shares with them (read-only here; edited on the org page). */
+  shared?: Array<{ org: OrgRef; servers: McpServerView[] }>;
   config: { mcpServers: Record<string, unknown> };
   /** Globally installed npm packages the boxes are born with (name → version), once a box has reported. */
   baked?: Record<string, string>;
@@ -237,6 +239,7 @@ export interface SkillView {
 }
 export interface SkillsResponse {
   skills: SkillView[];
+  shared?: Array<{ org: OrgRef; skills: SkillView[] }>;
 }
 
 /** What a memory note is (src/memory-store.ts): taste, standing instruction, repo knowledge, a choice, a correction, a how-to. */
@@ -309,6 +312,7 @@ export type MemoryReceiptRow = Omit<MemoryReceipt, "notes"> & { box: string };
 export interface MemoryNotesResponse {
   enabled: boolean;
   notes: MemoryNote[];
+  shared?: Array<{ org: OrgRef; enabled: boolean; notes: MemoryNote[] }>;
   episodes?: MemoryEpisode[];
   receipts?: MemoryReceiptRow[];
 }
@@ -638,6 +642,41 @@ export interface UserRow {
   daysLeft: number | null;
   expired: boolean;
 }
+/* ───────────── organisations (src/orgs.ts) ───────────── */
+export type OrgRole = "owner" | "admin" | "member";
+/** An organisation as it tags a shared item: who shares it and what the caller may do there. */
+export interface OrgRef {
+  id: string;
+  name: string;
+  role: OrgRole;
+}
+export interface OrgView extends OrgRef {
+  ownerId: string;
+  ownerLogin: string | null;
+  createdAt: string;
+  /** Signed-in people, owner included. */
+  members: number;
+  /** Invites still waiting for a sign-in. */
+  pending: number;
+}
+export interface OrgMemberView {
+  email: string;
+  userId: string | null;
+  login: string | null;
+  name: string | null;
+  avatarUrl: string | null;
+  role: OrgRole;
+  status: "joined" | "invited";
+  invitedAt: string | null;
+  joinedAt: string | null;
+}
+export interface OrgMembersResponse {
+  org: { id: string; name: string; role: OrgRole; ownerId: string };
+  members: OrgMemberView[];
+}
+/** `org` scopes a store call to an organisation (its MCP servers, skills or memory). */
+export const scoped = (body: Record<string, unknown>, org?: string): Record<string, unknown> => (org ? { ...body, org } : body);
+const q = (org?: string): Record<string, string> => (org ? { org } : {});
 export interface AuthConfig {
   mode: "token" | "saas";
   providers: string[];
@@ -669,6 +708,8 @@ export type Me =
       daysLeft: number | null;
       expired: boolean;
       billingUrl: string | null;
+      /** The organisations this person is in, owned first. */
+      orgs?: Array<OrgRef & { members: number; pending: number }>;
     };
 export interface ApiKeyRow {
   id: string;
@@ -1078,15 +1119,29 @@ export const api = {
     ),
 
   /** MCP servers the sandbox agent gets. */
-  mcpServers: (signal?: AbortSignal) =>
-    fetch(url("/mcp-servers.json"), { headers: authHeaders, signal }).then(parse<McpServersResponse>),
-  mcpMutate: (body: Record<string, unknown>) => post<McpServersResponse>("/mcp-servers.json", body),
+  mcpServers: (signal?: AbortSignal, org?: string) =>
+    fetch(url("/mcp-servers.json", q(org)), { headers: authHeaders, signal }).then(parse<McpServersResponse>),
+  mcpMutate: (body: Record<string, unknown>, org?: string) => post<McpServersResponse>("/mcp-servers.json", scoped(body, org)),
   /** One server's health: the same MCP initialize handshake the in-box claude does at startup, then `tools/list`. */
-  mcpTest: (name: string) => post<McpProbe>("/mcp-servers/test.json", { name }),
-  skills: (signal?: AbortSignal) => fetch(url("/skills.json"), { headers: authHeaders, signal }).then(parse<SkillsResponse>),
-  skillMutate: (body: Record<string, unknown>) => post<SkillsResponse>("/skills.json", body),
+  mcpTest: (name: string, org?: string) => post<McpProbe>("/mcp-servers/test.json", scoped({ name }, org)),
+  skills: (signal?: AbortSignal, org?: string) => fetch(url("/skills.json", q(org)), { headers: authHeaders, signal }).then(parse<SkillsResponse>),
+  skillMutate: (body: Record<string, unknown>, org?: string) => post<SkillsResponse>("/skills.json", scoped(body, org)),
   /** Memory across runs: the owner's notes. Not /memory.json, which is the VM's RAM. */
-  memoryNotes: (signal?: AbortSignal) => fetch(url("/memory-notes.json"), { headers: authHeaders, signal }).then(parse<MemoryNotesResponse>),
+  memoryNotes: (signal?: AbortSignal, org?: string) => fetch(url("/memory-notes.json", q(org)), { headers: authHeaders, signal }).then(parse<MemoryNotesResponse>),
+  /* organisations */
+  orgs: (signal?: AbortSignal) => fetch(url("/orgs.json"), { headers: authHeaders, signal }).then(parse<{ orgs: OrgView[] }>),
+  createOrg: (name: string) => post<{ org: OrgView; orgs: OrgView[] }>("/orgs.json", { name }),
+  renameOrg: (org: string, name: string) => post<{ ok: true; orgs: OrgView[] }>("/orgs/update.json", { org, name }),
+  deleteOrg: (org: string) =>
+    fetch(url("/orgs.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ org }) }).then(parse<{ ok: true; orgs: OrgView[] }>),
+  orgMembers: (org: string, signal?: AbortSignal) => fetch(url("/orgs/members.json", { org }), { headers: authHeaders, signal }).then(parse<OrgMembersResponse>),
+  orgInvite: (org: string, emails: string, role: "admin" | "member" = "member") =>
+    post<{ added: string[]; existing: string[]; invalid: string[]; members: OrgMemberView[] }>("/orgs/members.json", { org, emails, role }),
+  orgRemoveMember: (org: string, email: string) =>
+    fetch(url("/orgs/members.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ org, email }) }).then(parse<{ ok: true; members: OrgMemberView[] }>),
+  orgSetRole: (org: string, email: string, role: "admin" | "member") => post<{ ok: true; members: OrgMemberView[] }>("/orgs/members/role.json", { org, email, role }),
+  orgLeave: (org: string) => post<{ ok: true; orgs: OrgView[] }>("/orgs/leave.json", { org }),
+  orgTransfer: (org: string, userId: string) => post<{ ok: true; orgs: OrgView[] }>("/orgs/transfer.json", { org, userId }),
   /** The service's own health (canary, host disk, start failures, baked packages). */
   health: (signal?: AbortSignal) => fetch(url("/health.json"), { headers: authHeaders, signal }).then(parse<HealthResponse>),
   /** Build an image with the newer versions, switch to it, test it, switch back if the test fails. Admins only. */
@@ -1094,24 +1149,24 @@ export const api = {
   browser: (session: string, action: Record<string, unknown>) => post<BrowserReply>("/browser.json", { session, ...action }),
   browserInstall: (session: string) => post<{ ok: true }>("/browser/install.json", { session }),
   updateImage: () => post<NonNullable<HealthResponse["imageUpdate"]>>("/health/image-update.json", {}),
-  memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean; repo?: string }) =>
-    post<MemoryNotesResponse>("/memory-notes.json", body),
+  memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean; repo?: string }, org?: string) =>
+    post<MemoryNotesResponse>("/memory-notes.json", scoped(body, org)),
   /** Add a preference/rule by hand (the composer on the Memory page). */
-  memoryNoteAdd: (add: { kind: MemoryKind; text: string; why?: string; repo?: string; area?: string; paths?: string; links?: string }) => post<MemoryNotesResponse>("/memory-notes.json", { add }),
+  memoryNoteAdd: (add: { kind: MemoryKind; text: string; why?: string; repo?: string; area?: string; paths?: string; links?: string }, org?: string) => post<MemoryNotesResponse>("/memory-notes.json", scoped({ add }, org)),
   memoryEpisodeDelete: (box: string) =>
     fetch(url("/memory-notes.json", { episode: box }), { method: "DELETE", headers: authHeaders }).then(parse<MemoryNotesResponse>),
-  memoryNoteDelete: (id: string) =>
-    fetch(url("/memory-notes.json", { id }), { method: "DELETE", headers: authHeaders }).then(parse<MemoryNotesResponse>),
+  memoryNoteDelete: (id: string, org?: string) =>
+    fetch(url("/memory-notes.json", { id, ...q(org) }), { method: "DELETE", headers: authHeaders }).then(parse<MemoryNotesResponse>),
   /** Turn a playbook note into a SKILL.md draft in the skill store. 409 when a skill of that name exists. */
   memoryPromote: (id: string) => post<{ skill: { name: string }; enabled: boolean; notes: MemoryNote[] }>("/memory-promote.json", { id }),
   /** Every kept note as one Markdown file (authenticated by header; the caller saves the blob). */
-  memoryExport: async (): Promise<Blob> => {
-    const res = await fetch(url("/memory-export.md"), { headers: authHeaders });
+  memoryExport: async (org?: string): Promise<Blob> => {
+    const res = await fetch(url("/memory-export.md", q(org)), { headers: authHeaders });
     if (res.status === 401) signOut();
     if (!res.ok) throw new ApiError(`Export failed (${res.status})`, res.status);
     return res.blob();
   },
-  memoryImport: (markdown: string) => post<MemoryNotesResponse>("/memory-import.json", { markdown }),
+  memoryImport: (markdown: string, org?: string) => post<MemoryNotesResponse>("/memory-import.json", scoped({ markdown }, org)),
   workflows: (signal?: AbortSignal) => fetch(url("/workflows.json"), { headers: authHeaders, signal }).then(parse<WorkflowsResponse>),
   workflowMutate: (body: Record<string, unknown>) => post<WorkflowsResponse>("/workflows.json", body),
   workflowPreview: (yaml: string) => post<{ ok: true; workflow: WorkflowView }>("/workflows.json", { action: "preview", yaml }),

@@ -12,8 +12,9 @@ import { sshMuxOpts } from "./ssh.js";
 import { listClaims, listKept, listParked, markClaimed, shouldKeepStopped, unmarkClaimed, unmarkKept, unmarkParked } from "./claims.js";
 import { askParkTtlSec } from "./snapshot.js";
 import { guardNodeProgram } from "./guard.js";
-import { loadMcpStore, toClaudeMcpConfig, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
-import { boxSkillSelection, buildSkillsTarBase64, loadSkillStore, skillsForBox, type SkillDef } from "./skill-store.js";
+import { loadEffectiveMcpStore, toClaudeMcpConfig, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
+import { boxSkillSelection, buildSkillsTarBase64, loadEffectiveSkillStore, skillsForBox, type SkillDef } from "./skill-store.js";
+import { mergeMemoryStores } from "./orgs.js";
 import { SKILLS_DIR, SKILLS_INDEX, recordSkillPicks, skillTurnHint, skillsIndex } from "./skill-match.js";
 import { loadMemoryStore, markUsed, playbookHint, receiptOf, recordReceipt, renderMemoryArchive, renderMemoryMd, saveMemoryStore, selectMemory, type MemoryReceipt } from "./memory-store.js";
 import { MEMORY_ALL_MD, MEMORY_MD, memorySetup } from "./drivers/memory-tool.js";
@@ -62,7 +63,7 @@ import { EXIT_DISK_FULL } from "./run-health.js";
 import { parseBakedManifest, type LastProvision } from "./package-watch.js";
 import { ensureHostGuard, hostGuardFlags } from "./host-guard.js";
 import { BLANK_OWNER, ownerTag } from "./warm-owners.js";
-import { withOwner } from "./user-store.js";
+import { sharedOwners, withOwner } from "./user-store.js";
 import { MOLI_BIN, MOLI_PROMPT_HINT, browserToolSetup, moliInstallSh } from "./browser.js";
 import { orphanSandboxDirs, parseDfPk, parseDirListing, type DiskReading } from "./host-disk.js";
 import { PKG_STORE_MOUNT, STORE_BOX_PREFIX, isStoreBox, makePkgStore, specName, storable, storeKey, storedPathSh } from "./pkg-store.js";
@@ -1615,7 +1616,8 @@ export function codeModePayload(files: Array<{ name: string; contents: string }>
 
 export async function installMcpConfig(cfg: Config, box: string): Promise<string[]> {
   try {
-    const store = await loadMcpStore(cfg);
+    // The owner's servers plus their organisations' (src/orgs.ts): the merge is what the box gets.
+    const store = await loadEffectiveMcpStore(cfg);
     const policy = boxSecretPolicy(cfg);
     // Said once per install, in the controller log: which enabled server was kept out because it
     // carries the operator's own token. The MCP page says the same next to the server.
@@ -1783,7 +1785,7 @@ export function pruneMcpPackagesSh(root = "/usr/local/lib/node_modules"): string
  */
 export async function installSkills(cfg: Config, box: string): Promise<SkillDef[]> {
   try {
-    const skills = skillsForBox(await loadSkillStore(cfg), boxSkillSelection(box));
+    const skills = skillsForBox(await loadEffectiveSkillStore(cfg), boxSkillSelection(box));
     if (!skills.length) {
       await exec(cfg, box, `rm -rf ${SKILLS_DIR}`);
       return [];
@@ -1857,7 +1859,10 @@ export function forgetMemoryReceipt(box: string): void {
  */
 export async function installMemory(cfg: Config, box: string, task?: string, opts: { firstTurn?: boolean } = {}): Promise<{ hint: string }> {
   try {
-    const store = loadMemoryStore();
+    // `own` is the row that gets saved (recall counters, receipt); `store` adds the organisations'
+    // notes for selection and rendering and shares `own`'s note objects (src/orgs.ts mergeMemoryStores).
+    const own = loadMemoryStore();
+    const store = own.enabled ? mergeMemoryStores(own, sharedOwners().map((org) => loadMemoryStore(org))) : own;
     const rm = `rm -f ${[...MEMORY_PATHS, ...MEMORY_ALL_PATHS].join(" ")}`;
     if (!store.enabled || (!store.global.length && !Object.keys(store.repos).length && !Object.keys(store.episodes ?? {}).length)) {
       await exec(cfg, box, rm);
@@ -1881,10 +1886,10 @@ export async function installMemory(cfg: Config, box: string, task?: string, opt
       for (const n of fresh) counted.add(n.id);
       markUsed(fresh);
       const receipt = receiptOf(sel);
-      recordReceipt(store, box, receipt);
+      recordReceipt(own, box, receipt);
       memoryReceipts.set(box, receipt);
       try {
-        saveMemoryStore(store);
+        saveMemoryStore(own);
       } catch {
         /* a lost counter bump is not worth failing the turn */
       }
