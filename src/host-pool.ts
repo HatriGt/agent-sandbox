@@ -109,6 +109,8 @@ export interface HostPoolOpts {
   log?: (m: string) => void;
   /** A quick reachability probe (msb ls over SSH), injected so this module stays IO-free. */
   probe?: (cfg: Config) => Promise<string>;
+  /** Tests: a shorter cap on the probe than HOST_ANSWER_TIMEOUT_MS. */
+  answerTimeoutMs?: number;
 }
 
 /** Boxes that hold a session on a host: the figure capacity is measured against. */
@@ -146,6 +148,18 @@ export interface HostPool {
   pause(id: string): Promise<ProviderState>;
   start(id: string): Promise<ProviderState>;
   reload(): void;
+}
+
+/** How long one host gets to answer a sweep or a check before it is treated as unreachable this round. */
+export const HOST_ANSWER_TIMEOUT_MS = Math.max(5_000, Number(process.env.HOST_ANSWER_TIMEOUT_MS ?? "45000") || 45_000);
+
+/** Rejects with `what timed out after Ns` when `p` has not settled in `ms`; the work itself is not cancelled. */
+export function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const gate = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} timed out after ${Math.round(ms / 1000)}s`)), ms);
+  });
+  return Promise.race([p, gate]).finally(() => clearTimeout(timer));
 }
 
 export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): HostPool {
@@ -297,9 +311,11 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       };
     },
     capacity: () => totalCapacity(candidates()),
-    noteSweep: (id, boxes) => {
+    noteSweep: (id, untagged) => {
       const h = get(id);
       if (!h) return;
+      // Every box carries its host from here on, whoever read it.
+      const boxes = untagged.map((b) => (b.host === id ? b : { ...b, host: id }));
       const wasAsleep = h.sleep.asleep();
       h.lastBoxes = boxes;
       h.lastSweepAt = now();
@@ -428,12 +444,15 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       const t0 = now();
       let r: HostCheck;
       try {
-        const detail = opts.probe ? await opts.probe(h.cfg) : "no probe configured";
+        const detail = opts.probe ? await withTimeout(opts.probe(h.cfg), opts.answerTimeoutMs ?? HOST_ANSWER_TIMEOUT_MS, `check of ${id}`) : "no probe configured";
         r = { ok: true, ms: now() - t0, detail, at: now() };
         h.lastError = undefined;
         h.unreachableSince = undefined;
       } catch (e) {
         r = { ok: false, ms: now() - t0, detail: (e as Error).message.slice(0, 300), at: now() };
+        // A host that does not answer a check is not picked until a sweep or a check gets through.
+        h.lastError = r.detail;
+        h.unreachableSince ??= now();
       }
       h.check = r;
       return r;

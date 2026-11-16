@@ -202,8 +202,57 @@ test("check: the probe's answer is kept, and a failure does not throw", async ()
   assert.equal(bad.ok, false);
   assert.match(bad.detail, /refused/);
   assert.equal(pool.state().find((h) => h.id === "b")?.check?.ok, false);
+  // A host that failed its check is unreachable, so never picked, until something gets through.
+  assert.equal(pool.state().find((h) => h.id === "b")?.unreachable, true);
+  assert.equal(pool.pick().host?.spec.id, "primary");
+  pool.noteSweep("b", []);
+  assert.equal(pool.state().find((h) => h.id === "b")?.unreachable, false);
   await assert.rejects(() => pool.check("nope"), /no host/);
   registerSleepResolver(null);
+});
+
+test("check: a probe that hangs is capped and the host is unreachable meanwhile", async () => {
+  const pool = makeHostPool(cfg, openMemoryDb(), {
+    probe: (c) => (c.hostId === "slow" ? new Promise(() => {}) : Promise.resolve("ok")),
+    answerTimeoutMs: 30,
+  });
+  pool.upsert({ id: "slow", name: "slow", ssh: "root@slow", priority: -1 });
+  const r = await pool.check("slow");
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /timed out after 0s/);
+  assert.equal(pool.pick().host?.spec.id, "primary");
+  registerSleepResolver(null);
+});
+
+test("sweepHosts: a host that does not answer in time is served from memory and marked unreachable; the next round reuses the slow read", async () => {
+  const { sweepHosts, setSweepForTest } = await import("../src/host-sweep.ts");
+  const pool = makeHostPool(cfg, openMemoryDb());
+  pool.upsert({ id: "dead", name: "dead", ssh: "root@dead" });
+  pool.noteSweep("dead", [box("old-box")]);
+  let reads = 0;
+  setSweepForTest(async (c, id) => {
+    reads++;
+    if (id === "dead") await new Promise(() => {});
+    return { boxes: [box("live-box")], kept: new Set<string>(), claims: new Map<string, number>(), titles: {} };
+  }, 40);
+  try {
+    const t0 = Date.now();
+    const r1 = await sweepHosts(cfg, pool);
+    assert.ok(Date.now() - t0 < 2000, "the round does not wait for TCP");
+    assert.deepEqual(r1.swept, ["primary"]);
+    assert.deepEqual(r1.stale, ["dead"]);
+    assert.deepEqual(r1.boxes.map((b) => `${b.name}@${b.host}`).sort(), ["live-box@primary", "old-box@dead"]);
+    assert.equal(pool.state().find((h) => h.id === "dead")?.unreachable, true);
+    assert.match(pool.state().find((h) => h.id === "dead")?.lastError ?? "", /sweep of dead timed out/);
+    assert.equal(reads, 2);
+    // The next round attaches to the read still in flight instead of starting another SSH.
+    await sweepHosts(cfg, pool);
+    assert.equal(reads, 3, "the primary is read again, the dead host is not");
+    assert.equal(pool.pick().host?.spec.id, "primary");
+  } finally {
+    setSweepForTest(null);
+    registerSleepResolver(null);
+  }
 });
 
 test("the shared pool answers cfgForBox and warmCfgs; without one the given config is used", async () => {

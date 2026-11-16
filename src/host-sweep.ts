@@ -8,13 +8,19 @@
  * Failing loud is kept where it matters: when no host answered at all and none is asleep, the
  * sweep throws, so the fleet's run memory is never wiped by "zero boxes" that was really "the
  * host was unreachable". Without a configured pool (CLI tools) it sweeps the one host in `cfg`.
+ *
+ * A host that does not answer is given HOST_ANSWER_TIMEOUT_MS per round and then served from
+ * memory and marked unreachable: the controller's SSH has no connect timeout of its own, so a dead
+ * target would otherwise hold every sweep (and the Fleet page) for the two minutes TCP takes to
+ * give up. The slow read is left running and the next round attaches to it instead of stacking
+ * another SSH behind it.
  */
 import type { Config } from "./config.js";
 import type { BoxView } from "./monitor.js";
 import { gatherMonitor } from "./msb.js";
 import { listClaims, listKept } from "./claims.js";
 import { loadTitles } from "./titles.js";
-import { hostPool } from "./host-pool.js";
+import { hostPool, withTimeout, HOST_ANSWER_TIMEOUT_MS, type HostPool } from "./host-pool.js";
 
 export interface HostSweep {
   boxes: BoxView[];
@@ -33,8 +39,32 @@ interface Last {
   titles: Record<string, string>;
 }
 const last = new Map<string, Last>();
+type OneSweep = { boxes: BoxView[] } & Last;
+const inFlight = new Map<string, Promise<OneSweep>>();
 
-async function sweepOne(cfg: Config, id: string): Promise<{ boxes: BoxView[] } & Last> {
+/** Tests swap the per-host read and the cap. */
+let sweepOneImpl: (cfg: Config, id: string) => Promise<OneSweep> = sweepOne;
+let answerTimeoutMs = HOST_ANSWER_TIMEOUT_MS;
+export function setSweepForTest(impl: ((cfg: Config, id: string) => Promise<OneSweep>) | null, timeoutMs?: number): void {
+  sweepOneImpl = impl ?? sweepOne;
+  answerTimeoutMs = timeoutMs ?? HOST_ANSWER_TIMEOUT_MS;
+  inFlight.clear();
+  last.clear();
+}
+
+/** One host's read, shared with any round still waiting on it, capped for this round. */
+function sweepHost(cfg: Config, id: string): Promise<OneSweep> {
+  let p = inFlight.get(id);
+  if (!p) {
+    p = sweepOneImpl(cfg, id).finally(() => {
+      if (inFlight.get(id) === p) inFlight.delete(id);
+    });
+    inFlight.set(id, p);
+  }
+  return withTimeout(p, answerTimeoutMs, `sweep of ${id}`);
+}
+
+async function sweepOne(cfg: Config, id: string): Promise<OneSweep> {
   const [boxes, kept, claims, titles] = await Promise.all([
     gatherMonitor(cfg),
     listKept(cfg).catch(() => last.get(id)?.kept ?? new Set<string>()),
@@ -45,8 +75,8 @@ async function sweepOne(cfg: Config, id: string): Promise<{ boxes: BoxView[] } &
   return { boxes: boxes.map((b) => ({ ...b, host: id })), kept, claims, titles };
 }
 
-export async function sweepHosts(cfg: Config): Promise<HostSweep> {
-  const pool = hostPool();
+export async function sweepHosts(cfg: Config, poolOverride?: HostPool): Promise<HostSweep> {
+  const pool = poolOverride ?? hostPool();
   if (!pool) {
     const r = await sweepOne(cfg, cfg.hostId ?? "primary");
     return { ...r, swept: [cfg.hostId ?? "primary"], stale: [] };
@@ -71,10 +101,11 @@ export async function sweepHosts(cfg: Config): Promise<HostSweep> {
         return;
       }
       try {
-        const r = await sweepOne(h.cfg, id);
-        pool.noteSweep(id, r.boxes);
+        const r = await sweepHost(h.cfg, id);
+        const boxes = r.boxes.map((b) => (b.host === id ? b : { ...b, host: id }));
+        pool.noteSweep(id, boxes);
         out.swept.push(id);
-        merge(id, r.boxes, r);
+        merge(id, boxes, r);
       } catch (e) {
         firstError ??= e as Error;
         pool.noteSweepError(id, (e as Error).message);

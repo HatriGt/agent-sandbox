@@ -322,8 +322,9 @@ function HostDialog({ host, onClose, onSaved }: { host: HostView | null; onClose
           spec.snapshot = "";
         }
       }
-      await api.hostAction({ action: "upsert", ...(host ? { id: host.id } : {}), spec });
-      toast.success(host ? `${spec.name} updated` : `${spec.name} added`);
+      const r = await api.hostAction({ action: "upsert", ...(host ? { id: host.id } : {}), spec });
+      if (r.check && !r.check.ok) toast.warning(`${spec.name} ${host ? "updated" : "added"}, but it does not answer: ${r.check.detail}`, { duration: 12_000 });
+      else toast.success(`${spec.name} ${host ? "updated" : "added"}${r.check ? ` · ${r.check.detail}` : ""}`);
       await onSaved();
       onClose();
     } catch (e) {

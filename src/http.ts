@@ -43,6 +43,7 @@ import { StartFailureStreak, isStartFailure, logTail, startFailureAlertText } fr
 import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, type CanaryResult } from "./canary.js";
 import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-disk.js";
 import { configureHostPool, makeHostPool } from "./host-pool.js";
+import { PRIMARY_HOST_ID } from "./hosts.js";
 import { sweepHosts } from "./host-sweep.js";
 import { countBoxes as countBoxesOnHost } from "./msb.js";
 import { BAKED_MCP_PACKAGES, BASE_PACKAGES, fetchLatestVersions, imageChanges, packageNameOf, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
@@ -5172,11 +5173,16 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
   try {
     switch (body.action) {
       case "upsert": {
+        const before = hostPool.get(id)?.spec;
         const spec = hostPool.upsert({ ...(body.spec ?? {}), ...(id ? { id } : {}) } as Parameters<typeof hostPool.upsert>[0]);
         res.locals.auditAction = `host.upsert:${spec.id}`;
+        // A new target, or one switched back on, is checked now (capped by HOST_ANSWER_TIMEOUT_MS): the
+        // dialog shows the answer and a dead host is unreachable, so not picked, until a sweep gets through.
+        const connectionChanged = !before || before.ssh !== spec.ssh || before.msb !== spec.msb || before.msbHome !== spec.msbHome || (!before.enabled && spec.enabled);
+        const check = spec.enabled && spec.id !== PRIMARY_HOST_ID && connectionChanged ? await hostPool.check(spec.id) : undefined;
         // A new host's own addresses, before any box starts on it (src/host-guard.ts).
-        void learnHostGuard(hostPool.cfgFor(spec.id));
-        res.json({ ok: true, host: hostPool.state().find((h) => h.id === spec.id), hosts: hostPool.state(), capacity: hostPool.capacity() });
+        if (spec.enabled) void learnHostGuard(hostPool.cfgFor(spec.id));
+        res.json({ ok: true, host: hostPool.state().find((h) => h.id === spec.id), hosts: hostPool.state(), capacity: hostPool.capacity(), check });
         return;
       }
       case "remove": {
