@@ -63,7 +63,7 @@ const mC = r.json.members.find((m) => m.email === users.c.email);
 check(mB?.status === "joined" && mB.login === users.b.login, "existing user linked at once", mB);
 // The "@" typeahead: B (on the site, a member now) is offered first with their standing; GitHub's
 // half answers (ok) or is rate-limited (limited) - either is a working route, an error is not.
-r = await call("GET", `/orgs/people-search.json?org=${org}&q=${users.b.login.slice(0, 6)}`, { cookie: A });
+r = await call("GET", `/orgs/people-search.json?org=${org}&q=${users.b.login}`, { cookie: A });
 {
   const hitB = r.json?.people?.find((p) => p.login.toLowerCase() === users.b.login.toLowerCase());
   check(r.status === 200 && hitB?.onSite === true && hitB.status === "member" && ["ok", "limited"].includes(r.json.github), "typeahead offers B as on-site member; GitHub half answered", { github: r.json?.github, people: r.json?.people?.map((p) => [p.login, p.onSite, p.status]) });
