@@ -659,7 +659,7 @@ export default function App() {
                   : route.view === "admin"
                     ? [{ label: "Account", onClick: showAccount }, { label: "Admin" }]
                     : route.view === "org"
-                      ? [{ label: "Account", onClick: showAccount }, { label: "Organisation" }]
+                      ? [{ label: "Organisation" }]
                     : route.view === "connect"
                       ? [{ label: "Account", onClick: showAccount }, { label: "Connect an IDE" }]
                       : [{ label: { history: "History", activity: "Activity", skills: "Skills", memory: "Memory", harnesses: "Harnesses", integrations: "Integrations", account: "Account", welcome: "Welcome" }[route.view] }];
@@ -761,6 +761,7 @@ export default function App() {
         <span className="contents" onMouseEnter={prefetchIntegrations}>
           <NavItem active={view === "integrations"} flash={flash === "integrations"} onClick={showIntegrations} icon={<Plug />} label="Integrations" shortcut="g a" />
         </span>
+        {getMe()?.kind === "user" && getMe()?.mode === "saas" && <NavItem active={view === "org"} onClick={showOrg} icon={<Building2 />} label="Organisation" badge={getMe()?.kind === "user" ? (getMe() as { orgs?: unknown[] }).orgs?.length || undefined : undefined} />}
         <div className="mt-2 border-t pt-2" />
         <TrialBadge className="mx-2.5 mb-1 self-start" />
         {/* Account/Connect must be reachable in token mode too — the operator uses
@@ -942,8 +943,9 @@ export default function App() {
               <span className="contents" onMouseEnter={prefetchIntegrations}>
                 <RailIcon active={view === "integrations"} flash={flash === "integrations"} onClick={showIntegrations} icon={<Plug />} label="Integrations" shortcut="g a" />
               </span>
+              {getMe()?.kind === "user" && getMe()?.mode === "saas" && <RailIcon active={view === "org"} onClick={showOrg} icon={<Building2 />} label="Organisation" />}
               <div className="mt-auto flex flex-col items-center gap-1.5">
-                <RailIcon active={view === "account" || view === "connect" || view === "admin" || view === "welcome" || view === "org"} onClick={showAccount} icon={<UserRound />} label={getMe()?.kind === "user" ? "Account" : "Operator"} />
+                <RailIcon active={view === "account" || view === "connect" || view === "admin" || view === "welcome"} onClick={showAccount} icon={<UserRound />} label={getMe()?.kind === "user" ? "Account" : "Operator"} />
                 <ThemePicker side="right" align="end">
                   <RailIcon icon={<Palette />} label={`Theme: ${theme.label}`} />
                 </ThemePicker>
@@ -1050,7 +1052,7 @@ export default function App() {
                   </PageEnter>
                 ) : route.view === "org" ? (
                   <PageEnter className="h-full min-h-0">
-                    <Organisation id={route.id} onBack={showAccount} />
+                    <Organisation id={route.id} onBack={backToRail} />
                   </PageEnter>
                 ) : view === "connect" ? (
                   <PageEnter className="h-full min-h-0">

@@ -1,6 +1,6 @@
 import * as React from "react";
 import { AnimatePresence, motion, type HTMLMotionProps } from "motion/react";
-import { ArrowRightLeft, Building2, Check, ChevronDown, Crown, LogOut, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ArrowRightLeft, Building2, Check, ChevronDown, Crown, LogOut, Pencil, Plus, Trash2, UserPlus, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type OrgMemberView, type OrgRef, type OrgView } from "@/lib/api";
 import { getMe, setMe } from "@/lib/auth";
@@ -46,7 +46,7 @@ export function Organisation({ id, onBack }: { id?: string; onBack: () => void }
     return (
       <Shell onBack={onBack}>
         {id ? (
-          <EmptyState icon={Building2} title="Not one of yours" line="That organisation does not exist, or you are no longer in it." action={<Button variant="outline" size="sm" onClick={onBack}>Back to account</Button>} />
+          <EmptyState icon={Building2} title="Not one of yours" line="That organisation does not exist, or you are no longer in it." action={<Button variant="outline" size="sm" onClick={() => go({ view: "org" }, { replace: true })}>Your organisations</Button>} />
         ) : (
           <CreateFirst onCreated={(o) => { setOrgs((prev) => [...(prev ?? []), o]); go({ view: "org", id: o.id }, { replace: true }); }} />
         )}
@@ -59,13 +59,15 @@ export function Organisation({ id, onBack }: { id?: string; onBack: () => void }
 
 function Shell({ onBack, children }: { onBack: () => void; children: React.ReactNode }) {
   return (
-    <SettingsPage title="Organisation" back={{ label: "Account", onClick: onBack }}>
+    <SettingsPage title="Organisation" back={{ label: "Machines", onClick: onBack, mobileOnly: true }}>
       {children}
     </SettingsPage>
   );
 }
 
 function CreateFirst({ onCreated }: { onCreated: (o: OrgView) => void }) {
+  const me = getMe();
+  const email = me?.kind === "user" ? me.email : null;
   const [name, setName] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const create = async () => {
@@ -85,8 +87,12 @@ function CreateFirst({ onCreated }: { onCreated: (o: OrgView) => void }) {
   return (
     <EmptyState
       icon={Building2}
-      title="Start an organisation"
-      line="Name it, add your team by email, and whatever you set up here — MCP servers, skills, memory — reaches every member's runs automatically."
+      title="Start an organisation, or be added to one"
+      line="Name one and you own it: add your team by email, and whatever you set up here — MCP servers, skills, memory — reaches every member's runs automatically."
+      facts={[
+        { icon: Crown, text: "Name one above. You own it and decide who is in." },
+        { icon: UserPlus, text: email ? <>To join someone else's, ask its owner to add <span className="text-foreground">{email}</span> — you are in the moment they do.</> : "To join someone else's, set an email on your account and ask its owner to add it." },
+      ]}
       action={
         <form
           className="flex w-full max-w-sm items-center gap-2"
@@ -232,7 +238,7 @@ function OrgPage({ org, orgs, onBack, onOrgs }: { org: OrgView; orgs: OrgView[];
                   {org.role === "admin" ? " · you are an admin" : org.role === "member" ? " · you are a member" : ""}
                 </>
               }
-              back={{ label: "Account", onClick: onBack }}
+              back={{ label: "Machines", onClick: onBack, mobileOnly: true }}
               actions={
                 <>
                   {orgs.length > 1 && (
