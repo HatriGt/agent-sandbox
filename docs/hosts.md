@@ -115,6 +115,17 @@ sure the controller's SSH key is accepted, and **Add host** with provider "My ow
 check action runs `msb ls` and a disk reading over SSH and shows the round trip, so a wrong
 target or a missing `msb` shows up before any run lands.
 
+## Verified live (2026-11-17)
+
+`.shots/live-hosts-e2e.mjs --run-on-fs` against the public controller, as the operator: the
+registry lists the primary from .env; removing it is refused; a dead host added at order -1 is
+checked on the way in (45 s cap), unreachable from the start and never picked, and the Fleet page
+still answers with it enabled; a run lands on the primary with its host tag and is torn down; the
+Freestyle VM (asb-host) is accepted with its token elided and its API key kept as a flag, a
+blank key on an edit keeps the stored one, and put at order -1 it took a real run (delegate
+answered in 24 s from a cold boot, done at 80 s, the teardown routed to the right host). All test
+hosts were removed and the VM paused through the API afterwards.
+
 ## What is not covered
 
 - A box does not move between hosts. A pinned or sleeping run lives on the host it started on;
