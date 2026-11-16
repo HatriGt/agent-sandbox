@@ -167,7 +167,9 @@ if (!NO_RUN) {
   check(seen.includes(skill), "org skill directory reached the box");
   check(seen.includes(server), "org MCP server reached the box's MCP config");
   check(seen.includes(mineServer), "copied server reached the box's MCP config");
-  check(seen.includes(secret), "copied server carries the real secret in the box (not the mask)");
+  // The watch log is redacted by the controller, which knows the real value and prints it as
+  // `Bearer …<last 4>`; the browser mask (`Be…789`) would have come through untouched.
+  check(seen.includes(`Bearer \u2026${secret.slice(-4)}`) && !seen.includes(`Bearer ${secret.slice(0, 2)}\u2026${secret.slice(-3)}`), "copied server carries the real secret in the box (redacted in the log, not the browser mask)");
   check(seen.includes(mineSkill), "copied skill directory reached the box");
   check(seen.includes(`E2E-MINE-MEMORY-${ts}`), "copied note reached the box's MEMORY.md");
   if (box) {
