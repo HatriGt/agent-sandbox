@@ -9,6 +9,10 @@ import { cn } from "@/lib/utils";
  * that slides up from the edge, where a thumb can reach the close control. The body scrolls inside
  * `max-h-[85dvh]` with the title row pinned, so a long form never pushes its own heading off-screen.
  * Reduced motion: fade only. Dark mode drops the border in favour of the e5 shadow + a hairline.
+ * The scrim is a plain wash, no backdrop-filter: Chrome repaints a blurred overlay whenever the page
+ * behind it changes (the fleet poll does, every few seconds), which read as the dialog blinking.
+ * Actions go in <DialogFooter>: it sticks to the bottom of the scrolling body, so the buttons sit
+ * in the same place in every dialog whether the content is three lines or a long list.
  *
  * Desktop styles are the base and the phone sheet is `max-sm:` so a caller's `w-[…]` override
  * (SkillsPage passes 40rem) still wins on desktop without disturbing the full-width sheet.
@@ -32,6 +36,7 @@ function DialogContent({
   description?: string;
   /** Extra header controls, placed before the close button. */
   actions?: React.ReactNode;
+  /** Replaces the body's default padding scheme (side padding plus a bottom margin on the last non-footer child). */
   bodyClassName?: string;
   overlayClassName?: string;
   /** A 44px tool-window header (meta-size title, hairline under it) instead of the form heading. */
@@ -39,7 +44,7 @@ function DialogContent({
 }) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay data-slot="overlay" className={cn("fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[240ms] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[180ms]", overlayClassName)} />
+      <DialogPrimitive.Overlay data-slot="overlay" className={cn("fixed inset-0 z-40 bg-black/45 dark:bg-black/60 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[240ms] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[180ms]", overlayClassName)} />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
@@ -70,10 +75,23 @@ function DialogContent({
             <X className="size-4" />
           </DialogPrimitive.Close>
         </div>
-        <div className={cn("min-h-0 flex-1 overflow-y-auto px-6 pb-6", bodyClassName)}>{children}</div>
+        <div className={cn("min-h-0 flex-1 overflow-y-auto", bodyClassName ?? "px-6 [&>:last-child:not([data-slot=dialog-footer])]:mb-6")}>{children}</div>
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   );
 }
 
-export { Dialog, DialogTrigger, DialogClose, DialogContent };
+/**
+ * The action row. Sticky to the bottom of the body: when the content is short it simply follows
+ * it, when the content scrolls the buttons stay put. Put a hint or count first and the buttons
+ * after; `ml-auto` on the first button is already there via `justify-end` + `[&>*:first-child]`.
+ */
+function DialogFooter({ className, children }: { className?: string; children: React.ReactNode }) {
+  return (
+    <div data-slot="dialog-footer" className={cn("bg-popover sticky bottom-0 z-10 -mx-6 mt-4 flex items-center gap-2 border-t px-6 py-3.5 dark:border-white/8", className)}>
+      {children}
+    </div>
+  );
+}
+
+export { Dialog, DialogTrigger, DialogClose, DialogContent, DialogFooter };

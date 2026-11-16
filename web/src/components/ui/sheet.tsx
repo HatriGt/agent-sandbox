@@ -25,7 +25,7 @@ function SheetContent({
   const bottom = side === "bottom";
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay data-slot="overlay" className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[240ms] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[180ms]" />
+      <DialogPrimitive.Overlay data-slot="overlay" className="fixed inset-0 z-40 bg-black/45 dark:bg-black/60 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[240ms] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[180ms]" />
       <DialogPrimitive.Content
         data-slot="sheet-content"
         className={cn(

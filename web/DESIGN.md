@@ -1507,11 +1507,13 @@ that in three places and nowhere else:
   read-only for a member (no actions column, no footer, no toggles). The skill editor replaces the
   page the way it does on Skills. Each of the three sections has a **From yours** button beside
   its own actions (and a first card in the servers' empty state, a primary action in the others'):
-  `org/PickFromMine`, a dialog listing the admin's own servers, skills or notes as checkbox rows
-  (stamp name and command/URL for servers, `/name` and description for skills, the text with a
-  kind chip and the rationale or repo for notes; proposals and expired notes are left out). A row
-  the org already has by that name says *replaces the org's*; one the person has turned off says
-  *off for you*. **All**/**None**, "2 of 4 picked", **Add to {org}**. The copy is a controller
+  `org/PickFromMine`: a surface whose header line is the count and **Select all**, over a tile of
+  checkbox rows (stamp name and command/URL for servers, `/name` and description for skills, the
+  text with the rationale or repo for notes; proposals and expired notes are left out), the type
+  or kind as a wash chip at the right, and a search field once there are seven or more. A row the
+  org already has by that name carries an attention chip *replaces the org's*; one the person has
+  turned off says *off for you*. The DialogFooter holds "2 of 4 picked" and **Cancel** / **Add 2
+  to {org}** (⌘↵ adds). The copy is a controller
   route (`POST /orgs/copy.json`), never the browser, because the browser only ever sees masked
   secrets: the org's server arrives with the real env and headers, and the two copies are
   separate from then on.
@@ -1527,3 +1529,20 @@ is the note **Copy invite** puts on the clipboard. Verified with `.shots/org-fix
 (`--role=owner|member`, `--dark`): the org page top and bottom, the three pickers
 (`--only=pick-servers,pick-skills,pick-notes`), the empty state, Account, and the three shared-by
 blocks.
+
+## Dialogs: a plain scrim and one footer (2026-11-16)
+
+Two rules every dialog follows, both in `ui/dialog.tsx` (and the sheet's scrim in `ui/sheet.tsx`):
+
+- **The scrim is a wash, not a blur.** `bg-black/45` (60% in dark), no `backdrop-filter`. Chrome
+  on macOS repaints a blurred overlay every time the page under it changes, and the fleet poll
+  changes it every three seconds, so an open dialog blinked on that cadence. The expensive-UI
+  references use a flat scrim anyway; the blur bought nothing.
+- **Actions live in `<DialogFooter>`.** A row with a hairline above it, `py-3.5`, sticky to the
+  bottom of the scrolling body, so the buttons sit in the same place whether the content is three
+  lines or a long list, and never scroll away. A hint or count goes first (`mr-auto`), then the
+  ghost **Cancel**, then the one primary. The body pads its last non-footer child instead of
+  itself, because a scroll container keeps its end padding below everything, which is what kept
+  the old inline footers a padding's height above the edge. Paste config, Import a skill (both
+  steps) and the From-yours picker use it; anything new that has buttons should too.
+

@@ -81,7 +81,7 @@ await page.route("**/*", (route) => {
   const u = new URL(route.request().url());
   const org = u.searchParams.get("org");
   const p = u.pathname;
-  if (p === "/fleet.json") return json(route, { boxes, lifecycle, at: now });
+  if (p === "/fleet.json") return json(route, { boxes, lifecycle, at: Date.now() });
   if (p === "/monitor.json") return json(route, { boxes, lifecycle });
   if (p === "/me.json") return json(route, empty ? { ...me, orgs: [] } : me);
   if (p === "/auth/config.json") return json(route, { mode: "saas", providers: ["github"], tokenLogin: false, password: true, signup: true, passwordMin: 10, trialDays: 14, billingUrl: null, beta: true });
@@ -98,8 +98,11 @@ await page.route("**/*", (route) => {
 const pages = [
   ["org", "/dashboard/org/org_acme"],
   ["pick-servers", "/dashboard/org/org_acme"],
+  ["flicker", "/dashboard/org/org_acme"],
   ["pick-skills", "/dashboard/org/org_acme"],
   ["pick-notes", "/dashboard/org/org_acme"],
+  ["dlg-paste", "/dashboard/org/org_acme"],
+  ["dlg-import", "/dashboard/org/org_acme"],
   ["org-empty", "/dashboard/org"],
   ["account", "/dashboard/account"],
   ["integrations", "/dashboard/integrations"],
@@ -113,10 +116,38 @@ for (const [name, path] of pages) {
   await page.waitForTimeout(3200);
   if (name === "memory") await page.locator("#sec-memory-you").scrollIntoViewIfNeeded().catch(() => {});
   const file = `.shots/out/org-${name}-${role}${dark ? "-dark" : ""}${tag ? "-" + tag : ""}.png`;
-  if (name.startsWith("pick-")) {
+  if (name === "flicker") {
+    // Open the servers picker and watch the dialog node for 8s: does it remount, change state, or move?
+    await page.getByRole("button", { name: "From your own servers" }).first().click();
+    await page.waitForTimeout(800);
+    const r = await page.evaluate(async () => {
+      const out = [];
+      let last = document.querySelector("[role=dialog]");
+      let lastState = last?.getAttribute("data-state");
+      let lastRect = JSON.stringify(last?.getBoundingClientRect());
+      const t0 = performance.now();
+      while (performance.now() - t0 < 8000) {
+        await new Promise((f) => setTimeout(f, 50));
+        const el = document.querySelector("[role=dialog]");
+        const st = el?.getAttribute("data-state");
+        const rect = JSON.stringify(el?.getBoundingClientRect());
+        if (el !== last) out.push(`${Math.round(performance.now() - t0)}ms node ${el ? "replaced" : "gone"}`);
+        else if (st !== lastState) out.push(`${Math.round(performance.now() - t0)}ms state ${lastState}->${st}`);
+        else if (rect !== lastRect) out.push(`${Math.round(performance.now() - t0)}ms rect ${rect}`);
+        last = el;
+        lastState = st;
+        lastRect = rect;
+      }
+      return out;
+    });
+    console.log("flicker events:", r.length ? r.join(" | ") : "none in 8s");
+    await page.keyboard.press("Escape");
+    continue;
+  }
+  if (name.startsWith("pick-") || name.startsWith("dlg-")) {
     // the "From yours" picker of one section: open it, tick two rows, shoot the dialog
-    const label = { "pick-servers": "From your own servers", "pick-skills": "From yours", "pick-notes": "From yours" }[name];
-    const btn = name === "pick-servers" ? page.getByRole("button", { name: label }).first() : page.getByRole("button", { name: label }).nth(name === "pick-skills" ? 0 : 1);
+    const label = { "pick-servers": "From your own servers", "pick-skills": "From yours", "pick-notes": "From yours", "dlg-paste": "Paste config", "dlg-import": "Import" }[name];
+    const btn = name === "pick-notes" ? page.getByRole("button", { name: label }).nth(1) : page.getByRole("button", { name: label, exact: true }).first();
     await btn.scrollIntoViewIfNeeded().catch((e) => errors.push(`${name}: ${e.message}`));
     await btn.click().catch((e) => errors.push(`${name}: ${e.message}`));
     await page.waitForTimeout(900);

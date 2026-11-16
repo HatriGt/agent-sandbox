@@ -9,7 +9,7 @@ import { fetchRepoFile, fetchRepoSkill, listRepoSkills, parseRepoInput, parseSki
 import { cn } from "@/lib/utils";
 import { AnimatedTabs, TabPanel } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { inputClass } from "@/components/ui/field";
 import { Kbd } from "@/components/ui/kbd";
 import { type Draft, fmtBundle } from "./model";
@@ -233,12 +233,13 @@ function PasteStep({ onEditOne }: { onEditOne: (d: Draft) => void }) {
       />
       <p className="text-faint -mt-1 text-micro">Frontmatter (name, description) is read when present; otherwise the first heading and paragraph are used. You can fix anything in the editor.</p>
       <SkillPreview draft={parsed} />
-      <div className="flex items-center justify-end gap-2">
+      <DialogFooter>
+        <span className="text-faint mr-auto text-micro">{parsed ? `/${parsed.name} — you can change anything before it goes live.` : "Paste a SKILL.md; the name and description come from its frontmatter."}</span>
         <Button type="submit" size="sm" disabled={!parsed}>
           Review in editor
           <Kbd className="text-primary-foreground/70 border-primary-foreground/20 hidden bg-transparent sm:inline-flex">⌘↵</Kbd>
         </Button>
-      </div>
+      </DialogFooter>
     </form>
   );
 }
@@ -482,7 +483,7 @@ function GitHubStep({ existing, onClose, onImported, onEditOne, preset, mutate }
             })}
           </ul>
           {pickedCount === 1 && preview && <SkillPreview draft={preview.draft} loading={preview.loading} files={preview.draft?.files?.length} existing={!!preview.draft && !!existing[preview.draft.name]} />}
-          <div className="flex items-center justify-end gap-2">
+          <DialogFooter>
             <span className="text-faint mr-auto text-micro">{pickedCount === 1 ? "Opens in the editor for review before it goes live." : pickedCount > 1 ? "Saved straight in, enabled." : "Pick one to preview it, or several to import at once."}</span>
             <Button variant="ghost" size="sm" onClick={onClose}>
               Cancel
@@ -491,7 +492,7 @@ function GitHubStep({ existing, onClose, onImported, onEditOne, preset, mutate }
               {importing ? <Loader2 /> : <Download />}
               {pickedCount === 1 ? "Review in editor" : pickedCount ? `Import ${pickedCount}` : "Import"}
             </Button>
-          </div>
+          </DialogFooter>
         </>
       )}
     </div>

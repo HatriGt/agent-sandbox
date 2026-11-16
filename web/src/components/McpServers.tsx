@@ -12,7 +12,7 @@ import { SettingsSection } from "@/components/ui/settings";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { Sheet } from "@/components/ui/sheet";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Kbd } from "@/components/ui/kbd";
 import { ArmButton } from "@/components/ui/arm-button";
@@ -70,6 +70,7 @@ export function McpServers({ scope }: { scope?: { org: OrgRef } } = {}) {
   const shown = lastEditing.current;
   const [pasting, setPasting] = React.useState(false);
   const [picking, setPicking] = React.useState(false);
+  const existingNames = React.useMemo(() => new Set((servers ?? []).map((s) => s.name)), [servers]);
   const [health, setHealth] = React.useState<Record<string, Health>>({});
   const [testing, setTesting] = React.useState<Record<string, boolean>>({});
 
@@ -243,8 +244,8 @@ export function McpServers({ scope }: { scope?: { org: OrgRef } } = {}) {
       </Sheet>
       <Dialog open={pasting} onOpenChange={setPasting}>
         {pasting && <PasteDialog onMutate={mutate} onClose={() => setPasting(false)} />}
-        {scope && <PickFromMine org={scope.org} kind="servers" open={picking} onClose={() => setPicking(false)} existing={new Set((servers ?? []).map((s) => s.name))} onDone={() => cached.refresh()} />}
       </Dialog>
+      {scope && <PickFromMine org={scope.org} kind="servers" open={picking} onClose={() => setPicking(false)} existing={existingNames} onDone={() => cached.refresh()} />}
     </SettingsSection>
   );
 }
@@ -547,20 +548,20 @@ function PasteDialog({ onMutate, onClose }: { onMutate: Mutate; onClose: () => v
             {err}
           </p>
         </Collapse>
-        <div className="flex items-center gap-2">
-          <span className="text-faint hidden items-center gap-1 text-micro sm:inline-flex">
-            <Kbd>⌘</Kbd>
-            <Kbd>↵</Kbd> import
-          </span>
-          <Button type="button" size="sm" variant="ghost" onClick={onClose} className="ml-auto">
-            Cancel
-          </Button>
-          <Button size="sm" loading={busy} disabled={count === 0} onClick={() => void submit()}>
-            <ClipboardPaste />
-            Import{count > 0 ? ` ${count}` : ""}
-          </Button>
-        </div>
       </div>
+      <DialogFooter>
+        <span className="text-faint hidden items-center gap-1 text-micro sm:inline-flex">
+          <Kbd>⌘</Kbd>
+          <Kbd>↵</Kbd> import
+        </span>
+        <Button type="button" size="sm" variant="ghost" onClick={onClose} className="ml-auto">
+          Cancel
+        </Button>
+        <Button size="sm" loading={busy} disabled={count === 0} onClick={() => void submit()}>
+          <ClipboardPaste />
+          Import{count > 0 ? ` ${count}` : ""}
+        </Button>
+      </DialogFooter>
     </DialogContent>
   );
 }
