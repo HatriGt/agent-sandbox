@@ -87,8 +87,12 @@ the move.
 
 ## Start, use, stop: host sleep
 
-The VM pauses itself when nothing talks to it, and the next SSH connection wakes it (measured:
-about 6 s for the first call, 0.8 s after). Set the idle timeout once:
+The VM pauses itself when nothing talks to it, and the next SSH connection wakes it. Measured on
+2026-11-16 from a real pause: the VM is back 18 s after the request, the first SSH session lands
+at 32 s, and for about a minute after that every command is slow (an exec into a box that takes
+0.8 s on a settled VM took 5 to 7 s of CPU) while the VM pages its memory back in; the first
+sweep finished at 67 s and the box had its task at 133 s. A reader must not mistake one slow probe
+for a dead box (the canary now needs three missing reads in a row). Set the idle timeout once:
 
 ```bash
 npx -y freestyle@latest vm update asb-host --idle-timeout-seconds 300

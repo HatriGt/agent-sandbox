@@ -4928,12 +4928,18 @@ const canaryRun = async (): Promise<CanaryResult> => {
   const r = await withPrincipal(principal, () => delegateOnce({ task: CANARY_TASK }, principal));
   const box = typeof r.json.box === "string" ? r.json.box : "";
   if (r.status !== 200 || !box) return { ok: false, ms: Date.now() - t0, detail: `delegate answered ${r.status}: ${String(r.json.error ?? r.json.output ?? "").slice(0, 200)}` };
+  let missing = 0;
   try {
     while (Date.now() - t0 < CANARY_WAIT_MS) {
       await new Promise((res) => setTimeout(res, 3000));
       const snap = await watchHub.read(box).catch(() => undefined);
       if (!snap) continue;
-      if (snap.boxStatus === "missing") return { ok: false, ms: Date.now() - t0, detail: "the box vanished before finishing", box };
+      // "missing" is also what one failed read looks like (a probe that timed out on a host still
+      // waking from a pause: seen live 2026-11-16, the box was fine and got torn down). A box that is
+      // really gone answers missing on every read, so only a run of them is a verdict.
+      missing = snap.boxStatus === "missing" ? missing + 1 : 0;
+      if (missing >= 3) return { ok: false, ms: Date.now() - t0, detail: "the box vanished before finishing", box };
+      if (snap.boxStatus === "missing") continue;
       if (snap.runState === "done") return { ...canaryVerdict({ runState: snap.runState, exitCode: snap.exitCode, log: snap.log ?? "", ms: Date.now() - t0 }), box };
       if (snap.runState === "waiting") return { ok: false, ms: Date.now() - t0, detail: "the agent asked a question instead of answering", box };
     }
