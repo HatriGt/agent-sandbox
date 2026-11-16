@@ -10,6 +10,7 @@ const dark = flags.includes("--dark");
 const role = flag("role", "owner");
 const tag = flag("tag", "");
 const only = flag("only", "").split(",").filter(Boolean);
+const many = process.argv.includes("--many");
 const base = process.env.ASB_UI || "http://localhost:5173";
 const now = Date.now();
 const iso = (ms) => new Date(ms).toISOString();
@@ -63,6 +64,24 @@ const ownNotes = [
   { id: "n3", kind: "domain", scope: "repo", status: "kept", text: "The billing worker is idempotent on invoice id; retries are safe.", at: now - 4 * 864e5, source: "you", repo: "acme/orders-api", area: "billing" },
   { id: "n4", kind: "fact", scope: "operator", status: "pending", text: "A proposal that should not show in the picker.", at: now - 864e5, source: "run" },
 ];
+if (many) {
+  for (let i = 0; i < 24; i++) {
+    orgServers.push({ name: `tool-${String(i + 1).padStart(2, "0")}`, type: i % 2 ? "http" : "stdio", url: i % 2 ? `https://mcp.example.com/${i}` : undefined, command: i % 2 ? undefined : "npx", args: i % 2 ? undefined : ["-y", `@acme/tool-${i}`], enabled: i % 3 !== 0, addedAt: now - i * 864e5 });
+    orgSkills.push({ name: `skill-${String(i + 1).padStart(2, "0")}`, description: `Skill number ${i + 1} for the long-list check.`, content: "# x\n", enabled: i % 4 !== 0, addedAt: now - i * 864e5, updatedAt: now - i * 864e5 });
+    orgNotes.push({ id: `on-many-${i}`, kind: i % 2 ? "rule" : "preference", scope: "operator", status: "kept", text: `Long-list note ${i + 1}: a line of guidance that is long enough to look real.`, at: now - i * 864e5, source: "you" });
+    ownServers.push({ name: `own-tool-${String(i + 1).padStart(2, "0")}`, type: "http", url: `https://mcp.example.com/own/${i}`, enabled: i % 3 !== 0, addedAt: now - i * 864e5 });
+    ownSkills.push({ name: `own-skill-${String(i + 1).padStart(2, "0")}`, description: `Own skill number ${i + 1} for the long-list check.`, content: "# x\n", enabled: i % 4 !== 0, addedAt: now - i * 864e5, updatedAt: now - i * 864e5 });
+    ownNotes.push({ id: `n-many-${i}`, kind: i % 2 ? "rule" : "preference", scope: "operator", status: "kept", text: `Own long-list note ${i + 1}: a line of guidance that is long enough to look real.`, at: now - i * 864e5, source: "you" });
+    members.push({ email: `person${i + 1}@acme.dev`, userId: `u_p${i}`, login: `person${i + 1}`, name: null, avatarUrl: null, role: "member", status: "joined", invitedAt: iso(now - i * 864e5), joinedAt: iso(now - i * 864e5) });
+  }
+}
+const people = [
+  { login: "devon", name: "Devon Lee", avatarUrl: null, onSite: true, status: null },
+  { login: "devraj-k", name: null, avatarUrl: null, onSite: false, status: "invited" },
+  { login: "dev-priya", name: "Priya N", avatarUrl: null, onSite: true, status: "admin" },
+  { login: "developer-x", name: null, avatarUrl: null, onSite: false, status: null },
+  { login: "devtools-bot", name: null, avatarUrl: null, onSite: false, status: null },
+];
 const shared = (k) => [{ org: orgRef, ...(k === "servers" ? { servers: orgServers.filter((s) => s.enabled) } : k === "skills" ? { skills: orgSkills.filter((s) => s.enabled) } : { enabled: true, notes: orgNotes }) }];
 
 const mk = (name, runState, title, extra = {}) => ({ name, boxStatus: "running", task: title, runState, uptime: "12m", cpu: "14%", mem: "1.2G/4G", memUsage: { usedMib: 1200, totalMib: 4096 }, disk: { usedMib: 3000, totalMib: 20480 }, lastOutputAt: now - 20_000, title, repos: [{ name: "orders-api", branch: "main" }], agent: "claude", ...extra });
@@ -90,6 +109,7 @@ await page.route("**/*", (route) => {
   if (p === "/devices.json") return json(route, { sessions: [] });
   if (p === "/orgs.json") return json(route, { orgs: empty ? [] : orgs });
   if (p === "/orgs/members.json") return json(route, { org: { id: orgRef.id, name: orgRef.name, role, ownerId: orgs[0].ownerId }, members });
+  if (p === "/orgs/people-search.json") return json(route, { people: people.filter((x) => x.login.startsWith((u.searchParams.get("q") ?? "").toLowerCase())), github: "ok" });
   if (p === "/orgs/copy.json") return json(route, { ok: true, copied: { servers: ["github"], skills: [], notes: 0 } });
   if (p === "/mcp-servers.json") return json(route, org ? { servers: orgServers, config: { mcpServers: {} } } : { servers: ownServers, shared: shared("servers"), config: { mcpServers: {} }, baked: { "@modelcontextprotocol/server-github": "1.2.0" } });
   if (p === "/skills.json") return json(route, org ? { skills: orgSkills } : { skills: ownSkills, shared: shared("skills") });
@@ -105,6 +125,7 @@ const pages = [
   ["dlg-paste", "/dashboard/org/org_acme"],
   ["dlg-import", "/dashboard/org/org_acme"],
   ["arm", "/dashboard/org/org_acme"],
+  ["mention", "/dashboard/org/org_acme"],
   ["org-empty", "/dashboard/org"],
   ["account", "/dashboard/account"],
   ["integrations", "/dashboard/integrations"],
@@ -149,6 +170,22 @@ for (const [name, path] of pages) {
     await page.locator("section[aria-labelledby='org-mcp-h'], section[aria-labelledby='mcp-h']").first().screenshot({ path: file.replace(".png", "-server.png") }).catch(() => page.screenshot({ path: file.replace(".png", "-server.png") }));
     console.log(name, file.replace(".png", "-header.png"), file.replace(".png", "-row.png"), file.replace(".png", "-note.png"), file.replace(".png", "-server.png"));
     await page.keyboard.press("Escape");
+    continue;
+  }
+  if (name === "mention") {
+    const box = page.getByLabel("Email addresses to add");
+    await box.scrollIntoViewIfNeeded();
+    await box.click();
+    await box.pressSequentially("mei@acme.dev, @dev", { delay: 40 });
+    await page.waitForTimeout(700);
+    await page.screenshot({ path: file });
+    console.log("active before", await box.getAttribute("aria-activedescendant"), "hovered", await page.evaluate(() => document.querySelectorAll("[role=option]:hover").length));
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(300);
+    console.log("mention value", JSON.stringify(await box.inputValue()), "popover open", await page.locator("[role=listbox]").count());
+    await page.locator("section[aria-labelledby='org-people-h']").screenshot({ path: file.replace(".png", "-picked.png") });
+    console.log(name, file, file.replace(".png", "-picked.png"));
     continue;
   }
   if (name === "flicker") {
@@ -200,6 +237,11 @@ for (const [name, path] of pages) {
   console.log(name, file);
   if (name !== "org-empty" && name !== "account") {
     if (name === "memory") {
+      // The "You" view is a tab in the memory nav; the pending card sits above it.
+      await page.getByRole("button", { name: /^You\b/ }).first().click().catch(() => {});
+      await page.waitForTimeout(600);
+      const review = page.locator("#sec-memory-review-title, [aria-labelledby='memory-review-title']").first();
+      if (await review.count()) await review.screenshot({ path: file.replace(".png", "-review.png") }).catch(() => {});
       const you = page.locator("section[aria-labelledby='memory-you-h']");
       console.log("memory-you count", await you.count(), await page.evaluate(() => [...document.querySelectorAll("[id]")].map((e) => e.id).filter((i) => /mem|you|shared/i.test(i)).join(",")));
       console.log("shared text", await page.evaluate(() => document.body.innerText.includes("Shared by Acme")));

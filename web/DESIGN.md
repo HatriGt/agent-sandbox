@@ -1528,10 +1528,27 @@ in with that address (sign-up, GitHub, or a profile email change), so the only t
 is the note **Copy invite** puts on the clipboard. A GitHub sign-in with the email kept private
 has no address to invite, so the field also takes `@handle`: the row shows the handle, links the
 moment that login exists (at once, if it already does, with their avatar), and a person invited
-by both keys is one member. The purpose line and the placeholder say both. Verified with `.shots/org-fixture.mjs`
-(`--role=owner|member`, `--dark`): the org page top and bottom, the three pickers
-(`--only=pick-servers,pick-skills,pick-notes`), the empty state, Account, and the three shared-by
-blocks.
+by both keys is one member. The purpose line and the placeholder say both.
+
+Typing `@` in that field opens a typeahead (`org/HandleInput.tsx`): a popover above the input,
+`side="top" align="start"`, headed by a quiet line "GitHub logins starting with dev", then option
+rows (24px avatar or an `@` glyph, login, `· name` muted) with the person's standing at the right
+as a wash chip ("already in", "invited", "owner") or "on Agent Sandbox" in faint text, and a
+`↑↓ choose · ↵ add to the list` hint at the foot. Only the `@word` the caret is in is looked up
+(an email's `@` is not a token), with a 220ms debounce; ↵ or ⇥ puts `@login, ` in its place and
+keeps the caret, Esc closes, ↵ with nothing open adds the list as before. The hover highlight
+follows real mouse movement (`onMouseMove`, not `onMouseEnter`): Chromium fires a synthetic
+mouse-enter when a popover appears, which moved the keyboard highlight off the first row. The
+lookup is a controller route (`/orgs/people-search.json`, manage role) because the dashboard's
+CSP keeps the browser on this origin: people on the site whose login starts with the text come
+first (they link at once), then GitHub's user search through one of the caller's stored GitHub
+accounts if there is one, cached a few minutes per prefix and paused on a 403/429 so a rate limit
+degrades to "people already here still show" rather than an error.
+
+Verified with `.shots/org-fixture.mjs` (`--role=owner|member`, `--dark`, `--many` for ~25-row
+lists): the org page top and bottom, the typeahead (`--only=mention`, open and after a pick), the
+three pickers (`--only=pick-servers,pick-skills,pick-notes`), the empty state, Account, and the
+three shared-by blocks.
 
 ## Dialogs: a plain scrim and one footer (2026-11-16)
 
@@ -1541,6 +1558,13 @@ Two rules every dialog follows, both in `ui/dialog.tsx` (and the sheet's scrim i
   on macOS repaints a blurred overlay every time the page under it changes, and the fleet poll
   changes it every three seconds, so an open dialog blinked on that cadence. The expensive-UI
   references use a flat scrim anyway; the blur bought nothing.
+- **A long list scrolls inside its panel, about ten rows tall.** A table or note list that can
+  grow without bound (skills, MCP servers, people, memory notes, the shared-by blocks) is capped
+  at `max-h-[min(32rem,70dvh)]` and scrolls within the tile with the header pinned, so the page
+  keeps its shape and the sections below stay reachable. For a `DataTable` that is `stickyHeader`
+  plus `containerClassName`; for a `Panel` the `scroll` prop; the pending-notes card wraps its
+  list the same way. The cap is the tile's, never the page's: nothing else on the page scrolls
+  inside itself.
 - **A table's armed row button grows inwards.** The actions cell wraps its buttons in a
   `flex justify-end` row, so an icon-only ArmButton that arms into "Confirm remove" spills over the
   column to its left, inside the panel, instead of past the panel's edge where `overflow-hidden`

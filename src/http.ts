@@ -37,7 +37,7 @@ import {
 import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, loadBlob, ownerKey, registerSharedOwners, registerUserStoreBackend, saveBlob, withOwner, OPERATOR_OWNER } from "./user-store.js";
-import { addMembers, canManage, createOrg, deleteOrg, getOrg, leaveOrg, listMembers, orgRole, orgsOf, removeMember, renameOrg, setMemberRole, sharedOrgIds, transferOrg, type OrgRole } from "./orgs.js";
+import { addMembers, canManage, createOrg, deleteOrg, getOrg, leaveOrg, listMembers, orgRole, orgsOf, removeMember, renameOrg, searchUsersByLogin, setMemberRole, sharedOrgIds, transferOrg, type OrgRole, type PersonHit } from "./orgs.js";
 import { detectTransitions, formatNotification, makeNotifier, shouldNotify, toggleFor, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { StartFailureStreak, isStartFailure, logTail, startFailureAlertText } from "./run-health.js";
 import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, type CanaryResult } from "./canary.js";
@@ -2411,6 +2411,67 @@ app.delete("/orgs/members.json", (req: Request, res: Response) => {
   removeMember(db, scope.id, email);
   res.locals.auditAction = "org.remove";
   res.json({ ok: true, members: listMembers(db, scope.id) });
+});
+/**
+ * The invite field's "@" typeahead: people on the site whose login starts with the typed text
+ * (they link the moment they are added), then GitHub's user search for the rest. GitHub is asked
+ * from here because the dashboard's CSP keeps the browser on this origin; one stored GitHub account
+ * of the caller lifts the unauthenticated 10-a-minute limit, and a 403/429 pauses the lookup until
+ * the window resets rather than hammering it. Answers are cached a few minutes per prefix.
+ */
+const PEOPLE_SEARCH_TTL_MS = 5 * 60_000;
+const peopleSearchCache = new Map<string, { at: number; hits: Omit<PersonHit, "status">[] }>();
+let peopleSearchPausedUntil = 0;
+app.get("/orgs/people-search.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const scope = orgOf(req, res, "manage");
+  if (!scope) return;
+  const q = String(req.query.q ?? "").trim().replace(/^@/, "").toLowerCase();
+  if (!/^[a-z0-9](?:-?[a-z0-9]){0,38}$/.test(q)) {
+    res.json({ people: [], github: "skipped" });
+    return;
+  }
+  const standing = new Map<string, PersonHit["status"]>();
+  for (const m of listMembers(db, scope.id)) if (m.login) standing.set(m.login.toLowerCase(), m.role);
+  for (const m of listMembers(db, scope.id)) if (m.status === "invited" && m.email.startsWith("@")) standing.set(m.email.slice(1), "invited");
+  const people: PersonHit[] = searchUsersByLogin(db, q, 6).map((p) => ({ ...p, status: standing.get(p.login.toLowerCase()) ?? null }));
+  let github: "ok" | "limited" | "error" | "skipped" = "skipped";
+  if (q.length >= 2) {
+    const cached = peopleSearchCache.get(q);
+    let found: Omit<PersonHit, "status">[] | undefined = cached && Date.now() - cached.at < PEOPLE_SEARCH_TTL_MS ? cached.hits : undefined;
+    if (found) github = "ok";
+    else if (Date.now() < peopleSearchPausedUntil) github = "limited";
+    else {
+      try {
+        const token = pickDefaultAccount(await loadStore(cfg))?.token;
+        const r = await fetch(`https://api.github.com/search/users?q=${encodeURIComponent(`${q} in:login`)}&per_page=8`, {
+          headers: { accept: "application/vnd.github+json", "user-agent": "agent-sandbox", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+          signal: AbortSignal.timeout(8_000),
+        });
+        if (r.status === 403 || r.status === 429) {
+          const rate = rateInfoOf(r.headers);
+          peopleSearchPausedUntil = Date.now() + Math.min(rate.retryAfterMs ?? (rate.resetAt ? Math.max(rate.resetAt - Date.now(), 5_000) : 60_000), 10 * 60_000);
+          github = "limited";
+        } else if (!r.ok) github = "error";
+        else {
+          const j = (await r.json()) as { items?: Array<{ login?: string; avatar_url?: string }> };
+          found = (j.items ?? []).filter((u): u is { login: string; avatar_url?: string } => typeof u.login === "string").map((u) => ({ login: u.login, name: null, avatarUrl: u.avatar_url ?? null, onSite: false }));
+          peopleSearchCache.set(q, { at: Date.now(), hits: found });
+          if (peopleSearchCache.size > 500) peopleSearchCache.delete(peopleSearchCache.keys().next().value as string);
+          github = "ok";
+        }
+      } catch {
+        github = "error";
+      }
+    }
+    const seen = new Set(people.map((p) => p.login.toLowerCase()));
+    for (const h of found ?? []) {
+      if (seen.has(h.login.toLowerCase()) || people.length >= 10) continue;
+      seen.add(h.login.toLowerCase());
+      people.push({ ...h, status: standing.get(h.login.toLowerCase()) ?? null });
+    }
+  }
+  res.json({ people, github });
 });
 app.post("/orgs/members/role.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;

@@ -670,6 +670,14 @@ export interface OrgMemberView {
   invitedAt: string | null;
   joinedAt: string | null;
 }
+/** One row of the invite field's "@" typeahead: on the site already, or found on GitHub. */
+export interface PersonHit {
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+  onSite: boolean;
+  status: OrgRole | "invited" | null;
+}
 export interface OrgMembersResponse {
   org: { id: string; name: string; role: OrgRole; ownerId: string };
   members: OrgMemberView[];
@@ -1135,6 +1143,9 @@ export const api = {
   deleteOrg: (org: string) =>
     fetch(url("/orgs.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ org }) }).then(parse<{ ok: true; orgs: OrgView[] }>),
   orgMembers: (org: string, signal?: AbortSignal) => fetch(url("/orgs/members.json", { org }), { headers: authHeaders, signal }).then(parse<OrgMembersResponse>),
+  /** People whose GitHub login starts with `q`, those already on Agent Sandbox first. */
+  orgPeopleSearch: (org: string, q: string, signal?: AbortSignal) =>
+    fetch(url("/orgs/people-search.json", { org, q }), { headers: authHeaders, signal }).then(parse<{ people: PersonHit[]; github: "ok" | "limited" | "error" | "skipped" }>),
   orgInvite: (org: string, emails: string, role: "admin" | "member" = "member") =>
     post<{ added: string[]; existing: string[]; invalid: string[]; members: OrgMemberView[] }>("/orgs/members.json", { org, emails, role }),
   orgRemoveMember: (org: string, email: string) =>

@@ -122,7 +122,7 @@ export function OrgMemory({ org }: { org: OrgRef }) {
         />
       </Collapse>
       <Swap state={data === null ? "loading" : notes.length === 0 ? "empty" : "list"}>
-        <Panel>
+        <Panel scroll={notes.length > 0}>
           {data === null ? (
             <ListSkeleton rows={3} />
           ) : notes.length === 0 ? (

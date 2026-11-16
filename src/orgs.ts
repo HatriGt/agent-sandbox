@@ -292,6 +292,26 @@ export function listMembers(db: Db, orgId: string): OrgMemberView[] {
   return out;
 }
 
+/** Someone the invite field's typeahead can offer: on the site already, or found on GitHub. */
+export interface PersonHit {
+  login: string;
+  name: string | null;
+  avatarUrl: string | null;
+  /** Signed in to Agent Sandbox at least once (an invite by handle links at once). */
+  onSite: boolean;
+  /** Their standing in the organisation being edited, if any. */
+  status: OrgRole | "invited" | null;
+}
+
+/** Signed-in people whose login starts with `q` (lowercase, no "@"), shortest login first. */
+export function searchUsersByLogin(db: Db, q: string, limit = 6): Omit<PersonHit, "status">[] {
+  const like = `${q.toLowerCase().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const rows = db
+    .prepare(`SELECT login, name, avatar_url FROM users WHERE lower(login) LIKE ? ESCAPE '\\' ORDER BY length(login), lower(login) LIMIT ?`)
+    .all(like, limit) as Array<{ login: string; name: string | null; avatar_url: string | null }>;
+  return rows.map((r) => ({ login: r.login, name: r.name, avatarUrl: r.avatar_url, onSite: true }));
+}
+
 /**
  * Invite addresses. An address that already belongs to a user links at once (they are in from this
  * moment); any other waits as an invite. Returns what was added and what was already there.

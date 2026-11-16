@@ -200,6 +200,8 @@ export function McpServers({ scope }: { scope?: { org: OrgRef } } = {}) {
               onRowClick={canEdit ? (s) => setEditing({ server: s }) : undefined}
               rowLabel={(s) => `Open ${s.name}`}
               rowProps={(s) => ({ className: cn(!s.enabled && "[&_td]:text-muted-foreground") })}
+              stickyHeader
+              containerClassName="max-h-[min(32rem,70dvh)]"
               search={{ placeholder: "Search servers", text: (s) => [s.name, s.type, s.command, ...(s.args ?? []), s.url, ...Object.keys(s.env ?? {}), ...Object.keys(s.headers ?? {})].filter(Boolean).join(" ") }}
               toolbar={
                 <div role="radiogroup" aria-label="Filter servers" className="flex flex-wrap items-center gap-1.5">

@@ -12,6 +12,7 @@ import { ListEmpty, ListSkeleton } from "@/components/ui/list-state";
 import { Panel, PanelFooter, SettingsSection } from "@/components/ui/settings";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DataTable, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
+import { HandleInput } from "@/components/org/HandleInput";
 import { cn } from "@/lib/utils";
 
 const time = (s: string | null) => (s && Number.isFinite(Date.parse(s)) ? Date.parse(s) : null);
@@ -191,6 +192,8 @@ export function OrgPeople({ org, role, members, onMembers }: { org: { id: string
               columns={columns}
               rowKey={(m) => m.email || m.userId || "owner"}
               minWidth="min-w-[36rem]"
+              stickyHeader
+              containerClassName="max-h-[min(32rem,70dvh)]"
               search={(members ?? []).length > 8 ? { placeholder: "Search people", text: (m) => `${m.email} ${m.login ?? ""} ${m.name ?? ""} ${m.role} ${m.status}` } : undefined}
               actions={
                 manage
@@ -218,11 +221,12 @@ export function OrgPeople({ org, role, members, onMembers }: { org: { id: string
         {manage && (
           <PanelFooter>
             <UserPlus className="text-muted-foreground size-4 shrink-0" aria-hidden />
-            <input
-              ref={inputRef}
+            <HandleInput
+              org={org.id}
+              inputRef={inputRef}
               value={emails}
-              onChange={(e) => setEmails(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && void invite()}
+              onChange={setEmails}
+              onSubmit={() => void invite()}
               placeholder="Email addresses or @github-handles — paste a list, any separator"
               aria-label="Email addresses to add"
               className="placeholder:text-muted-foreground text-foreground h-8 min-w-0 flex-1 rounded-md bg-transparent px-1 text-meta outline-none"

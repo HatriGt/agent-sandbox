@@ -101,6 +101,8 @@ export function SkillTable({ skills, loading, onOpen, onMutate, toolbar, empty, 
       actions={readOnly ? undefined : (s) => <SkillActions skill={s} onOpen={() => onOpen(s)} onMutate={onMutate} />}
       empty={empty}
       minWidth="min-w-[40rem]"
+      stickyHeader
+      containerClassName="max-h-[min(32rem,70dvh)]"
     />
   );
 }

@@ -50,7 +50,7 @@ export function SharedBy({ org, kind, items, className }: { org: OrgRef; kind: "
       {n === 0 ? (
         <p className="text-muted-foreground px-1 text-meta">Nothing shared yet.</p>
       ) : (
-        <Panel>
+        <Panel scroll>
           <ul className="divide-y">
             {items.map((it) => (
               <li key={it.key} className={cn("flex min-w-0 items-center gap-3 px-3.5 py-2.5", it.on === false && "text-muted-foreground")}>

@@ -61,6 +61,17 @@ check(r.status === 200 && r.json.added.length === 3 && r.json.existing?.includes
 const mB = r.json.members.find((m) => m.email === users.b.email);
 const mC = r.json.members.find((m) => m.email === users.c.email);
 check(mB?.status === "joined" && mB.login === users.b.login, "existing user linked at once", mB);
+// The "@" typeahead: B (on the site, a member now) is offered first with their standing; GitHub's
+// half answers (ok) or is rate-limited (limited) - either is a working route, an error is not.
+r = await call("GET", `/orgs/people-search.json?org=${org}&q=${users.b.login.slice(0, 6)}`, { cookie: A });
+{
+  const hitB = r.json?.people?.find((p) => p.login.toLowerCase() === users.b.login.toLowerCase());
+  check(r.status === 200 && hitB?.onSite === true && hitB.status === "member" && ["ok", "limited"].includes(r.json.github), "typeahead offers B as on-site member; GitHub half answered", { github: r.json?.github, people: r.json?.people?.map((p) => [p.login, p.onSite, p.status]) });
+}
+r = await call("GET", `/orgs/people-search.json?org=${org}&q=torvalds`, { cookie: A });
+check(r.status === 200 && (r.json.github === "limited" || r.json.people?.some((p) => p.login === "torvalds" && p.onSite === false)), "typeahead finds a GitHub user who is not on the site", { github: r.json?.github, logins: r.json?.people?.map((p) => p.login) });
+r = await call("GET", `/orgs/people-search.json?org=${org}&q=torvalds`, { cookie: B });
+check(r.status === 403, "a plain member cannot use the typeahead", r.status);
 check(mC?.status === "invited" && mC.userId === null, "unknown email waits as an invite", mC);
 
 // member cannot manage

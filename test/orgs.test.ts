@@ -5,7 +5,7 @@ import { openMemoryDb } from "../src/db.js";
 import { createPasswordUser, upsertGithubUser, updateProfile, deleteUser } from "../src/identity.js";
 import { makeSecretBox } from "../src/secretbox.js";
 import { loadBlob, registerSharedOwners, registerUserStoreBackend, saveBlob, sharedOwners, withOwner, ownerKey } from "../src/user-store.js";
-import { addMembers, createOrg, deleteOrg, leaveOrg, listMembers, mergeMcpStores, mergeMemoryStores, mergeSkillStores, orgRole, orgsOf, parseEmails, removeMember, setMemberRole, sharedOrgIds, transferOrg, ORG_LIMITS } from "../src/orgs.js";
+import { addMembers, createOrg, deleteOrg, leaveOrg, listMembers, mergeMcpStores, mergeMemoryStores, mergeSkillStores, orgRole, orgsOf, parseEmails, removeMember, setMemberRole, sharedOrgIds, transferOrg, ORG_LIMITS, searchUsersByLogin } from "../src/orgs.js";
 import { loadMemoryStore, saveMemoryStore, addManualNote, emptyMemoryStore, selectMemory, markUsed } from "../src/memory-store.js";
 import type { McpStore } from "../src/mcp-store.js";
 import type { SkillStore } from "../src/skill-store.js";
@@ -52,6 +52,19 @@ test("an invite by email links when that person shows up — before or after the
   assert.equal(orgsOf(db, owner.id)[0].pending, 1);
   updateProfile(db, nomail.id, { email: "NoMail@acme.test" });
   assert.equal(orgRole(db, org.id, nomail.id), "member");
+});
+
+test("the typeahead's local half: logins by prefix, shortest first, LIKE wildcards escaped", () => {
+  const db = openMemoryDb();
+  upsertGithubUser(db, { githubId: "11", login: "Devon", email: null });
+  upsertGithubUser(db, { githubId: "12", login: "dev-priya", email: "p@acme.test" });
+  upsertGithubUser(db, { githubId: "13", login: "andev", email: null });
+  upsertGithubUser(db, { githubId: "14", login: "dev_underscore", email: null });
+  assert.deepEqual(searchUsersByLogin(db, "dev").map((p) => p.login), ["Devon", "dev-priya", "dev_underscore"]);
+  assert.deepEqual(searchUsersByLogin(db, "dev_").map((p) => p.login), ["dev_underscore"], "an underscore is literal, not a wildcard");
+  assert.deepEqual(searchUsersByLogin(db, "%").map((p) => p.login), [], "a percent sign is literal too");
+  assert.equal(searchUsersByLogin(db, "d", 2).length, 2);
+  assert.ok(searchUsersByLogin(db, "DEV").every((p) => p.onSite));
 });
 
 test("an invite by GitHub handle: links at once for someone who never set an email, later for the rest, and never twice", () => {

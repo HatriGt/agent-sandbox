@@ -121,10 +121,10 @@ export function SettingsSection({
  * it (the transcript's block card, at page scale). No outline, no shadow. `className` styles the
  * tile (dividers, padding); `frameClassName` the frame (margins).
  */
-export function Panel({ className, frameClassName, children, ...props }: React.ComponentProps<"div"> & { frameClassName?: string }) {
+export function Panel({ className, frameClassName, scroll, children, ...props }: React.ComponentProps<"div"> & { frameClassName?: string; /** A long list scrolls inside the tile (about ten rows) instead of growing the page. */ scroll?: boolean }) {
   return (
     <div className={cn("surface p-1", frameClassName)}>
-      <div className={cn("tile overflow-hidden rounded-xl", className)} {...props}>
+      <div className={cn("tile rounded-xl", scroll ? "max-h-[min(32rem,70dvh)] overflow-x-hidden overflow-y-auto overscroll-y-contain" : "overflow-hidden", className)} {...props}>
         {children}
       </div>
     </div>

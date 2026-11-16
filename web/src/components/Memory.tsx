@@ -323,7 +323,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                   </h2>
                   <p className="text-muted-foreground text-micro">Proposed by runs — kept automatically unless you forget them.</p>
                 </header>
-                <ul className={cn("divide-y", dim)}>
+                <ul className={cn("max-h-[min(32rem,70dvh)] divide-y overflow-y-auto overscroll-y-contain", dim)}>
                   <AnimatePresence initial={false}>
                     {model.pending.map((n) => (
                       <NoteRow key={n.id} {...rowProps(n)} showRepo />
@@ -400,7 +400,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
               {view === "you" && (
                 <SettingsSection id="memory-you" title="You" meta={plural(model.you.length, "note")} purpose="Preferences and rules — in every run's MEMORY.md, whatever the repo.">
                   {model.you.length ? (
-                    <Panel>
+                    <Panel scroll>
                       <ul className={cn("divide-y", dim)}>
                         <AnimatePresence initial={false}>
                           {model.you.map((n) => (
@@ -463,7 +463,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                             ))}
                           </nav>
                         )}
-                        <Panel>
+                        <Panel scroll>
                           {groups.map((g) => (
                             <div key={g.area || "unfiled"} id={g.area ? areaId(repo, g.area) : undefined} className="scroll-mt-24 border-b last:border-b-0">
                               <AreaHeader group={g} onArea={(a) => reveal(areaId(repo, a))} unfiled={!g.area} />
@@ -501,7 +501,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                   {!model.earlier.length ? (
                     <p className="text-muted-foreground text-meta">No replaced note matches.</p>
                   ) : (
-                    <Panel id="memory-earlier-list">
+                    <Panel id="memory-earlier-list" scroll>
                       <ul className="divide-y">
                         <AnimatePresence initial={false}>
                         {model.earlier.map((n) => (
