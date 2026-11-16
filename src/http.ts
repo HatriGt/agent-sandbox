@@ -4183,7 +4183,10 @@ const dispatcher = makeDispatcher({
   publicUrl: cfg.publicUrl,
   log: (m) => console.error(m),
   audit: (owner, action, detail) => auditTrigger(owner, action, detail),
-  liveBoxes: async () => (await gatherMonitor(cfg)).map((b) => b.name),
+  // Every five minutes the dispatcher frees slots held by boxes that are gone. While the host sleeps
+  // nothing launches or dies unseen (a launch wakes it first), so the last sweep is the live set; a
+  // fresh sweep here was the one SSH that kept a sleeping host from pausing (seen live 2026-11-16).
+  liveBoxes: async () => (hostSleep.asleep() ? (await readFleet()).boxes : await gatherMonitor(cfg)).map((b) => b.name),
   startRun: startTriggerRun,
   // The receipt comment on the issue/PR that fired the run, with the owner's own GitHub token.
   postComment: async (owner, repo, number, body) => {
