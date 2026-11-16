@@ -408,8 +408,10 @@ const POOL_PREFIX = "pool-";
 export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude", owner: string | null = null): Promise<string> {
   // Flavor rides in the NAME (pool-<ts>-omp-<rand>) so every prefix/age-based pool mechanism
   // covers both flavors unchanged. Callers pass the flavored cfg (ompPoolCfg) for omp boots.
+  // No wake() here: a warm boot is the pool keeping itself stocked, not work. A delegation that
+  // cold-boots goes through createBox, and a claim through adoptWarmBox or the task start, which
+  // wake; a refill that woke the host would keep it up for another quiet window after every run.
   const name = `${POOL_PREFIX}${Date.now()}-${agent === "omp" ? "omp-" : ""}${Math.random().toString(36).slice(2, 8)}`;
-  hostSleep().wake(`warm ${name}`);
   warming.add(name);
   try {
     await bootAndWarm(cfg, name, agent, owner);
