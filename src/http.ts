@@ -5186,6 +5186,10 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
         return;
       }
       case "remove": {
+        if (id === PRIMARY_HOST_ID) {
+          res.status(400).json({ error: "the primary host comes from .env and cannot be removed; disable it to stop routing runs there" });
+          return;
+        }
         const live = hostPool.get(id)?.lastBoxes.filter((b) => /^running$/i.test(b.boxStatus) && b.role !== "pool-free").length ?? 0;
         if (live) {
           res.status(409).json({ error: `${live} machine(s) still run on this host; tear them down first, or disable the host and let them finish` });
