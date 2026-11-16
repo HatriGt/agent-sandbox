@@ -1525,7 +1525,10 @@ that in three places and nowhere else:
 
 Nothing is emailed. Adding an address makes an invite row; the person is in the moment they sign
 in with that address (sign-up, GitHub, or a profile email change), so the only thing to send them
-is the note **Copy invite** puts on the clipboard. Verified with `.shots/org-fixture.mjs`
+is the note **Copy invite** puts on the clipboard. A GitHub sign-in with the email kept private
+has no address to invite, so the field also takes `@handle`: the row shows the handle, links the
+moment that login exists (at once, if it already does, with their avatar), and a person invited
+by both keys is one member. The purpose line and the placeholder say both. Verified with `.shots/org-fixture.mjs`
 (`--role=owner|member`, `--dark`): the org page top and bottom, the three pickers
 (`--only=pick-servers,pick-skills,pick-notes`), the empty state, Account, and the three shared-by
 blocks.
@@ -1538,6 +1541,10 @@ Two rules every dialog follows, both in `ui/dialog.tsx` (and the sheet's scrim i
   on macOS repaints a blurred overlay every time the page under it changes, and the fleet poll
   changes it every three seconds, so an open dialog blinked on that cadence. The expensive-UI
   references use a flat scrim anyway; the blur bought nothing.
+- **A table's armed row button grows inwards.** The actions cell wraps its buttons in a
+  `flex justify-end` row, so an icon-only ArmButton that arms into "Confirm remove" spills over the
+  column to its left, inside the panel, instead of past the panel's edge where `overflow-hidden`
+  cut it to a red stub. Nothing to do per table.
 - **Actions live in `<DialogFooter>`.** A row with a hairline above it, `py-3.5`, sticky to the
   bottom of the scrolling body, so the buttons sit in the same place whether the content is three
   lines or a long list, and never scroll away. A hint or count goes first (`mr-auto`), then the

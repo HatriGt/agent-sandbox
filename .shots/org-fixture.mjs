@@ -28,7 +28,8 @@ const members = [
   { email: "tomas@acme.dev", userId: "u_tomas", login: "tomas", name: null, avatarUrl: null, role: "member", status: "joined", invitedAt: iso(now - 6 * 864e5), joinedAt: iso(now - 5 * 864e5) },
   { email: "mei@acme.dev", userId: null, login: null, name: null, avatarUrl: null, role: "member", status: "invited", invitedAt: iso(now - 2 * 864e5), joinedAt: null },
   { email: "jules@contractor.io", userId: null, login: null, name: null, avatarUrl: null, role: "member", status: "invited", invitedAt: iso(now - 3600e3), joinedAt: null },
-].slice(0, role === "owner" ? 5 : 6);
+  { email: "@devraj-k", userId: null, login: null, name: null, avatarUrl: null, role: "member", status: "invited", invitedAt: iso(now - 600e3), joinedAt: null },
+].slice(0, role === "owner" ? 6 : 7);
 
 const orgServers = [
   { name: "linear", type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer ••••" }, enabled: true, addedAt: now - 9 * 864e5 },
@@ -103,6 +104,7 @@ const pages = [
   ["pick-notes", "/dashboard/org/org_acme"],
   ["dlg-paste", "/dashboard/org/org_acme"],
   ["dlg-import", "/dashboard/org/org_acme"],
+  ["arm", "/dashboard/org/org_acme"],
   ["org-empty", "/dashboard/org"],
   ["account", "/dashboard/account"],
   ["integrations", "/dashboard/integrations"],
@@ -116,6 +118,39 @@ for (const [name, path] of pages) {
   await page.waitForTimeout(3200);
   if (name === "memory") await page.locator("#sec-memory-you").scrollIntoViewIfNeeded().catch(() => {});
   const file = `.shots/out/org-${name}-${role}${dark ? "-dark" : ""}${tag ? "-" + tag : ""}.png`;
+  if (name === "arm") {
+    // Armed destructive buttons: the header Delete and a row's Remove, shot while armed.
+    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    await page.waitForTimeout(350);
+    await page.locator("header").first().screenshot({ path: file.replace(".png", "-header.png") });
+    await page.keyboard.press("Escape");
+    const row = page.getByRole("row").filter({ hasText: "@tomas" });
+    await row.hover();
+    await page.waitForTimeout(200);
+    await row.getByRole("button", { name: /^Remove/ }).click();
+    await page.waitForTimeout(350);
+    await page.locator("section[aria-labelledby='org-people-h']").screenshot({ path: file.replace(".png", "-row.png") }).catch(async () => page.screenshot({ path: file.replace(".png", "-row.png") }));
+    await page.keyboard.press("Escape");
+    // a memory note row (hover reveals the button) and a server row
+    const note = page.locator("section[aria-labelledby='org-memory-h'] li").first();
+    await note.scrollIntoViewIfNeeded();
+    await note.hover();
+    await page.waitForTimeout(200);
+    await note.getByRole("button", { name: "Forget this note" }).click();
+    await page.waitForTimeout(350);
+    await page.locator("section[aria-labelledby='org-memory-h']").screenshot({ path: file.replace(".png", "-note.png") }).catch(() => {});
+    await page.keyboard.press("Escape");
+    const srow = page.getByRole("row").filter({ hasText: "acme-docs" });
+    await srow.scrollIntoViewIfNeeded();
+    await srow.hover();
+    await page.waitForTimeout(200);
+    await srow.getByRole("button", { name: /^Remove/ }).click().catch((e) => errors.push(`server remove: ${e.message}`));
+    await page.waitForTimeout(350);
+    await page.locator("section[aria-labelledby='org-mcp-h'], section[aria-labelledby='mcp-h']").first().screenshot({ path: file.replace(".png", "-server.png") }).catch(() => page.screenshot({ path: file.replace(".png", "-server.png") }));
+    console.log(name, file.replace(".png", "-header.png"), file.replace(".png", "-row.png"), file.replace(".png", "-note.png"), file.replace(".png", "-server.png"));
+    await page.keyboard.press("Escape");
+    continue;
+  }
   if (name === "flicker") {
     // Open the servers picker and watch the dialog node for 8s: does it remount, change state, or move?
     await page.getByRole("button", { name: "From your own servers" }).first().click();

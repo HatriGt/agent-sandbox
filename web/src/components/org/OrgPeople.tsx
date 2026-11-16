@@ -22,8 +22,9 @@ const ROLES = [
 ];
 
 /** The note an admin pastes into Slack or an email: the one thing the invitee has to know. */
-export function inviteNote(orgName: string, email: string): string {
-  return `You've been added to ${orgName} on Agent Sandbox. Sign up or sign in with ${email} at ${location.origin}/dashboard — the organisation's MCP servers, skills and memory are there for you automatically.`;
+export function inviteNote(orgName: string, key: string): string {
+  const how = key.startsWith("@") ? `sign in with GitHub as ${key}` : `sign up or sign in with ${key}`;
+  return `You've been added to ${orgName} on Agent Sandbox. To be in, ${how} at ${location.origin}/dashboard — the organisation's MCP servers, skills and memory are there for you automatically.`;
 }
 
 /**
@@ -174,7 +175,7 @@ export function OrgPeople({ org, role, members, onMembers }: { org: { id: string
       id="org-people"
       title="People"
       meta={members ? `${joined} in${pending ? ` · ${pending} invited` : ""}` : undefined}
-      purpose={manage ? "Add email addresses. Anyone who signs in with one is in — their sandboxes get the organisation's servers, skills and memory from the next run." : "Who shares this organisation's servers, skills and memory."}
+      purpose={manage ? "Add email addresses, or @handles for people who sign in with GitHub. Anyone who signs in with one is in — their sandboxes get the organisation's servers, skills and memory from the next run." : "Who shares this organisation's servers, skills and memory."}
     >
       <Panel>
         <Swap state={state}>
@@ -222,7 +223,7 @@ export function OrgPeople({ org, role, members, onMembers }: { org: { id: string
               value={emails}
               onChange={(e) => setEmails(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && void invite()}
-              placeholder="Email addresses — paste a list, any separator"
+              placeholder="Email addresses or @github-handles — paste a list, any separator"
               aria-label="Email addresses to add"
               className="placeholder:text-muted-foreground text-foreground h-8 min-w-0 flex-1 rounded-md bg-transparent px-1 text-meta outline-none"
             />

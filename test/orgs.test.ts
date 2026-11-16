@@ -54,6 +54,33 @@ test("an invite by email links when that person shows up — before or after the
   assert.equal(orgRole(db, org.id, nomail.id), "member");
 });
 
+test("an invite by GitHub handle: links at once for someone who never set an email, later for the rest, and never twice", () => {
+  const db = openMemoryDb();
+  const owner = user(db, "owner", "owner@acme.test");
+  const org = createOrg(db, owner.id, "Acme");
+  // Signed in with GitHub, email kept private: no address to invite, only the handle.
+  const quiet = upsertGithubUser(db, { githubId: "7", login: "Quiet-Dev", email: null });
+  assert.equal(parseEmails("@Quiet-Dev @bad--name @-x ann@acme.test").invalid.join(","), "@bad--name,@-x");
+  const r = addMembers(db, org.id, "@Quiet-Dev, @owner, @nobody-yet", owner.id);
+  assert.deepEqual(r.added, ["@quiet-dev", "@nobody-yet"]);
+  assert.deepEqual(r.existing, ["@owner"], "the owner's own handle is never a member row");
+  assert.equal(orgRole(db, org.id, quiet.id), "member", "a handle links the moment it is added");
+  assert.equal(listMembers(db, org.id).find((m) => m.email === "@quiet-dev")?.login, "Quiet-Dev");
+
+  // The same person by their other key is "existing", not a second row.
+  updateProfile(db, quiet.id, { email: "quiet@acme.test" });
+  assert.deepEqual(addMembers(db, org.id, "quiet@acme.test", owner.id).existing, ["quiet@acme.test"]);
+
+  // Invited by handle AND email before signing up: one membership once they do.
+  addMembers(db, org.id, "nobody-yet@acme.test", owner.id);
+  assert.equal(orgsOf(db, owner.id)[0].pending, 2);
+  const late = upsertGithubUser(db, { githubId: "8", login: "nobody-yet", email: "nobody-yet@acme.test" });
+  assert.equal(orgRole(db, org.id, late.id), "member");
+  assert.equal(listMembers(db, org.id).filter((m) => m.userId === late.id).length, 1, "one row, the redundant invite dropped");
+  assert.equal(orgsOf(db, late.id).length, 1, "the org is listed once");
+  assert.equal(orgsOf(db, owner.id)[0].pending, 0);
+});
+
 test("roles, removal, leaving, hand-over and deletion", () => {
   const db = openMemoryDb();
   const owner = user(db, "owner", "o@x.test");

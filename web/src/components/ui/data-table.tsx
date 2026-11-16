@@ -356,7 +356,12 @@ export function DataTable<T>({
                   ))}
                   {actions && (
                     <TableCell align="end" className="overflow-visible" onClick={stopRow} onKeyDown={stopRow}>
-                      <div className="dt-actions inline-flex items-center justify-end gap-1">{actions(r)}</div>
+                      {/* A flex row ending at the right: content wider than the cell (an armed icon
+                          button that grew a label) spills over the column to its LEFT, inside the
+                          panel, instead of past the panel's edge where overflow-hidden cut it. */}
+                      <div className="flex justify-end">
+                        <div className="dt-actions inline-flex items-center justify-end gap-1">{actions(r)}</div>
+                      </div>
                     </TableCell>
                   )}
                 </TableRow>

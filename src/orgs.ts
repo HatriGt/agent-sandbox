@@ -70,6 +70,10 @@ export const ORG_LIMITS = {
 } as const;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** `@login`: a GitHub handle (1-39 chars, letters, digits and single hyphens as GitHub allows). */
+const HANDLE_RE = /^@[a-z0-9](?:-?[a-z0-9]){0,38}$/;
+/** An invite row keyed by handle stores `@login`; the person's row links by login, not email. */
+export const isHandle = (key: string): boolean => key.startsWith("@");
 const rand = (bytes: number) => crypto.randomBytes(bytes).toString("base64url");
 
 /** Is this owner key an organisation's (so its stores are shared, never personal)? */
@@ -80,6 +84,11 @@ export const canManage = (role: OrgRole | null | undefined): boolean => role ===
 /* ───────────────────────────── pure shaping ───────────────────────────── */
 
 /** A pasted list — commas, semicolons, spaces, newlines, "Name <a@b.c>" — into unique lowercase addresses. */
+/**
+ * Email addresses and GitHub handles (`@login`) out of a pasted list in any shape, unique and
+ * lowercase, in `emails` (the key every route and the dashboard already use); anything else in
+ * `invalid`. A handle is for the person who signed in with GitHub and never set an email.
+ */
 export function parseEmails(raw: string): { emails: string[]; invalid: string[] } {
   const emails: string[] = [];
   const invalid: string[] = [];
@@ -89,7 +98,7 @@ export function parseEmails(raw: string): { emails: string[]; invalid: string[] 
     if (!part) continue;
     const e = part.trim().toLowerCase();
     if (!e) continue;
-    if (!EMAIL_RE.test(e)) {
+    if (!EMAIL_RE.test(e) && !HANDLE_RE.test(e)) {
       invalid.push(part);
       continue;
     }
@@ -198,9 +207,20 @@ export function deleteOrg(db: Db, id: string): boolean {
  * so it runs wherever membership is asked for — the invite "arrives" the moment the person shows up.
  */
 export function linkInvites(db: Db, userId: string): number {
-  const u = db.prepare(`SELECT email FROM users WHERE id = ?`).get(userId) as { email: string | null } | undefined;
-  if (!u?.email) return 0;
-  return db.prepare(`UPDATE org_members SET user_id = ?, joined_at = COALESCE(joined_at, ?) WHERE user_id IS NULL AND email = ?`).run(userId, nowIso(), u.email.toLowerCase()).changes;
+  const u = db.prepare(`SELECT email, login FROM users WHERE id = ?`).get(userId) as { email: string | null; login: string } | undefined;
+  if (!u) return 0;
+  const keys = [u.email?.toLowerCase(), `@${u.login.toLowerCase()}`].filter((k): k is string => !!k);
+  // An org that already has this person (through the other key) keeps one row: the redundant
+  // invite goes, so a person invited by both email and handle is a member once.
+  const drop = db.prepare(`DELETE FROM org_members WHERE user_id IS NULL AND email = ? AND org_id IN (SELECT org_id FROM org_members WHERE user_id = ?)`);
+  const link = db.prepare(`UPDATE org_members SET user_id = ?, joined_at = COALESCE(joined_at, ?) WHERE user_id IS NULL AND email = ?`);
+  let n = 0;
+  const now = nowIso();
+  for (const k of keys) {
+    drop.run(k, userId);
+    n += link.run(userId, now, k).changes;
+  }
+  return n;
 }
 
 /** The organisations this user belongs to, owned first, with the user's role in each. */
@@ -280,27 +300,32 @@ export function addMembers(db: Db, orgId: string, raw: string, invitedBy: string
   const o = getOrg(db, orgId);
   if (!o) throw new Error("No such organisation.");
   const { emails, invalid } = parseEmails(raw);
-  if (!emails.length && !invalid.length) throw new Error("Add at least one email address.");
+  if (!emails.length && !invalid.length) throw new Error("Add at least one email address or GitHub handle.");
   if (emails.length > ORG_LIMITS.maxInviteBatch) throw new Error(`At most ${ORG_LIMITS.maxInviteBatch} addresses at a time.`);
   const count = (db.prepare(`SELECT COUNT(*) AS n FROM org_members WHERE org_id = ?`).get(orgId) as { n: number }).n;
   if (count + emails.length > ORG_LIMITS.maxMembers) throw new Error(`An organisation holds at most ${ORG_LIMITS.maxMembers} people.`);
-  const ownerEmail = (db.prepare(`SELECT email FROM users WHERE id = ?`).get(o.owner_id) as { email: string | null } | undefined)?.email?.toLowerCase();
+  const ownerRow = db.prepare(`SELECT email, login FROM users WHERE id = ?`).get(o.owner_id) as { email: string | null; login: string } | undefined;
+  const ownerKeys = new Set([ownerRow?.email?.toLowerCase(), ownerRow ? `@${ownerRow.login.toLowerCase()}` : undefined].filter(Boolean));
   const added: string[] = [];
   const existing: string[] = [];
   const now = nowIso();
   const insert = db.prepare(`INSERT INTO org_members (org_id, email, user_id, role, invited_by, invited_at, joined_at) VALUES (?, ?, ?, ?, ?, ?, ?)`);
-  const findUser = db.prepare(`SELECT id FROM users WHERE email IS NOT NULL AND lower(email) = ?`);
+  const byEmail = db.prepare(`SELECT id FROM users WHERE email IS NOT NULL AND lower(email) = ?`);
+  const byLogin = db.prepare(`SELECT id FROM users WHERE lower(login) = ?`);
+  const hasRow = db.prepare(`SELECT 1 FROM org_members WHERE org_id = ? AND email = ?`);
+  const hasUser = db.prepare(`SELECT 1 FROM org_members WHERE org_id = ? AND user_id = ?`);
   const tx = db.transaction(() => {
     for (const e of emails) {
-      if (e === ownerEmail) {
+      if (ownerKeys.has(e) || hasRow.get(orgId, e)) {
         existing.push(e);
         continue;
       }
-      if (db.prepare(`SELECT 1 FROM org_members WHERE org_id = ? AND email = ?`).get(orgId, e)) {
+      const u = (isHandle(e) ? byLogin.get(e.slice(1)) : byEmail.get(e)) as { id: string } | undefined;
+      // The same person under their other key is already a member: say so instead of a second row.
+      if (u && (u.id === o.owner_id || hasUser.get(orgId, u.id))) {
         existing.push(e);
         continue;
       }
-      const u = findUser.get(e) as { id: string } | undefined;
       insert.run(orgId, e, u?.id ?? null, role === "admin" ? "admin" : "member", invitedBy, now, u ? now : null);
       added.push(e);
     }

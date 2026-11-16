@@ -56,8 +56,8 @@ const orgName = `E2E Org ${ts}`;
 let r = await call("POST", "/orgs.json", { body: { name: orgName }, cookie: A });
 check(r.status === 200 && r.json?.org?.role === "owner", "create org", r.json?.org);
 const org = r.json.org.id;
-r = await call("POST", "/orgs/members.json", { body: { org, emails: `${users.b.email}, ${users.c.email}` }, cookie: A });
-check(r.status === 200 && r.json.added.length === 2, "invite two emails", { added: r.json?.added, invalid: r.json?.invalid });
+r = await call("POST", "/orgs/members.json", { body: { org, emails: `${users.b.email}, ${users.c.email}, @${users.c.login}, @${users.b.login}` }, cookie: A });
+check(r.status === 200 && r.json.added.length === 3 && r.json.existing?.includes(`@${users.b.login}`), "invite two emails and two handles: B's handle is already in, C's waits", { added: r.json?.added, existing: r.json?.existing, invalid: r.json?.invalid });
 const mB = r.json.members.find((m) => m.email === users.b.email);
 const mC = r.json.members.find((m) => m.email === users.c.email);
 check(mB?.status === "joined" && mB.login === users.b.login, "existing user linked at once", mB);
@@ -128,6 +128,9 @@ r = await call("GET", "/me.json", { cookie: C });
 check(r.json?.orgs?.some((o) => o.id === org), "late sign-up with the invited email joins", r.json?.orgs);
 r = await call("GET", `/orgs/members.json?org=${org}`, { cookie: A });
 check(r.json?.members.find((m) => m.email === users.c.email)?.status === "joined", "C shows as joined to the owner");
+check(r.json?.members.filter((m) => m.login === users.c.login).length === 1, "C invited by email and handle is one member, not two", r.json?.members.map((m) => [m.email, m.status]));
+r = await call("GET", "/me.json", { cookie: C });
+check(r.json?.orgs?.filter((o) => o.id === org).length === 1, "C's /me lists the org once");
 
 // ---- 6. a real run as B: what reached the box?
 let box = null;
