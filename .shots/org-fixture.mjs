@@ -45,9 +45,23 @@ const orgNotes = [
   { id: "on2", kind: "preference", scope: "operator", status: "kept", text: "Commit messages are one sentence in the imperative, no ticket prefix.", at: now - 6 * 864e5, source: "you" },
   { id: "on3", kind: "domain", scope: "repo", status: "kept", text: "orders-api owns the ledger; invoices are derived from it and never written by hand.", why: "Two services wrote invoices in 2025 and the totals drifted.", at: now - 3 * 864e5, source: "you", repo: "acme/orders-api", area: "ledger" },
 ];
-const ownServers = [{ name: "github", type: "stdio", command: "npx", args: ["-y", "@modelcontextprotocol/server-github"], env: { GITHUB_TOKEN: "••••" }, enabled: true, addedAt: now - 40 * 864e5, provision: "baked" }];
-const ownSkills = [{ name: "review-pr", description: "Review a pull request the way this team likes.", content: "# Review PR\n", enabled: true, addedAt: now - 40 * 864e5, updatedAt: now - 40 * 864e5 }];
-const ownNotes = [{ id: "n1", kind: "preference", scope: "operator", status: "kept", text: "Prefer small PRs; split anything over 400 lines.", at: now - 10 * 864e5, source: "you", uses: 3 }];
+const ownServers = [
+  { name: "github", type: "stdio", command: "npx", args: ["-y", "@modelcontextprotocol/server-github"], env: { GITHUB_TOKEN: "••••" }, enabled: true, addedAt: now - 40 * 864e5, provision: "baked" },
+  { name: "linear", type: "http", url: "https://mcp.linear.app/mcp", headers: { Authorization: "Bearer ••••" }, enabled: true, addedAt: now - 20 * 864e5 },
+  { name: "postgres-staging", type: "stdio", command: "npx", args: ["-y", "@modelcontextprotocol/server-postgres", "postgresql://staging"], enabled: false, addedAt: now - 12 * 864e5 },
+  { name: "sentry", type: "sse", url: "https://mcp.sentry.dev/sse", enabled: true, addedAt: now - 5 * 864e5 },
+];
+const ownSkills = [
+  { name: "review-pr", description: "Review a pull request the way this team likes.", content: "# Review PR\n", enabled: true, addedAt: now - 40 * 864e5, updatedAt: now - 40 * 864e5 },
+  { name: "release-notes", description: "Draft release notes from the merged PRs since the last tag.", content: "# Release notes\n", enabled: true, addedAt: now - 15 * 864e5, updatedAt: now - 2 * 864e5 },
+  { name: "triage-bug", description: "Reproduce a bug report, find the owning module, propose a fix.", content: "# Triage\n", enabled: false, addedAt: now - 9 * 864e5, updatedAt: now - 9 * 864e5 },
+];
+const ownNotes = [
+  { id: "n1", kind: "preference", scope: "operator", status: "kept", text: "Prefer small PRs; split anything over 400 lines.", at: now - 10 * 864e5, source: "you", uses: 3 },
+  { id: "n2", kind: "rule", scope: "operator", status: "kept", text: "Run the full test suite before every push; a red suite never goes up.", why: "A broken main cost a day in March.", at: now - 8 * 864e5, source: "you" },
+  { id: "n3", kind: "domain", scope: "repo", status: "kept", text: "The billing worker is idempotent on invoice id; retries are safe.", at: now - 4 * 864e5, source: "you", repo: "acme/orders-api", area: "billing" },
+  { id: "n4", kind: "fact", scope: "operator", status: "pending", text: "A proposal that should not show in the picker.", at: now - 864e5, source: "run" },
+];
 const shared = (k) => [{ org: orgRef, ...(k === "servers" ? { servers: orgServers.filter((s) => s.enabled) } : k === "skills" ? { skills: orgSkills.filter((s) => s.enabled) } : { enabled: true, notes: orgNotes }) }];
 
 const mk = (name, runState, title, extra = {}) => ({ name, boxStatus: "running", task: title, runState, uptime: "12m", cpu: "14%", mem: "1.2G/4G", memUsage: { usedMib: 1200, totalMib: 4096 }, disk: { usedMib: 3000, totalMib: 20480 }, lastOutputAt: now - 20_000, title, repos: [{ name: "orders-api", branch: "main" }], agent: "claude", ...extra });
@@ -75,6 +89,7 @@ await page.route("**/*", (route) => {
   if (p === "/devices.json") return json(route, { sessions: [] });
   if (p === "/orgs.json") return json(route, { orgs: empty ? [] : orgs });
   if (p === "/orgs/members.json") return json(route, { org: { id: orgRef.id, name: orgRef.name, role, ownerId: orgs[0].ownerId }, members });
+  if (p === "/orgs/copy.json") return json(route, { ok: true, copied: { servers: ["github"], skills: [], notes: 0 } });
   if (p === "/mcp-servers.json") return json(route, org ? { servers: orgServers, config: { mcpServers: {} } } : { servers: ownServers, shared: shared("servers"), config: { mcpServers: {} }, baked: { "@modelcontextprotocol/server-github": "1.2.0" } });
   if (p === "/skills.json") return json(route, org ? { skills: orgSkills } : { skills: ownSkills, shared: shared("skills") });
   if (p === "/memory-notes.json") return json(route, org ? { enabled: true, notes: orgNotes } : { enabled: true, notes: ownNotes, shared: shared("notes"), episodes: [], receipts: [] });
@@ -82,6 +97,9 @@ await page.route("**/*", (route) => {
 });
 const pages = [
   ["org", "/dashboard/org/org_acme"],
+  ["pick-servers", "/dashboard/org/org_acme"],
+  ["pick-skills", "/dashboard/org/org_acme"],
+  ["pick-notes", "/dashboard/org/org_acme"],
   ["org-empty", "/dashboard/org"],
   ["account", "/dashboard/account"],
   ["integrations", "/dashboard/integrations"],
@@ -95,6 +113,23 @@ for (const [name, path] of pages) {
   await page.waitForTimeout(3200);
   if (name === "memory") await page.locator("#sec-memory-you").scrollIntoViewIfNeeded().catch(() => {});
   const file = `.shots/out/org-${name}-${role}${dark ? "-dark" : ""}${tag ? "-" + tag : ""}.png`;
+  if (name.startsWith("pick-")) {
+    // the "From yours" picker of one section: open it, tick two rows, shoot the dialog
+    const label = { "pick-servers": "From your own servers", "pick-skills": "From yours", "pick-notes": "From yours" }[name];
+    const btn = name === "pick-servers" ? page.getByRole("button", { name: label }).first() : page.getByRole("button", { name: label }).nth(name === "pick-skills" ? 0 : 1);
+    await btn.scrollIntoViewIfNeeded().catch((e) => errors.push(`${name}: ${e.message}`));
+    await btn.click().catch((e) => errors.push(`${name}: ${e.message}`));
+    await page.waitForTimeout(900);
+    const rows = page.getByRole("dialog").getByRole("checkbox");
+    const n = await rows.count();
+    console.log(name, "rows", n);
+    for (const i of [0, 2]) if (i < n) await rows.nth(i).click();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: file });
+    console.log(name, file);
+    await page.keyboard.press("Escape");
+    continue;
+  }
   await page.screenshot({ path: file });
   console.log(name, file);
   if (name !== "org-empty" && name !== "account") {

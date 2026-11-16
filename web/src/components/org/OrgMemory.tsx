@@ -1,6 +1,6 @@
 import * as React from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Brain, Download, Plus, Trash2, Upload } from "lucide-react";
+import { Brain, Download, Plus, Trash2, Upload, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { api, type MemoryNote, type OrgRef } from "@/lib/api";
 import { useCached } from "@/lib/cache";
@@ -13,6 +13,7 @@ import { Swap } from "@/components/ui/swap";
 import { ListEmpty, ListSkeleton } from "@/components/ui/list-state";
 import { Panel, SettingsSection } from "@/components/ui/settings";
 import { Composer, KindGlyph } from "@/components/Memory";
+import { PickFromMine } from "@/components/org/PickFromMine";
 import { NoteStatement } from "@/components/memory/noteText";
 import { plural } from "@/components/memory/kinds";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,7 @@ export function OrgMemory({ org }: { org: OrgRef }) {
   const data = cached.data ?? null;
   const notes = React.useMemo(() => (data?.notes ?? []).filter((n) => n.until === undefined && n.status !== "pending").sort((a, b) => b.at - a.at), [data]);
   const [composing, setComposing] = React.useState(false);
+  const [picking, setPicking] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
 
   const apply = async (p: Promise<Parameters<typeof cached.setData>[0]>, ok?: string): Promise<boolean> => {
@@ -77,6 +79,10 @@ export function OrgMemory({ org }: { org: OrgRef }) {
       actions={
         data && manage ? (
           <>
+            <Button variant="outline" size="sm" onClick={() => setPicking(true)}>
+              <UserRound className="size-4" />
+              From yours
+            </Button>
             <Button variant="outline" size="sm" onClick={() => setComposing((v) => !v)} aria-expanded={composing} aria-controls="org-memory-composer">
               <Plus className="size-4" />
               Add
@@ -103,6 +109,7 @@ export function OrgMemory({ org }: { org: OrgRef }) {
           {cached.error}
         </p>
       )}
+      <PickFromMine org={org} kind="notes" open={picking} onClose={() => setPicking(false)} existing={new Set(notes.map((n) => n.id))} onDone={() => cached.refresh()} />
       <Collapse open={composing}>
         <Composer
           id="org-memory-composer"
@@ -119,7 +126,19 @@ export function OrgMemory({ org }: { org: OrgRef }) {
           {data === null ? (
             <ListSkeleton rows={3} />
           ) : notes.length === 0 ? (
-            <ListEmpty icon={Brain} title="No shared notes yet" line={manage ? "A preference the whole team shares, a rule every run should follow, how the product works." : "Nothing shared yet."} />
+            <ListEmpty
+              icon={Brain}
+              title="No shared notes yet"
+              line={manage ? "A preference the whole team shares, a rule every run should follow, how the product works." : "Nothing shared yet."}
+              action={
+                manage ? (
+                  <Button size="sm" variant="outline" onClick={() => setPicking(true)}>
+                    <UserRound />
+                    From your notes
+                  </Button>
+                ) : undefined
+              }
+            />
           ) : (
             <ul className={cn("divide-y", data.enabled ? "" : "opacity-60")}>
               <AnimatePresence initial={false}>

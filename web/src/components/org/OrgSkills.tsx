@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Download, Plus, Zap } from "lucide-react";
+import { Download, Plus, UserRound, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { api, type OrgRef, type SkillView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
@@ -8,6 +8,7 @@ import { Panel, SettingsSection } from "@/components/ui/settings";
 import { ListEmpty } from "@/components/ui/list-state";
 import { Swap } from "@/components/ui/swap";
 import { ImportDialog } from "@/components/skills/ImportDialog";
+import { PickFromMine } from "@/components/org/PickFromMine";
 import { SkillTable } from "@/components/skills/SkillLibrary";
 import type { Draft, Mutate } from "@/components/skills/model";
 
@@ -35,6 +36,7 @@ export function useOrgSkills(org: OrgRef) {
 export function OrgSkills({ org, skills, error, mutate, refresh, onEdit }: { org: OrgRef; skills: SkillView[] | null; error: string | null; mutate: Mutate; refresh: () => Promise<void>; onEdit: (e: Omit<OrgSkillEditing, "key">) => void }) {
   const manage = org.role !== "member";
   const [importing, setImporting] = React.useState(false);
+  const [picking, setPicking] = React.useState(false);
   const existing = React.useMemo(() => Object.fromEntries((skills ?? []).map((s) => [s.name, true as const])), [skills]);
   const on = (skills ?? []).filter((s) => s.enabled).length;
   return (
@@ -46,6 +48,10 @@ export function OrgSkills({ org, skills, error, mutate, refresh, onEdit }: { org
       actions={
         manage ? (
           <>
+            <Button size="sm" variant="outline" onClick={() => setPicking(true)}>
+              <UserRound />
+              From yours
+            </Button>
             <Button size="sm" variant="outline" onClick={() => setImporting(true)}>
               <Download />
               Import
@@ -72,10 +78,16 @@ export function OrgSkills({ org, skills, error, mutate, refresh, onEdit }: { org
               line={manage ? "Write one here, or import from GitHub or a SKILL.md — every member gets it on their next run." : "Nothing shared yet."}
               action={
                 manage ? (
-                  <Button size="sm" variant="outline" onClick={() => onEdit({ draft: { name: "", description: "", content: "" } })}>
-                    <Plus />
-                    New skill
-                  </Button>
+                  <>
+                    <Button size="sm" onClick={() => setPicking(true)}>
+                      <UserRound />
+                      From your skills
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => onEdit({ draft: { name: "", description: "", content: "" } })}>
+                      <Plus />
+                      New skill
+                    </Button>
+                  </>
                 ) : undefined
               }
             />
@@ -84,6 +96,7 @@ export function OrgSkills({ org, skills, error, mutate, refresh, onEdit }: { org
           <SkillTable skills={skills ?? []} loading={skills === null} readOnly={!manage} owner={org.name} onOpen={(s) => manage && onEdit({ initial: s })} onMutate={mutate} />
         )}
       </Swap>
+      <PickFromMine org={org} kind="skills" open={picking} onClose={() => setPicking(false)} existing={new Set((skills ?? []).map((s) => s.name))} onDone={refresh} />
       <ImportDialog
         open={importing}
         onClose={() => setImporting(false)}

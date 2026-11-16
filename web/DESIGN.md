@@ -1490,9 +1490,11 @@ memory — and every member's runs get the union (own wins on a name clash; a se
 off is left out; what a run learns goes into the person's memory, never the org's). The UI says
 that in three places and nowhere else:
 
-- **Account → Organisations.** A list panel: crown (you own it), shield (admin) or building
-  (member) on a round tile, the role line and the counts, a chevron. The footer is the one way to
-  start one: a name and **Create**; hidden once a person owns five.
+- **Sidebar → Organisation** (under Resources, hosted sign-ins only; the badge is how many they
+  are in). It opens the first organisation, or the empty state: "Start an organisation, or be
+  added to one" — a name and **Create** on one side, and on the other the person's own email,
+  which is what an owner has to add for them to be in. Nothing about organisations lives on
+  Account.
 - **`/dashboard/org/:id`.** A SettingsPage titled with the org's name; the purpose line is the
   facts ("3 people · 2 invited · you own it"). The owner's actions are quiet ghosts — **Switch**
   (when they are in more than one), **Rename** (inline: the title becomes the input), **Hand over**
@@ -1503,7 +1505,16 @@ that in three places and nowhere else:
   org's *MCP servers*, *Skills* and *Memory* — the same sections the personal pages draw, pointed
   at the org's store (`<McpServers scope={{ org }} />`, `SkillTable owner={org.name}`, `OrgMemory`),
   read-only for a member (no actions column, no footer, no toggles). The skill editor replaces the
-  page the way it does on Skills.
+  page the way it does on Skills. Each of the three sections has a **From yours** button beside
+  its own actions (and a first card in the servers' empty state, a primary action in the others'):
+  `org/PickFromMine`, a dialog listing the admin's own servers, skills or notes as checkbox rows
+  (stamp name and command/URL for servers, `/name` and description for skills, the text with a
+  kind chip and the rationale or repo for notes; proposals and expired notes are left out). A row
+  the org already has by that name says *replaces the org's*; one the person has turned off says
+  *off for you*. **All**/**None**, "2 of 4 picked", **Add to {org}**. The copy is a controller
+  route (`POST /orgs/copy.json`), never the browser, because the browser only ever sees masked
+  secrets: the org's server arrives with the real env and headers, and the two copies are
+  separate from then on.
 - **"Shared by {org}" under your own list** on Integrations, Skills and Memory (`org/SharedBy`): a
   small building tile, the name, a count, and **Manage** for admins. The rows are plain tiles with
   no toggles or row actions, so an org's server is never mistaken for one of yours; off items are
@@ -1513,5 +1524,6 @@ that in three places and nowhere else:
 Nothing is emailed. Adding an address makes an invite row; the person is in the moment they sign
 in with that address (sign-up, GitHub, or a profile email change), so the only thing to send them
 is the note **Copy invite** puts on the clipboard. Verified with `.shots/org-fixture.mjs`
-(`--role=owner|member`, `--dark`): the org page top and bottom, the empty state, Account, and the
-three shared-by blocks.
+(`--role=owner|member`, `--dark`): the org page top and bottom, the three pickers
+(`--only=pick-servers,pick-skills,pick-notes`), the empty state, Account, and the three shared-by
+blocks.

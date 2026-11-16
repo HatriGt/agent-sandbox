@@ -1142,6 +1142,8 @@ export const api = {
   orgSetRole: (org: string, email: string, role: "admin" | "member") => post<{ ok: true; members: OrgMemberView[] }>("/orgs/members/role.json", { org, email, role }),
   orgLeave: (org: string) => post<{ ok: true; orgs: OrgView[] }>("/orgs/leave.json", { org }),
   orgTransfer: (org: string, userId: string) => post<{ ok: true; orgs: OrgView[] }>("/orgs/transfer.json", { org, userId }),
+  /** Copy some of your own servers / skills / notes into an organisation you manage (secrets intact; done on the controller). */
+  orgCopy: (org: string, pick: { servers?: string[]; skills?: string[]; notes?: string[] }) => post<{ ok: true; copied: { servers: string[]; skills: string[]; notes: number } }>("/orgs/copy.json", { org, ...pick }),
   /** The service's own health (canary, host disk, start failures, baked packages). */
   health: (signal?: AbortSignal) => fetch(url("/health.json"), { headers: authHeaders, signal }).then(parse<HealthResponse>),
   /** Build an image with the newer versions, switch to it, test it, switch back if the test fails. Admins only. */

@@ -1,8 +1,9 @@
 import * as React from "react";
-import { Braces, Check, ClipboardPaste, Copy, List, Pencil, Plug, Plus, RotateCcw, Trash2, WandSparkles, X, Zap } from "lucide-react";
+import { Braces, Check, ClipboardPaste, Copy, List, Pencil, Plug, Plus, RotateCcw, Trash2, UserRound, WandSparkles, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { api, type McpServersResponse, type McpServerView, type OrgRef } from "@/lib/api";
 import { SharedBy } from "@/components/org/SharedBy";
+import { PickFromMine } from "@/components/org/PickFromMine";
 import { useCached } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
@@ -68,6 +69,7 @@ export function McpServers({ scope }: { scope?: { org: OrgRef } } = {}) {
   }
   const shown = lastEditing.current;
   const [pasting, setPasting] = React.useState(false);
+  const [picking, setPicking] = React.useState(false);
   const [health, setHealth] = React.useState<Record<string, Health>>({});
   const [testing, setTesting] = React.useState<Record<string, boolean>>({});
 
@@ -139,6 +141,17 @@ export function McpServers({ scope }: { scope?: { org: OrgRef } } = {}) {
             />
           {view === "list" && (
             <>
+              {scope && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button size="sm" variant="outline" onClick={() => setPicking(true)} aria-label="From your own servers" className="px-2.5">
+                      <UserRound />
+                      <span className="hidden md:inline">From yours</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Pick servers from your own list, copied with their secrets</TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button size="sm" variant="outline" onClick={() => setPasting(true)} aria-label="Paste config" className="px-2.5">
@@ -171,7 +184,7 @@ export function McpServers({ scope }: { scope?: { org: OrgRef } } = {}) {
           <ListSkeleton />
         ) : servers.length === 0 ? (
           canEdit ? (
-            <EmptyState onAdd={() => setEditing({})} onPaste={() => setPasting(true)} />
+            <EmptyState onAdd={() => setEditing({})} onPaste={() => setPasting(true)} onMine={scope ? () => setPicking(true) : undefined} />
           ) : (
             <p className="text-muted-foreground px-1 text-meta">Nothing shared yet.</p>
           )
@@ -230,6 +243,7 @@ export function McpServers({ scope }: { scope?: { org: OrgRef } } = {}) {
       </Sheet>
       <Dialog open={pasting} onOpenChange={setPasting}>
         {pasting && <PasteDialog onMutate={mutate} onClose={() => setPasting(false)} />}
+        {scope && <PickFromMine org={scope.org} kind="servers" open={picking} onClose={() => setPicking(false)} existing={new Set((servers ?? []).map((s) => s.name))} onDone={() => cached.refresh()} />}
       </Dialog>
     </SettingsSection>
   );
@@ -414,7 +428,7 @@ function ListSkeleton() {
   );
 }
 
-function EmptyState({ onAdd, onPaste }: { onAdd: () => void; onPaste: () => void }) {
+function EmptyState({ onAdd, onPaste, onMine }: { onAdd: () => void; onPaste: () => void; onMine?: () => void }) {
   return (
     <div className="enter bg-card relative overflow-hidden rounded-xl border p-6 shadow-e1 sm:p-8">
       <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(60%_100%_at_50%_0%,color-mix(in_oklab,var(--live)_10%,transparent),transparent)]" aria-hidden />
@@ -427,9 +441,20 @@ function EmptyState({ onAdd, onPaste }: { onAdd: () => void; onPaste: () => void
           An MCP server hands the agent extra tools — Jira, a database, your own API. It already has shell, files, GitHub and the web; anything added here is available in every sandbox on its next run.
         </p>
       </div>
-      <div className="relative mt-6 grid gap-2 sm:grid-cols-2">
+      <div className={cn("relative mt-6 grid gap-2 sm:grid-cols-2", onMine && "lg:grid-cols-3")}>
+        {onMine && (
+          <button type="button" onClick={onMine} className="group surface surface-hover hover-raise flex cursor-pointer items-start gap-3 p-4 text-left">
+            <span className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg shadow-e1" aria-hidden>
+              <UserRound className="size-4" />
+            </span>
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-foreground text-meta font-medium">From your own servers</span>
+              <span className="text-muted-foreground text-micro leading-snug">Pick any of yours; they are copied here with their secrets.</span>
+            </span>
+          </button>
+        )}
         <button type="button" onClick={onAdd} className="group surface surface-hover hover-raise flex cursor-pointer items-start gap-3 p-4 text-left">
-          <span className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg shadow-e1" aria-hidden>
+          <span className={cn("grid size-8 shrink-0 place-items-center rounded-lg", onMine ? "bg-muted text-muted-foreground group-hover:text-foreground transition-colors" : "bg-primary text-primary-foreground shadow-e1")} aria-hidden>
             <Plus className="size-4" />
           </span>
           <span className="flex min-w-0 flex-col gap-0.5">

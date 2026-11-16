@@ -2437,6 +2437,70 @@ app.post("/orgs/leave.json", (req: Request, res: Response) => {
   res.locals.auditAction = "org.leave";
   res.json({ ok: true, orgs: orgsOf(db, userOf(res)!.userId) });
 });
+// Copy some of the caller's own servers / skills / memory notes into an organisation they manage.
+// Done here, not in the browser, because the browser only ever sees masked secrets: the org's copy
+// of a server gets the real env and headers. {org, servers?: string[], skills?: string[], notes?: string[]}
+app.post("/orgs/copy.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const scope = orgOf(req, res, "manage");
+  if (!scope) return;
+  const body = (req.body ?? {}) as { servers?: unknown; skills?: unknown; notes?: unknown };
+  const names = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, 200) : []);
+  const want = { servers: names(body.servers), skills: names(body.skills), notes: names(body.notes) };
+  if (!want.servers.length && !want.skills.length && !want.notes.length) {
+    res.status(400).json({ error: "nothing to copy" });
+    return;
+  }
+  try {
+    // The caller's own stores, under the caller's principal.
+    const ownMcp = want.servers.length ? await loadMcpStore(cfg) : null;
+    const ownSkills = want.skills.length ? await loadSkillStore(cfg) : null;
+    const ownMemory = want.notes.length ? loadMemoryStore() : null;
+    const copied = { servers: [] as string[], skills: [] as string[], notes: 0 };
+    const now = Date.now();
+    await withOwner(scope.id, async () => {
+      if (ownMcp) {
+        const store = await loadMcpStore(cfg);
+        for (const name of want.servers) {
+          const s = ownMcp.servers[name];
+          if (!s) continue;
+          store.servers[name] = { ...structuredClone(s), addedAt: now };
+          copied.servers.push(name);
+        }
+        await saveMcpStore(cfg, store);
+      }
+      if (ownSkills) {
+        const store = await loadSkillStore(cfg);
+        for (const name of want.skills) {
+          const s = ownSkills.skills[name];
+          if (!s) continue;
+          store.skills[name] = { ...structuredClone(s), addedAt: store.skills[name]?.addedAt ?? now, updatedAt: now };
+          copied.skills.push(name);
+        }
+        await saveSkillStore(cfg, store);
+      }
+      if (ownMemory) {
+        const store = loadMemoryStore();
+        const mine = [...ownMemory.global, ...Object.values(ownMemory.repos).flat()];
+        for (const id of want.notes) {
+          const n = mine.find((x) => x.id === id);
+          if (!n || n.until != null || n.status !== "kept") continue;
+          const list = n.scope === "repo" && n.repo ? (store.repos[n.repo] ??= []) : store.global;
+          if (list.some((x) => x.id === n.id)) continue;
+          const { uses: _u, lastUsed: _l, stale: _s, ...rest } = n;
+          list.push({ ...structuredClone(rest), source: "you", at: now });
+          copied.notes++;
+        }
+        saveMemoryStore(store);
+      }
+    });
+    res.locals.auditAction = "org.copy";
+    res.json({ ok: true, copied });
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  }
+});
+
 app.post("/orgs/transfer.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const scope = orgOf(req, res, "owner");

@@ -80,10 +80,40 @@ check(r.status === 200 && r.json.notes.some((n) => n.text === noteText), "org no
 r = await call("POST", `/skills.json?org=${org}`, { body: { action: "toggle", name: skill, enabled: true }, cookie: B });
 check(r.status === 403, "member cannot edit org skills", r.status);
 
+// ---- 3b. A copies from their own stores into the org (the "From yours" picker): a server with a
+// secret env, a skill, a note. The copy is server-side, so the org's server keeps the real secret.
+const mineServer = `e2e-mine-server-${ts}`;
+const mineSkill = `e2e-mine-skill-${ts}`;
+const mineNote = `E2E-MINE-MEMORY-${ts}: the owner's own note, copied into the org.`;
+const secret = `sk-e2e-secret-${ts}-0123456789`;
+r = await call("POST", "/mcp-servers.json", { body: { action: "upsert", server: { name: mineServer, type: "http", url: "https://example.com/mine", headers: { Authorization: `Bearer ${secret}` } } }, cookie: A });
+check(r.status === 200 && r.json.servers.some((s) => s.name === mineServer && !String(s.headers?.Authorization ?? "").includes(secret)), "own server saved, secret masked for the browser", r.json?.servers?.find((s) => s.name === mineServer)?.headers);
+r = await call("POST", "/skills.json", { body: { action: "upsert", skill: { name: mineSkill, description: `E2E own skill ${ts}`, content: `# ${mineSkill}
+
+Say E2E-MINE-SKILL-${ts}.
+`, enabled: true } }, cookie: A });
+check(r.status === 200, "own skill saved", r.status);
+r = await call("POST", "/memory-notes.json", { body: { add: { kind: "rule", text: mineNote } }, cookie: A });
+const mineNoteId = r.json?.notes?.find((n) => n.text === mineNote)?.id;
+check(r.status === 200 && !!mineNoteId, "own note saved", mineNoteId);
+r = await call("POST", "/orgs/copy.json", { body: { org, servers: [mineServer, "no-such-server"], skills: [mineSkill], notes: [mineNoteId] }, cookie: B });
+check(r.status === 403, "member cannot copy into the org", r.status);
+r = await call("POST", "/orgs/copy.json", { body: { org, servers: [mineServer, "no-such-server"], skills: [mineSkill], notes: [mineNoteId] }, cookie: A });
+check(r.status === 200 && r.json.copied?.servers?.length === 1 && r.json.copied.skills.length === 1 && r.json.copied.notes === 1, "owner copies own server, skill and note into the org", r.json?.copied);
+r = await call("GET", `/mcp-servers.json?org=${org}`, { cookie: A });
+check(r.json?.servers?.some((s) => s.name === mineServer), "org now lists the copied server");
+r = await call("GET", `/skills.json?org=${org}`, { cookie: A });
+check(r.json?.skills?.some((s) => s.name === mineSkill), "org now lists the copied skill");
+r = await call("GET", `/memory-notes.json?org=${org}`, { cookie: A });
+check(r.json?.notes?.some((n) => n.text === mineNote), "org now lists the copied note");
+r = await call("POST", "/orgs/copy.json", { body: { org }, cookie: A });
+check(r.status === 400, "copy with nothing picked is refused", r.status);
+
 // ---- 4. what B is served
 r = await call("GET", "/mcp-servers.json", { cookie: B });
 const sharedServers = r.json?.shared?.find((g) => g.org.id === org);
 check(!!sharedServers && sharedServers.servers.some((s) => s.name === server) && sharedServers.org.role === "member", "B sees the org server as shared", sharedServers?.org);
+check(!!sharedServers?.servers.some((s) => s.name === mineServer && !String(s.headers?.Authorization ?? "").includes(secret)), "B sees the copied server, secret masked");
 r = await call("GET", "/skills.json", { cookie: B });
 check(!!r.json?.shared?.find((g) => g.org.id === org)?.skills.some((s) => s.name === skill), "B sees the org skill as shared");
 r = await call("GET", "/memory-notes.json", { cookie: B });
@@ -136,6 +166,10 @@ if (!NO_RUN) {
   check(seen.includes(`E2E-ORG-MEMORY-${ts}`), "org memory note reached the box's MEMORY.md");
   check(seen.includes(skill), "org skill directory reached the box");
   check(seen.includes(server), "org MCP server reached the box's MCP config");
+  check(seen.includes(mineServer), "copied server reached the box's MCP config");
+  check(seen.includes(secret), "copied server carries the real secret in the box (not the mask)");
+  check(seen.includes(mineSkill), "copied skill directory reached the box");
+  check(seen.includes(`E2E-MINE-MEMORY-${ts}`), "copied note reached the box's MEMORY.md");
   if (box) {
     const t = await call("POST", "/teardown.json", { body: { box }, cookie: B });
     check(t.status === 200, "teardown of the test box", t.status);
