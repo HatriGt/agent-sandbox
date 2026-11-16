@@ -19,6 +19,7 @@ import { UsageMeter } from "@/components/ui/usage-meter";
 import { DataTable, MetaLine, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
 import { Capacity } from "@/components/Capacity";
 import { ServiceHealth } from "@/components/ServiceHealth";
+import { HostsPanel } from "@/components/Hosts";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 
@@ -91,6 +92,8 @@ export function Sandboxes({
   const waiting = boxes.filter((b) => b.runState === "waiting" && !b.leaving);
 
   const sleepable = boxes.filter((b) => displayState(b) === "sleeping" && !b.kept && !b.leaving);
+  // More than one box host in play: say which machine runs where.
+  const multiHost = React.useMemo(() => new Set(boxes.map((b) => b.host).filter(Boolean)).size > 1, [boxes]);
   return (
     <div className="h-full min-w-0 overflow-y-auto">
       <div className="page-frame py-6 md:py-8">
@@ -221,10 +224,12 @@ export function Sandboxes({
                 </Button>
               </div>
             ) : (
-              <MachineTable boxes={visible} grouped={grouped} lifecycle={lifecycle} onOpen={onOpen} onDestroyed={onDestroyed} />
+              <MachineTable boxes={visible} grouped={grouped} lifecycle={lifecycle} onOpen={onOpen} onDestroyed={onDestroyed} multiHost={multiHost} />
             )}
           </Swap>
         </section>
+
+        <HostsPanel />
       </div>
     </div>
   );
@@ -254,6 +259,7 @@ function MachineTable({
   loading,
   onOpen,
   onDestroyed,
+  multiHost,
 }: {
   boxes: StableBox[];
   grouped: boolean;
@@ -261,6 +267,7 @@ function MachineTable({
   loading?: boolean;
   onOpen: (name: string) => void;
   onDestroyed: (name: string) => void;
+  multiHost?: boolean;
 }) {
   const columns: Column<StableBox>[] = [
     {
@@ -270,7 +277,7 @@ function MachineTable({
       cell: (b) => stateDot(b),
     },
     { id: "task", header: "Task", primary: true, cell: (b) => <TaskCell box={b} lifecycle={lifecycle} /> },
-    { id: "machine", header: "Machine", width: "w-52", fitMax: 440, hideBelow: "md", cell: (b) => <MachineCell box={b} lifecycle={lifecycle} /> },
+    { id: "machine", header: "Machine", width: "w-52", fitMax: 440, hideBelow: "md", cell: (b) => <MachineCell box={b} lifecycle={lifecycle} multiHost={multiHost} /> },
     { id: "left", header: "Time left", width: "w-[8.5rem]", hideBelow: "md", cell: (b) => <TimeLeft box={b} lifecycle={lifecycle} /> },
     // The row is the action (click opens the thread); this cell holds destroy + the click cue.
     { id: "actions", header: <span className="sr-only">Actions</span>, width: "w-[5.5rem]", align: "end", cell: (b) => <RowActions box={b} onDestroyed={onDestroyed} /> },
@@ -326,13 +333,18 @@ function TaskCell({ box, lifecycle }: { box: StableBox; lifecycle: FleetLifecycl
   );
 }
 
-function MachineCell({ box, lifecycle }: { box: StableBox; lifecycle: FleetLifecycle }) {
+function MachineCell({ box, lifecycle, multiHost }: { box: StableBox; lifecycle: FleetLifecycle; multiHost?: boolean }) {
   const state = displayState(box);
   const deadline = deadlineOf(box, lifecycle);
   return (
     <div className="stamp text-muted-foreground flex min-w-0 flex-col gap-0.5">
       <span className="text-foreground truncate" title={shortName(box.name)}>
         {friendlyName(box.name)}
+        {multiHost && box.host && (
+          <span className="bg-foreground/6 text-muted-foreground ml-1.5 rounded px-1.5 py-px font-sans text-[10px]" title={`Runs on the ${box.host} host`}>
+            {box.host}
+          </span>
+        )}
       </span>
       {/* Words in the sans face; only the duration is data. */}
       <span className="font-sans text-micro">

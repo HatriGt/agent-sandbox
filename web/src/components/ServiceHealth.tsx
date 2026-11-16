@@ -80,7 +80,18 @@ export function ServiceHealth() {
                 {!d ? "host disk unknown" : `host disk ${d.usedPct}% · ${(d.availMib / 1024).toFixed(0)} GiB free`}
               </span>
             </StatusDot>,
-            ...(data.hostSleep?.enabled
+            ...(data.hosts && data.hosts.length > 1
+              ? [
+                  <StatusDot tone={data.hosts.some((h) => h.enabled && h.unreachable) ? "destructive" : "ok"} className="font-normal">
+                    <span title={data.hosts.map((h) => `${h.name}: ${!h.enabled ? "off" : h.unreachable ? "unreachable" : h.asleep ? "asleep" : "awake"}`).join(" · ")}>
+                      {data.hosts.filter((h) => h.enabled).length} hosts
+                      {data.hosts.some((h) => h.enabled && h.asleep) ? ` · ${data.hosts.filter((h) => h.enabled && h.asleep).length} asleep` : ""}
+                      {data.hosts.some((h) => h.enabled && h.unreachable) ? ` · ${data.hosts.filter((h) => h.enabled && h.unreachable).length} unreachable` : ""}
+                    </span>
+                  </StatusDot>,
+                ]
+              : []),
+            ...(data.hostSleep?.enabled && !(data.hosts && data.hosts.length > 1)
               ? [
                   <StatusDot tone={data.hostSleep.asleep ? "muted" : "ok"} className="font-normal">
                     <span title={`The host is left to pause itself after ${Math.round(data.hostSleep.afterMs / 60_000)} quiet minutes; the next task wakes it`}>

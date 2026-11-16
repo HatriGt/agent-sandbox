@@ -1577,3 +1577,34 @@ Two rules every dialog follows, both in `ui/dialog.tsx` (and the sheet's scrim i
   the old inline footers a padding's height above the edge. Paste config, Import a skill (both
   steps) and the From-yours picker use it; anything new that has buttons should too.
 
+## Box hosts (2026-11-17)
+
+The machines runs go to became a pool (docs/hosts.md): the VPS, any number of Freestyle accounts,
+any machine with msb. The UI says so in two places and nowhere else:
+
+- **Fleet view → Box hosts**, a section under the machines table, admins only (the gate is the
+  server's answer, not a client-side identity: token mode never sets one). A `DataTable` with a
+  tile per host: name with "· from .env" on the primary, a stamp subline (provider · SSH target
+  with any token elided · "sleeps after 5m" or "never sleeps" · "keeps a warm box"), and under it,
+  in `text-destructive`, the last error when the host is unreachable. Only the SSH target gives
+  way when the column is narrow; the words around it stay whole. The **State** column is a
+  StatusDot in the fleet's vocabulary (working, idle, asleep · 43m ago, unreachable, off), the
+  **Machines** column is "2/5" with a meter, **This month** is "188 of 400 vCPU-h left" with a
+  meter that turns warn past 85 % or "unmetered" in faint. The actions are icon ghosts: check
+  (activity), pause or wake (moon or sun, Freestyle only), edit, remove (an ArmButton; the primary
+  has none). The header's one primary is **Add host**.
+- **The health line** on the same page says "4 hosts · 1 asleep · 1 unreachable" once there is
+  more than one, red when one is unreachable; a single-host install keeps the old "host awake"
+  wording. Machine rows get a tiny host chip next to the machine name only when more than one
+  host is in play.
+
+The add/edit dialog is a plain form in the dialog grammar (title, one-line purpose, fields with
+hints in `text-faint`, a DialogFooter with ghost Cancel and one primary): name, a Segmented for
+the provider (Freestyle VM / My own machine) with a sentence under it saying what that means, the
+SSH target with its shape as the hint, VM id and API key side by side ("Stored; leave blank to
+keep it" on an edit), then order / sleep after / slots in a row with one-line hints, three
+switches (keep a warm box, takes new runs, monthly allowance) and, when the allowance is on,
+vCPU-hours / vCPUs billed / resets on day with the Free-plan figures as the hint. Paths and boot
+sources sit under a Collapse because nobody sets them on a first add. Verified in both schemes
+with `.shots/hosts-fixture.mjs` (every route mocked; `--panel` for the section alone,
+`--open=new|edit` for the dialogs).

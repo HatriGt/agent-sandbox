@@ -12,6 +12,8 @@ export type BoxRole = "session" | "pool-claimed" | "pool-free";
 export interface BoxView {
   name: string;
   role: BoxRole;
+  /** The box host this machine runs on (its id in the hosts registry); absent on a single-host install's older boxes. */
+  host?: string;
   /** msb lifecycle: "Running" while the microVM is up, "Stopped" for a sleeping (idle-stopped) box. */
   boxStatus: string;
   runState: RunState;
@@ -521,6 +523,63 @@ export interface WatchSnapshot extends Omit<BoxView, "role"> {
   mcpNotes?: string[];
 }
 
+/** One box host as /hosts.json and /health.json describe it (src/host-pool.ts HostStateView). */
+export interface HostView {
+  id: string;
+  name: string;
+  provider: "static" | "freestyle" | string;
+  primary: boolean;
+  /** The SSH target with any token elided. */
+  ssh: string;
+  enabled: boolean;
+  warm: boolean;
+  priority: number;
+  sleepAfterMs: number;
+  maxBoxes: number;
+  running: number;
+  reserved: number;
+  asleep: boolean;
+  sleepSince: number;
+  unreachable: boolean;
+  lastError?: string;
+  lastSweepAt: number;
+  allowance?: { vcpuHours: number; vcpu: number; resetDay: number; month: string; usedHours: number; leftHours: number; pct: number };
+  providerState?: { state: string; detail?: string; at: number };
+  check?: { ok: boolean; ms: number; detail: string; at: number };
+  disk?: { reading?: { totalMib: number; usedMib: number; availMib: number; usedPct: number }; at: number; error?: string };
+  freestyle?: { vmId: string; hasApiKey: boolean };
+  msbHome?: string;
+  stagingDir?: string;
+  msb?: string;
+  snapshot?: string;
+  ompSnapshot?: string;
+  claudeImage?: string;
+  ompImage?: string;
+}
+
+/** What the add/edit host form sends; a blank API key on an edit keeps the stored one. */
+export interface HostSpecInput {
+  id?: string;
+  name?: string;
+  provider?: "static" | "freestyle";
+  ssh?: string;
+  sshExtraOpts?: string;
+  msb?: string;
+  msbHome?: string;
+  stagingDir?: string;
+  maxBoxes?: number | null;
+  priority?: number;
+  sleepAfterMs?: number;
+  warm?: boolean;
+  enabled?: boolean;
+  allowance?: { vcpuHours: number; vcpu: number; resetDay: number } | null;
+  freestyle?: { vmId: string; apiKey: string } | null;
+  snapshot?: string;
+  ompSnapshot?: string;
+  claudeImage?: string;
+  ompImage?: string;
+}
+
 /** /health.json: the service's own health for the Fleet page. */
 export interface HealthResponse {
   canary: {
@@ -531,6 +590,8 @@ export interface HealthResponse {
   hostDisk: { reading?: { totalMib: number; usedMib: number; availMib: number; usedPct: number }; at: number; error?: string; alertPct: number; home: string };
   /** Host sleep (a metered host left to pause itself); absent or null for a non-admin, enabled=false when off. */
   hostSleep?: { enabled: boolean; asleep: boolean; since: number; lastWorkAt: number; afterMs: number } | null;
+  /** Every box host (admins); empty for a non-admin. */
+  hosts?: HostView[];
   orphanSweep: { at: number; removed: string[]; freedMib?: number; error?: string } | null;
   startFailures: { streak: number; last?: { box: string; at: number; tail: string }; alertedAt: number };
   baked: Record<string, string>;
@@ -1164,6 +1225,10 @@ export const api = {
   browser: (session: string, action: Record<string, unknown>) => post<BrowserReply>("/browser.json", { session, ...action }),
   browserInstall: (session: string) => post<{ ok: true }>("/browser/install.json", { session }),
   updateImage: () => post<NonNullable<HealthResponse["imageUpdate"]>>("/health/image-update.json", {}),
+  /** The box hosts (admins only). */
+  hosts: (signal?: AbortSignal) => fetch(url("/hosts.json"), { headers: authHeaders, signal }).then(parse<{ hosts: HostView[]; capacity: number }>),
+  hostAction: (body: { action: "upsert"; id?: string; spec: HostSpecInput } | { action: "remove" | "check" | "wake" | "pause"; id: string }) =>
+    post<{ ok: boolean; host?: HostView; hosts?: HostView[]; capacity?: number; check?: HostView["check"]; providerState?: HostView["providerState"] }>("/hosts.json", body),
   memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean; repo?: string }, org?: string) =>
     post<MemoryNotesResponse>("/memory-notes.json", scoped(body, org)),
   /** Add a preference/rule by hand (the composer on the Memory page). */
