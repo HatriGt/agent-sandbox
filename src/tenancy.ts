@@ -4,7 +4,7 @@ import type { HandlerDeps } from "./handlers.js";
 import type { Db } from "./db.js";
 import { forgetBox, getUser, mayAccess, ownedBoxNames, planOf, recordBoxOwner, TrialExpiredError, type Principal } from "./identity.js";
 import { formatMonitor } from "./monitor.js";
-import { gatherMonitor } from "./msb.js";
+import { sweepBoxes } from "./host-sweep.js";
 
 /**
  * The principal travels with the request through async continuations, so the shared `deps` (used by
@@ -128,7 +128,7 @@ export function guardDeps(deps: HandlerDeps, own: Ownership): HandlerDeps {
     // The text fleet report (MCP `monitor`) shows a user only their own machines; the pool is infrastructure.
     async monitor(cfg) {
       if (!own.isUser()) return deps.monitor(cfg);
-      const mine = own.visible(await gatherMonitor(cfg));
+      const mine = own.visible(await sweepBoxes(cfg));
       return mine.length ? formatMonitor(mine) : "No machines yet. delegate() starts one — it will be yours alone.";
     },
   };

@@ -16,6 +16,8 @@ import { acquireBox, refillPool, poolEligible, ompPoolEligible, poolStatus } fro
 import { noteOwnerActive, noteOwnerAgent } from "./warm-owners.js";
 import { ownerKey } from "./user-store.js";
 import { isCanaryTask } from "./canary.js";
+import { cfgForBox, hostPool, sessionBoxes, warmCfgs } from "./host-pool.js";
+import { sweepBoxes } from "./host-sweep.js";
 import {
   runAgentTask,
   resumeAgentTask,
@@ -439,7 +441,35 @@ async function prepareRepoSetup(
 }
 
 export const deps: HandlerDeps = {
-  countBoxes: (cfg) => msbCountBoxes(cfg),
+  // Live boxes across every enabled host. An asleep or unreachable host answers from its last
+  // sweep (it cannot take a run anyway); the error stays loud only when no host answered at all.
+  countBoxes: async (cfg) => {
+    const pool = hostPool();
+    if (!pool) return msbCountBoxes(cfg);
+    let total = 0;
+    let answered = false;
+    let firstError: Error | undefined;
+    await Promise.all(
+      pool.enabled().map(async (h) => {
+        if (h.sleep.asleep() || h.unreachableSince) {
+          total += sessionBoxes(h.lastBoxes);
+          answered ||= h.sleep.asleep();
+          return;
+        }
+        try {
+          total += await msbCountBoxes(h.cfg);
+          answered = true;
+        } catch (e) {
+          firstError ??= e as Error;
+          pool.noteSweepError(h.spec.id, (e as Error).message);
+          total += sessionBoxes(h.lastBoxes);
+        }
+      })
+    );
+    if (!answered && firstError) throw firstError;
+    return total;
+  },
+  capacity: (cfg) => hostPool()?.capacity() ?? cfg.maxBoxes,
 
   resolveGitAccess: (cfg, plan, opts) => resolveGitAccessImpl(cfg, plan, opts),
 
@@ -452,10 +482,16 @@ export const deps: HandlerDeps = {
   ): Promise<DelegationResult> {
     // A thread's model provider needs its endpoint reachable: derived, never typed in twice.
     if (plan.provider) allowDomains = Array.from(new Set([...(allowDomains ?? []), ...providerEgressDomains(plan.provider)]));
+    // Which host takes this run (src/host-pick.ts). The slot is held until the box is in `msb ls`
+    // so a parallel fan-out cannot overshoot one host while the total gate still passes.
+    const picked = hostPool()?.pick({ minAllowanceHours: 1 });
+    if (picked && !picked.host) throw new Error(`No box host can take this run: ${picked.reason}.`);
+    const hostCfg: Config = picked?.host ? { ...cfg, ...picked.host.cfg } : cfg;
+    const releaseSlot = (): void => picked?.release();
     // Per-call egress extras merge onto the curated allowlist for this delegation only.
     let runCfg = allowDomains?.length
-      ? { ...cfg, egressDomains: Array.from(new Set([...cfg.egressDomains, ...allowDomains])) }
-      : cfg;
+      ? { ...hostCfg, egressDomains: Array.from(new Set([...hostCfg.egressDomains, ...allowDomains])) }
+      : hostCfg;
     // An omp run cold-boots from the base image with a bigger root disk: bun + omp need ~1.5 GB
     // the 1G snapshot rootfs cannot hold, and growing a claimed box requires a restart during
     // which the pool maintainer reaps it as unexecable (measured live). snapshot:"" also makes
@@ -465,135 +501,21 @@ export const deps: HandlerDeps = {
       // "sandbox restarted"); omp boxes get the 2G tier from boot. When an agent-omp snapshot is
       // baked (MSB_OMP_SNAPSHOT), boot from it — bun + omp pre-installed on the 4G rootfs, so the
       // ~90s per-thread install disappears; otherwise cold-boot from the image and install.
-      runCfg = { ...runCfg, ...ompRootSource(cfg), rootDisk: OMP_MIN_DISK, memory: OMP_MIN_MEMORY, cpus: OMP_CPUS };
+      runCfg = { ...runCfg, ...ompRootSource(hostCfg), rootDisk: OMP_MIN_DISK, memory: OMP_MIN_MEMORY, cpus: OMP_CPUS };
     } else {
       // Every other driver runs in the claude box: the baked claude image when one is configured
       // (MSB_CLAUDE_IMAGE), else the snapshot, else a cold install from the base image.
-      runCfg = { ...runCfg, ...claudeRootSource(cfg) };
+      runCfg = { ...runCfg, ...claudeRootSource(hostCfg) };
     }
-
-    const id = newSessionId();
-    // Phase timings for start-latency work: one [timing] line per delegation, ms per phase.
-    const t0 = Date.now();
-    const marks: string[] = [];
-    let last = t0;
-    const mark = (label: string) => {
-      const now = Date.now();
-      marks.push(`${label}=${now - last}ms`);
-      last = now;
-    };
-
-    // `creds` (owner->token/login) was resolved by the handler via resolveGitAccess (both sources).
-    // Used to CLONE private repos and for the in-box per-owner git credentials, per-repo identity,
-    // and `gh` CLI. No default account: if an owner didn't resolve, there's simply no token for it.
-
-    // 1. Stage every repo into <sessionRoot>/<name> — rsync (local) or fresh git clone (remote).
-    //    The whole session root is then copied into /workspace, so each repo -> /workspace/<name>.
-    //    Also build name->owner so identity can be set per-repo dir in the box.
-    //    TASK-ONLY (no repos): nothing is staged; the box boots with an empty /workspace and the
-    //    agent just works on the task (e.g. "write a detailed report about X").
-    const hasRepos = plan.repos.length > 0;
-    const sessionRoot = hasRepos ? stagingPathFor(runCfg, id) : undefined;
-    const repoOwners: Record<string, string> = {};
     try {
-      for (const r of plan.repos) {
-        const dest = repoStagingPath(runCfg, id, r.name);
-        if (plan.source === "git") {
-          const owner = ownerOf(r.repo);
-          if (owner) repoOwners[r.name] = owner;
-          // Clone with the owner's access-resolved token (private repos). No default fallback: a repo
-          // that reached here without a token means resolution deemed it public/accessible.
-          const token = owner ? creds?.ownerTokens?.[owner] : undefined;
-          await cloneRepoInStaging({ ...runCfg, ghToken: token }, r.repo, r.ref, id, dest);
-          // Uncommitted work from the caller's machine rides in as a diff over the fresh checkout.
-          // A patch that doesn't apply aborts the delegation — never start a box on a half-applied tree.
-          if (r.patch) await applyPatchInStaging(runCfg, dest, r.patch);
-        } else {
-          await syncTreeToVps(runCfg, r.repo, id, dest);
-          // For local, derive the owner from the working tree's origin remote (best-effort).
-          const on = await localRepoOwnerName(r.repo);
-          const owner = on ? ownerOf(on) : undefined;
-          if (owner) repoOwners[r.name] = owner;
-        }
-      }
-    } catch (e) {
-      // Staging failed mid-way (bad patch, clone error): what was already cloned/synced would
-      // otherwise sit on the host forever — a full checkout of a private repo per failed attempt.
-      if (sessionRoot) void cleanupStaging(runCfg, sessionRoot);
-      throw e;
+      return await runOnHost(runCfg, hostCfg, plan, allowDomains, creds, interact, releaseSlot);
+    } finally {
+      releaseSlot();
     }
-    mark("stage");
-    // Thread the name->owner map so applyGitCredentials can set per-repo identity.
-    const runCreds: AgentCreds | undefined = creds ? { ...creds, repoOwners } : undefined;
-
-    // 2. A restricted-egress delegation must not reuse an open-egress pooled box. The pool carries
-    // both flavors now; a delegation is only eligible for (and only claims) its own agent's boxes.
-    const poolAgent: "claude" | "omp" = plan.agent === "omp" ? "omp" : "claude";
-    const eligible =
-      poolAgent === "omp"
-        ? ompPoolEligible(cfg, !!allowDomains?.length)
-        : poolEligible(runCfg, !!allowDomains?.length);
-    // A warm box belongs to one owner: this run takes its owner's box (or a blank one), never
-    // another person's. Starting a task also marks the owner as around, so the reseed below
-    // prepares their next box. The controller's own canary is nobody's presence.
-    const boxOwner = ownerKey();
-    if (!isCanaryTask(plan.task)) {
-      noteOwnerActive(cfg, boxOwner);
-      noteOwnerAgent(boxOwner, poolAgent);
-    }
-    const { box, warm } = await acquireBox(runCfg, id, sessionRoot, eligible, poolAgent, boxOwner);
-    mark("acquire");
-
-    // Operator attachments (pasted screenshots) land in the box before the agent's first tool call.
-    for (const a of plan.attachments ?? []) {
-      const safe = safeWorkspacePath(a.path);
-      if (!safe.ok) throw new Error(`attachment: ${safe.message}`);
-      const abs = `/workspace/${safe.relPath}`;
-      const dir = abs.slice(0, abs.lastIndexOf("/"));
-      await execInBox(runCfg, box, `mkdir -p ${shellQuote(dir)} && base64 -d > ${shellQuote(abs)}`, { input: a.base64.replace(/^data:[^,]*,/, "") });
-    }
-
-    // Provider env (sourced by every turn, so resumes keep it), outside /workspace and mode 600,
-    // so it never lands in a diff or a checkpoint.
-    if (plan.provider) {
-      const body = providerEnvFile(providerEnv(plan.provider, plan.model));
-      await execInBox(runCfg, box, `umask 077 && cat > ${PROVIDER_ENV_PATH}`, { input: body });
-    }
-
-    // Staging is transient (already copied into the box). Clean it; refill pool on claim.
-    if (sessionRoot) void cleanupStaging(runCfg, sessionRoot);
-    if (warm) void refillPool(cfg);
-
-    // Launch the agent DETACHED (the run keeps going in the box regardless), then BLOCK here until
-    // it reaches an interactive boundary (asks a question / finishes) or the wait times out. The
-    // open MCP call is the "listener" — this is what makes the calling agent wait for the box
-    // instead of ending its turn. A timeout returns "still working, reconnect via status".
-    // A harness run installs exactly its skills (src/harness.ts); set before the install below.
-    if (plan.skills) setBoxSkillSelection(box, plan.skills);
-    // Repo setup (src/setup-profile.ts): warm install from a known profile, or detect one from the
-    // repo's files; either way the agent's system prompt carries it. Best-effort — setup trouble
-    // never blocks the run.
-    let layout: RepoLayout[] = plan.repos;
-    let setupDetected: Record<string, SetupProfile> | undefined;
-    if (plan.setup && plan.repos.length) {
-      const r = await prepareRepoSetup(runCfg, box, plan.repos, plan.setup);
-      layout = r.layout;
-      if (Object.keys(r.detected).length) setupDetected = r.detected;
-      mark("setup");
-    }
-    // Harness rules ride beside the task (system prompt), never inside it — see DelegatePlan.rules.
-    await runAgentTask(runCfg, box, plan.task, layout, runCreds, plan.model, plan.agent, plan.rules, plan.secrets);
-    mark("launch");
-    console.error(`[timing] delegate ${box} warm=${warm} total=${Date.now() - t0}ms ${marks.join(" ")}`);
-    const extra = setupDetected ? { setupDetected } : {};
-    // A detached caller (the dashboard) needs only the box name — its thread view attaches over
-    // SSE. Blocking its HTTP response on the wait window added ~50s of perceived start latency.
-    if (interact?.detach) return { box, warm, output: "run:started — attach via status/watch", ...extra };
-    const output = await driveInteractive(runCfg, box, interact);
-    return { box, warm, output, ...extra };
   },
 
   async status(cfg, session, interact) {
+    cfg = cfgForBox(cfg, session);
     // status reconnects and drives the SAME interactive loop: on a client that can elicit, calling
     // status resumes the ask→answer→continue conversation; otherwise it blocks to the next boundary
     // and returns it. A quick box-level line is prefixed for context (running/stopped/gone).
@@ -604,6 +526,7 @@ export const deps: HandlerDeps = {
   },
 
   async resume(cfg, session, message, secrets, interact, model) {
+    cfg = cfgForBox(cfg, session);
     if (!(await boxExists(cfg, session))) return GONE(session);
     // If a GitHub token is supplied here, probe + store it (login-keyed) so it's reusable later; it's
     // also injected ephemerally for this step via secrets. Best-effort capture (never breaks resume).
@@ -644,12 +567,14 @@ export const deps: HandlerDeps = {
   },
 
   async rewind(cfg, session) {
+    cfg = cfgForBox(cfg, session);
     if (!(await boxExists(cfg, session))) return GONE(session);
     await rewindToAskSnapshot(msbIo(cfg), session, rewindRunFlags(cfg));
     return `Rewound session=${session} to the state it asked its last captured question from. Resume it with the new answer.`;
   },
 
   async resumeDetached(cfg, session, message, secrets, model) {
+    cfg = cfgForBox(cfg, session);
     // Same as `resume` minus the blocking wait for the next boundary: the dashboard streams the
     // transcript live, so it only needs the run to be kicked off. Returns as soon as claude is
     // started in the box (a few seconds: wake if asleep, inject creds, exec).
@@ -658,22 +583,28 @@ export const deps: HandlerDeps = {
     await resumeAgentTask(cfg, session, message, undefined, secrets, creds, model);
   },
   async teardown(cfg, session) {
+    cfg = cfgForBox(cfg, session);
     await msbTeardown(cfg, session, stagingPathFor(cfg, session));
+    hostPool()?.forgetBox(session);
   },
 
   async poolStatus(cfg, opts) {
-    return poolStatusText(await poolStatus(cfg), opts?.names ?? true);
+    const parts = await Promise.all(warmCfgs(cfg).map((c) => poolStatus(c)));
+    const merged = parts.length === 1 ? parts[0] : { size: parts.reduce((n, p) => n + p.size, 0), available: parts.reduce((n, p) => n + p.available, 0), boxes: parts.flatMap((p) => p.boxes), enabled: parts.some((p) => p.enabled) };
+    return poolStatusText(merged, opts?.names ?? true);
   },
 
   async monitor(cfg) {
-    return formatMonitor(await gatherMonitor(cfg));
+    return formatMonitor(await sweepBoxes(cfg));
   },
 
   async watch(cfg, session, lines) {
+    cfg = cfgForBox(cfg, session);
     return formatWatch(await gatherWatch(cfg, session, lines));
   },
 
   async ask(cfg, session, question, newThread) {
+    cfg = cfgForBox(cfg, session);
     if (!(await boxExists(cfg, session))) return GONE(session);
     // The co-pilot lane: a separate read-only Claude run in the same box. Deliberately does NOT go
     // through driveInteractive — that loop is the DRIVER's turn-taking, and touching it here would
@@ -690,6 +621,7 @@ export const deps: HandlerDeps = {
   },
 
   async verify(cfg, session, plan) {
+    cfg = cfgForBox(cfg, session);
     if (!(await boxExists(cfg, session))) {
       return { mode: plan.mode, pass: false, detail: `could not verify: no sandbox exists for session '${session}'` };
     }
@@ -768,6 +700,132 @@ export const deps: HandlerDeps = {
     return `Stored GitHub account '${acc.login}' (${acc.type}).${orgs}${repoNote} It will be used automatically for repos it can access.`;
   },
 };
+
+/** The delegation on its chosen host; `releaseSlot` is called once the box holds the slot itself. */
+async function runOnHost(runCfg: Config, cfg: Config, plan: DelegatePlan, allowDomains: string[] | undefined, creds: AgentCreds | undefined, interact: Interact | undefined, releaseSlot: () => void): Promise<DelegationResult> {
+
+  const id = newSessionId();
+  // Phase timings for start-latency work: one [timing] line per delegation, ms per phase.
+  const t0 = Date.now();
+  const marks: string[] = [];
+  let last = t0;
+  const mark = (label: string) => {
+    const now = Date.now();
+    marks.push(`${label}=${now - last}ms`);
+    last = now;
+  };
+
+  // `creds` (owner->token/login) was resolved by the handler via resolveGitAccess (both sources).
+  // Used to CLONE private repos and for the in-box per-owner git credentials, per-repo identity,
+  // and `gh` CLI. No default account: if an owner didn't resolve, there's simply no token for it.
+
+  // 1. Stage every repo into <sessionRoot>/<name> — rsync (local) or fresh git clone (remote).
+  //    The whole session root is then copied into /workspace, so each repo -> /workspace/<name>.
+  //    Also build name->owner so identity can be set per-repo dir in the box.
+  //    TASK-ONLY (no repos): nothing is staged; the box boots with an empty /workspace and the
+  //    agent just works on the task (e.g. "write a detailed report about X").
+  const hasRepos = plan.repos.length > 0;
+  const sessionRoot = hasRepos ? stagingPathFor(runCfg, id) : undefined;
+  const repoOwners: Record<string, string> = {};
+  try {
+    for (const r of plan.repos) {
+      const dest = repoStagingPath(runCfg, id, r.name);
+      if (plan.source === "git") {
+        const owner = ownerOf(r.repo);
+        if (owner) repoOwners[r.name] = owner;
+        // Clone with the owner's access-resolved token (private repos). No default fallback: a repo
+        // that reached here without a token means resolution deemed it public/accessible.
+        const token = owner ? creds?.ownerTokens?.[owner] : undefined;
+        await cloneRepoInStaging({ ...runCfg, ghToken: token }, r.repo, r.ref, id, dest);
+        // Uncommitted work from the caller's machine rides in as a diff over the fresh checkout.
+        // A patch that doesn't apply aborts the delegation — never start a box on a half-applied tree.
+        if (r.patch) await applyPatchInStaging(runCfg, dest, r.patch);
+      } else {
+        await syncTreeToVps(runCfg, r.repo, id, dest);
+        // For local, derive the owner from the working tree's origin remote (best-effort).
+        const on = await localRepoOwnerName(r.repo);
+        const owner = on ? ownerOf(on) : undefined;
+        if (owner) repoOwners[r.name] = owner;
+      }
+    }
+  } catch (e) {
+    // Staging failed mid-way (bad patch, clone error): what was already cloned/synced would
+    // otherwise sit on the host forever — a full checkout of a private repo per failed attempt.
+    if (sessionRoot) void cleanupStaging(runCfg, sessionRoot);
+    throw e;
+  }
+  mark("stage");
+  // Thread the name->owner map so applyGitCredentials can set per-repo identity.
+  const runCreds: AgentCreds | undefined = creds ? { ...creds, repoOwners } : undefined;
+
+  // 2. A restricted-egress delegation must not reuse an open-egress pooled box. The pool carries
+  // both flavors now; a delegation is only eligible for (and only claims) its own agent's boxes.
+  const poolAgent: "claude" | "omp" = plan.agent === "omp" ? "omp" : "claude";
+  const eligible =
+    poolAgent === "omp"
+      ? ompPoolEligible(cfg, !!allowDomains?.length)
+      : poolEligible(runCfg, !!allowDomains?.length);
+  // A warm box belongs to one owner: this run takes its owner's box (or a blank one), never
+  // another person's. Starting a task also marks the owner as around, so the reseed below
+  // prepares their next box. The controller's own canary is nobody's presence.
+  const boxOwner = ownerKey();
+  if (!isCanaryTask(plan.task)) {
+    noteOwnerActive(cfg, boxOwner);
+    noteOwnerAgent(boxOwner, poolAgent);
+  }
+  const { box, warm } = await acquireBox(runCfg, id, sessionRoot, eligible, poolAgent, boxOwner);
+  mark("acquire");
+  if (runCfg.hostId) hostPool()?.rememberBox(box, runCfg.hostId);
+  releaseSlot();
+
+  // Operator attachments (pasted screenshots) land in the box before the agent's first tool call.
+  for (const a of plan.attachments ?? []) {
+    const safe = safeWorkspacePath(a.path);
+    if (!safe.ok) throw new Error(`attachment: ${safe.message}`);
+    const abs = `/workspace/${safe.relPath}`;
+    const dir = abs.slice(0, abs.lastIndexOf("/"));
+    await execInBox(runCfg, box, `mkdir -p ${shellQuote(dir)} && base64 -d > ${shellQuote(abs)}`, { input: a.base64.replace(/^data:[^,]*,/, "") });
+  }
+
+  // Provider env (sourced by every turn, so resumes keep it), outside /workspace and mode 600,
+  // so it never lands in a diff or a checkpoint.
+  if (plan.provider) {
+    const body = providerEnvFile(providerEnv(plan.provider, plan.model));
+    await execInBox(runCfg, box, `umask 077 && cat > ${PROVIDER_ENV_PATH}`, { input: body });
+  }
+
+  // Staging is transient (already copied into the box). Clean it; refill pool on claim.
+  if (sessionRoot) void cleanupStaging(runCfg, sessionRoot);
+  if (warm) void refillPool(cfg);
+
+  // Launch the agent DETACHED (the run keeps going in the box regardless), then BLOCK here until
+  // it reaches an interactive boundary (asks a question / finishes) or the wait times out. The
+  // open MCP call is the "listener" — this is what makes the calling agent wait for the box
+  // instead of ending its turn. A timeout returns "still working, reconnect via status".
+  // A harness run installs exactly its skills (src/harness.ts); set before the install below.
+  if (plan.skills) setBoxSkillSelection(box, plan.skills);
+  // Repo setup (src/setup-profile.ts): warm install from a known profile, or detect one from the
+  // repo's files; either way the agent's system prompt carries it. Best-effort — setup trouble
+  // never blocks the run.
+  let layout: RepoLayout[] = plan.repos;
+  let setupDetected: Record<string, SetupProfile> | undefined;
+  if (plan.setup && plan.repos.length) {
+    const r = await prepareRepoSetup(runCfg, box, plan.repos, plan.setup);
+    layout = r.layout;
+    if (Object.keys(r.detected).length) setupDetected = r.detected;
+    mark("setup");
+  }
+  // Harness rules ride beside the task (system prompt), never inside it — see DelegatePlan.rules.
+  await runAgentTask(runCfg, box, plan.task, layout, runCreds, plan.model, plan.agent, plan.rules, plan.secrets);
+  mark("launch");
+  console.error(`[timing] delegate ${box} warm=${warm} total=${Date.now() - t0}ms ${marks.join(" ")}`);
+  const extra = setupDetected ? { setupDetected } : {};
+  // A detached caller (the dashboard) needs only the box name — its thread view attaches over
+  // SSE. Blocking its HTTP response on the wait window added ~50s of perceived start latency.
+  if (interact?.detach) return { box, warm, output: "run:started — attach via status/watch", ...extra };
+  const output = await driveInteractive(runCfg, box, interact);
+  return { box, warm, output, ...extra };
+}
 
 /**
  * The pool_status text. Box names only with `names`: the MCP tool reaches every user, and an

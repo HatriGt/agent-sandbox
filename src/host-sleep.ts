@@ -82,8 +82,11 @@ export function makeHostSleep(afterMs: number, opts: { now?: () => number; log?:
   };
 }
 
-// One controller, one host: the launch paths in msb.ts and the loops in http.ts share this.
+// Each box host has its own instance (src/host-pool.ts). The launch paths in msb.ts and the refill
+// in pool.ts hold a Config bound to a host, so they ask for THAT host's sleep; before the pool is
+// configured (CLI tools, tests) the one shared instance answers for every config.
 let shared: HostSleep = makeHostSleep(0);
+let resolver: (cfg: { hostId?: string }) => HostSleep = () => shared;
 
 /** Install the configured instance (http.ts, at boot). Before that, nothing sleeps. */
 export function configureHostSleep(sleep: HostSleep): HostSleep {
@@ -93,4 +96,14 @@ export function configureHostSleep(sleep: HostSleep): HostSleep {
 
 export function hostSleep(): HostSleep {
   return shared;
+}
+
+/** The pool installs this so `sleepFor` answers per host. */
+export function registerSleepResolver(r: ((cfg: { hostId?: string }) => HostSleep) | null): void {
+  resolver = r ?? (() => shared);
+}
+
+/** The sleep state of the host a Config is bound to. */
+export function sleepFor(cfg: { hostId?: string }): HostSleep {
+  return resolver(cfg);
 }

@@ -44,7 +44,7 @@ export interface FleetSnapshot {
   lifecycle: FleetLifecycle;
   /** Server time (ms) the sweep completed — lets the client compute honest freshness. */
   at: number;
-  /** The host is being left asleep (src/host-sleep.ts): this is the last sweep, not a fresh one. */
+  /** Every host is being left asleep (src/host-sleep.ts): this is the last sweep, not a fresh one. */
   hostAsleep?: boolean;
 }
 
@@ -128,6 +128,8 @@ export function makeFleetReader(
     sweepTtlMs?: number;
     /** Host sleep (src/host-sleep.ts): while asleep the last snapshot is served and no sweep runs. */
     sleep?: { asleep(): boolean; noteFleet(boxes: readonly BoxView[]): void };
+    /** Slots across every box host (src/host-pool.ts), read per snapshot so an added host shows at once. */
+    capacity?: () => number;
   } = {}
 ): () => Promise<FleetSnapshot> {
   const ttl = opts.ttlMs ?? 1500;
@@ -188,7 +190,7 @@ export function makeFleetReader(
         const merged = mergeWithMemory(boxes, memory);
         persist(boxes);
         if (opts.store) for (const name of before) if (!memory.has(name)) void opts.store.forget(name).catch(() => {});
-        cached = { boxes: opts.decorate ? opts.decorate(merged) : merged, lifecycle, at: now() };
+        cached = { boxes: opts.decorate ? opts.decorate(merged) : merged, lifecycle: opts.capacity ? { ...lifecycle, capacity: opts.capacity() } : lifecycle, at: now() };
         opts.sleep?.noteFleet(boxes);
         return cached;
       })

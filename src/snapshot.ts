@@ -208,7 +208,7 @@ export async function dropAskSnapshot(io: SnapshotIo, box: string): Promise<void
  */
 export function rewindRunFlags(cfg: Config): string[] {
   const egress = cfg.egressAllowAll
-    ? ["--net", "public", ...hostGuardFlags()]
-    : [...hostGuardFlags(), "--net-default-egress", "deny", "--net-rule", "allow@dns", ...cfg.egressDomains.flatMap((d) => ["--net-rule", `allow@${d}:tcp:443`])];
+    ? ["--net", "public", ...hostGuardFlags(cfg)]
+    : [...hostGuardFlags(cfg), "--net-default-egress", "deny", "--net-rule", "allow@dns", ...cfg.egressDomains.flatMap((d) => ["--net-rule", `allow@${d}:tcp:443`])];
   return ["-m", cfg.memory, "--max-memory", cfg.memory, ...egress, "--idle-timeout", cfg.idleTimeout, "--max-duration", cfg.maxDuration, "--pull", "never"];
 }

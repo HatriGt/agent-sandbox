@@ -49,6 +49,8 @@ export interface BoxView {
    * the box's memory cap.
    */
   memUsage?: Usage;
+  /** The box host this machine runs on (src/host-pool.ts host id); absent before the first sweep. */
+  host?: string;
   /** Which coding agent this thread runs on ("claude" | "omp"), from the box's .agent.kind mark. */
   agent?: string;
   /** Unix seconds of the agent log's last write — when the agent last produced output. Best-effort. */

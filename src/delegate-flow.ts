@@ -126,11 +126,12 @@ export async function runDelegateFlow(
   console.error(`[timing] flow access=${tAccess - tFlow}ms capacity=${Date.now() - tAccess}ms`);
   // reserveBox counts concurrent delegations that have passed this check but not yet booted, so a
   // parallel fan-out cannot overshoot MSB_MAX_BOXES between the count and the boot.
-  const release = reserveBox(live, cfg.maxBoxes);
+  const capacity = deps.capacity?.(cfg) ?? cfg.maxBoxes;
+  const release = reserveBox(live, capacity);
   if (!release) {
     return {
       ok: false,
-      question: `Refused: ${live}/${cfg.maxBoxes} boxes already running or starting. Tear one down or raise MSB_MAX_BOXES.`,
+      question: `Refused: ${live}/${capacity} boxes already running or starting. Tear one down or raise MSB_MAX_BOXES.`,
     };
   }
 

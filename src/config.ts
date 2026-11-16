@@ -9,6 +9,8 @@ import { readImageOverride, resolveImage } from "./image-update.js";
 
 export interface Config {
   /** SSH target the client uses to reach the VPS for rsync (user@host or ssh alias). */
+  /** The host this config is bound to (src/host-pool.ts); unset = the primary host from .env. */
+  hostId?: string;
   vpsSsh: string;
   /** Base dir on the VPS where each delegation's working tree is staged before --copy-dir. */
   vpsStagingDir: string;

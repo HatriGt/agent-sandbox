@@ -16,7 +16,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isDeadSession } from "./mcp-session.js";
 import { loadDotEnv } from "./dotenv.js";
-import { configuredImage, loadConfig } from "./config.js";
+import { configuredImage, loadConfig, type Config } from "./config.js";
 import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
 import { deps as rawDeps, resolveCredsForBox, detectSetupInBox } from "./deps.js";
@@ -42,7 +42,9 @@ import { detectTransitions, formatNotification, makeNotifier, shouldNotify, togg
 import { StartFailureStreak, isStartFailure, logTail, startFailureAlertText } from "./run-health.js";
 import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, type CanaryResult } from "./canary.js";
 import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-disk.js";
-import { configureHostSleep, makeHostSleep } from "./host-sleep.js";
+import { configureHostPool, makeHostPool } from "./host-pool.js";
+import { sweepHosts } from "./host-sweep.js";
+import { countBoxes as countBoxesOnHost } from "./msb.js";
 import { BAKED_MCP_PACKAGES, BASE_PACKAGES, fetchLatestVersions, imageChanges, packageNameOf, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
 import { clearImageOverride, makeImageUpdater, planImageUpdate, writeImageOverride } from "./image-update.js";
 import { browserFastMissed, browserFastSh, browserStubScript, makeBoxQueue, moliInstallSh, parseBrowserAction, parseBrowserReply } from "./browser.js";
@@ -142,10 +144,6 @@ import { fileURLToPath } from "node:url";
 
 loadDotEnv();
 const cfg = loadConfig();
-// Host sleep (src/host-sleep.ts): the timed loops below ask it before touching the host, and the
-// launch paths in msb.ts wake it. Off (HOST_SLEEP_AFTER_MS unset) it never says asleep.
-const hostSleep = configureHostSleep(makeHostSleep(cfg.hostSleepAfterMs, { log: (m) => console.error(m) }));
-if (hostSleep.enabled) console.error(`[host-sleep] on: the host is left to pause after ${Math.round(cfg.hostSleepAfterMs / 60_000)}m without an agent working`);
 
 if (!cfg.httpToken) {
   console.error(
@@ -157,6 +155,32 @@ if (!cfg.httpToken) {
 // The controller's own state (users, sessions, API keys, box ownership, audit). Opened in both modes:
 // in "token" mode it only receives audit rows and ownership records for the operator.
 const db = openDb(cfg.dataDir);
+// The box hosts (src/host-pool.ts): the .env host plus any added from the dashboard. Every
+// box-scoped call below goes through hcfg(box) so it lands on the host the box lives on; the timed
+// loops ask the pool before touching a host, and each host has its own sleep clock.
+const hostPool = configureHostPool(
+  makeHostPool(cfg, db, {
+    log: (m) => console.error(m),
+    probe: async (c) => {
+      const [live, disk] = await Promise.all([countBoxesOnHost(c), hostDisk(c).catch(() => undefined)]);
+      return `${live} live box(es)${disk ? `, disk ${disk.usedPct}% used` : ""}`;
+    },
+  })
+);
+const hcfg = (box: string): Config => hostPool.cfgForBox(box);
+// The primary host's sleep clock, for the health payload and the loops that go quiet when every host does.
+const hostSleep = {
+  get enabled() {
+    return hostPool.primary().sleep.enabled;
+  },
+  asleep: () => hostPool.allAsleep(),
+  state: () => hostPool.primary().sleep.state(),
+};
+if (hostSleep.enabled) console.error(`[host-sleep] on: the host is left to pause after ${Math.round(cfg.hostSleepAfterMs / 60_000)}m without an agent working`);
+{
+  const n = hostPool.hosts().length;
+  if (n > 1) console.error(`[hosts] ${n} box hosts: ${hostPool.state().map((h) => `${h.id} (${h.provider}, priority ${h.priority}${h.enabled ? "" : ", disabled"})`).join(", ")}`);
+}
 // Integrations (GitHub accounts, MCP servers) are per owner and encrypted at rest from here on. The
 // operator's row is seeded from the legacy shared files on first read.
 const secretBox = makeSecretBox(keyFromEnvOrFile(process.env.SECRETS_KEY, cfg.dataDir));
@@ -424,7 +448,7 @@ const boxRepoCache = new Map<string, Promise<string[]>>();
 const reposOfBox = (box: string): Promise<string[]> => {
   let p = boxRepoCache.get(box);
   if (!p) {
-    p = boxRepoSlugs(cfg, box).catch(() => {
+    p = boxRepoSlugs(hcfg(box), box).catch(() => {
       boxRepoCache.delete(box);
       return [];
     });
@@ -440,9 +464,9 @@ const withMemoryNew = (snap: WatchSnapshot, box: string): WatchSnapshot => {
   return memoryNew ? { ...snap, memoryNew } : snap;
 };
 const watchHub = new WatchHub({
-  read: async (s) => withMemoryNew(redactSnap(await gatherWatch(cfg, s, undefined, { metrics: false })), s),
+  read: async (s) => withMemoryNew(redactSnap(await gatherWatch(hcfg(s), s, undefined, { metrics: false })), s),
   // The live thread's first frame of a long run: the whole log, not the tail window (readFull).
-  readLog: async (s) => redactor.redact(await readAgentLogFull(cfg, s)),
+  readLog: async (s) => redactor.redact(await readAgentLogFull(hcfg(s), s)),
 });
 // The dashboard's fleet read: gatherMonitor behind a short shared cache, plus lifecycle config and
 // sleeping (Stopped-but-resumable) boxes merged from memory.
@@ -579,8 +603,8 @@ const resumeQuietly = (session: string, message: string, extraSecrets?: Record<s
       const secrets = await grantedSecretsOf(session, extraSecrets);
       return await withOwner(ownerOf(db, session) ?? null, () =>
         rawResumeDetached
-          ? rawResumeDetached(cfg, session, message, secrets, boxModels.get(session))
-          : rawResume(cfg, session, message, secrets, {}, boxModels.get(session)).then(() => undefined)
+          ? rawResumeDetached(hcfg(session), session, message, secrets, boxModels.get(session))
+          : rawResume(hcfg(session), session, message, secrets, {}, boxModels.get(session)).then(() => undefined)
       );
     } catch (e) {
       // The optimistic "running" note above was wrong — the resume never happened. Roll it back and
@@ -599,7 +623,7 @@ const captureBeforeMessage = async (box: string): Promise<void> => {
   if (!canRevert(snap.runState)) return; // mid-turn resume (queued send-now): no consistent point to capture
   // The turn number is computed in-box from the log itself (captureCmd), so a stale snapshot here
   // can no longer mislabel the tar; idempotent when the turn is already captured.
-  const r = await execInBox(cfg, box, captureCmd());
+  const r = await execInBox(hcfg(box), box, captureCmd());
   if (!/CKPT_(OK|HAVE)/.test(r.stdout)) console.error(`[ckpt] pre-message capture on ${box}: ${r.stdout.trim().slice(-200)}`);
 };
 verifyRetrier = makeVerifyRetrier({ resume: resumeQuietly, log: (m) => console.error(m) });
@@ -613,7 +637,7 @@ startInboxDelivery({
   inbox,
   read: (s) => watchHub.read(s),
   resume: resumeQuietly,
-  delivered: (s) => takeDeliveredInbox(cfg, s),
+  delivered: (s) => takeDeliveredInbox(hcfg(s), s),
   log: (m) => console.error(m),
 });
 // Credential broker: a box that pauses to ask for GitHub auth is resumed with the stored account.
@@ -819,7 +843,7 @@ const collectRepoSetup = async (box: string, owner: string): Promise<Array<{ nam
   const agent = sentinel ? parseSentinel(sentinel.trim(), repos.map((x) => x.name)) : {};
   for (const { name, slug } of repos) {
     const existing = getSetup(db, owner, slug);
-    const detected = !existing && !agent[name] ? await detectSetupInBox(cfg, box, `/workspace/${name}`) : undefined;
+    const detected = !existing && !agent[name] ? await detectSetupInBox(hcfg(box), box, `/workspace/${name}`) : undefined;
     const saved = recordLearned(db, owner, slug, { agent: agent[name], detected });
     if (saved) console.error(`[setup] ${box}: learned ${slug} (${saved.confirmedBy})`);
   }
@@ -963,10 +987,10 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet
   // and would land in history as phantom completed runs the user never started.
   if (snap.runState !== "done") return;
   const up = /^running$/i.test(snap.boxStatus);
-  const files = opts.withFiles && up ? await listChanges(cfg, box).catch(() => []) : [];
+  const files = opts.withFiles && up ? await listChanges(hcfg(box), box).catch(() => []) : [];
   // Full workspace diff, captured NOW because this is the last moment the box can answer: after
   // teardown a run's only reviewable diff is this row. Redacted like everything box-produced.
-  const diffText = opts.withFiles && up ? await readFullDiff(cfg, box).then((d) => redactor.redact(d)).catch(() => "") : "";
+  const diffText = opts.withFiles && up ? await readFullDiff(hcfg(box), box).then((d) => redactor.redact(d)).catch(() => "") : "";
   const events = parseTrace(snap.log ?? "");
   const digest = buildDigest({
     box,
@@ -1028,12 +1052,12 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet
   // sleep TTL. Last, so the archive, memory, chains and follow-ups above have read what they need.
   // A box the operator pinned (Keep) stays; a listing failure keeps it too (fail safe).
   if (fin.destroy && opts.withFiles) {
-    const kept = await listKept(cfg).catch(() => null);
+    const kept = await listKept(hcfg(box)).catch(() => null);
     if (kept && !kept.has(box)) {
       await deps
-        .teardown(cfg, box)
+        .teardown(hcfg(box), box)
         .then(() => {
-          void forgetTitle(cfg, box).catch(() => {});
+          void forgetTitle(hcfg(box), box).catch(() => {});
           console.error(`[triggers] ${box}: destroyed on finish (automation box policy)`);
         })
         .catch((e) => console.error(`[triggers] ${box}: destroy on finish failed: ${(e as Error).message.slice(0, 200)}`));
@@ -1049,7 +1073,7 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet
 const captureTurnCheckpoint = (box: string): Promise<void> =>
   withBoxLock(box, async () => {
     try {
-      const r = await execInBox(cfg, box, captureCmd());
+      const r = await execInBox(hcfg(box), box, captureCmd());
       if (!/CKPT_(OK|HAVE)/.test(r.stdout)) console.error(`[ckpt] capture on ${box}: ${r.stdout.trim().slice(-200)}`);
     } catch (e) {
       console.error(`[ckpt] capture on ${box} errored: ${(e as Error).message.slice(0, 200)}`);
@@ -1075,13 +1099,13 @@ const maybePark = (boxes: Array<{ name: string; runState?: string; boxStatus?: s
       !parkInFlight.has(b.name)
     ) {
       parkInFlight.add(b.name);
-      void parkWaitingBox(msbIo(cfg), b.name)
+      void parkWaitingBox(msbIo(hcfg(b.name)), b.name)
         .then(async (ok) => {
           if (!ok) return;
           noteStopped(b.name); // stop readers from exec-booting the box we just stopped
           waitingSince.delete(b.name);
-          await markParked(cfg, b.name).catch(() => {});
-          await touchClaimed(cfg, b.name).catch(() => {}); // park clock counts from the park
+          await markParked(hcfg(b.name), b.name).catch(() => {});
+          await touchClaimed(hcfg(b.name), b.name).catch(() => {}); // park clock counts from the park
         })
         .catch(() => {})
         .finally(() => parkInFlight.delete(b.name));
@@ -1125,18 +1149,13 @@ const harnessLineOf = (box: string): { harness: { id: string; name: string; line
 const readFleet = makeFleetReader(
   cfg,
   async () => {
-    const [boxes, kept, claims, titles] = await Promise.all([
-      gatherMonitor(cfg),
-      listKept(cfg).catch(() => new Set<string>()),
-      listClaims(cfg).catch(() => new Map<string, number>()),
-      loadTitles(cfg).catch(() => ({}) as Record<string, string>),
-    ]);
+    const { boxes, kept, claims, titles } = await sweepHosts(cfg);
     // A box seen Running last sweep and Stopped now just fell asleep: re-stamp its claim so the sleep
     // TTL (and the "asleep for" figure) count from the nap rather than from when the run started.
     for (const b of boxes) {
       const was = lastSeenStatus.get(b.name);
       const runningNow = /^running$/i.test(b.boxStatus);
-      if (was === true && !runningNow && claims.has(b.name)) void touchClaimed(cfg, b.name).catch(() => {});
+      if (was === true && !runningNow && claims.has(b.name)) void touchClaimed(hcfg(b.name), b.name).catch(() => {});
       lastSeenStatus.set(b.name, runningNow);
     }
     for (const k of [...lastSeenStatus.keys()]) if (!boxes.some((b) => b.name === k)) lastSeenStatus.delete(k);
@@ -1204,7 +1223,7 @@ const readFleet = makeFleetReader(
           if (vplan && ev.kind === "done" && (ev.exitCode ?? 0) === 0 && deps.verify) {
             const runState = nextRunViews.find((b) => b.name === ev.box)?.runState ?? "done";
             void deps
-              .verify(cfg, ev.box, vplan)
+              .verify(hcfg(ev.box), ev.box, vplan)
               .then((r) => boxVerified.set(ev.box, r))
               .catch(() => {})
               // Done means verified: a failed check with retry budget left sends the run back with the
@@ -1259,11 +1278,21 @@ const readFleet = makeFleetReader(
       const q = inbox.list(b.name);
       return q.length ? { ...b, queued: q.map((m) => m.text) } : b;
     }),
-    sleep: hostSleep,
+    sleep: { asleep: () => hostPool.allAsleep(), noteFleet: () => {} },
+    capacity: () => hostPool.capacity(),
     store: {
-      load: () => loadRunMetas(cfg),
-      save: (meta) => saveRunMeta(cfg, meta as Parameters<typeof saveRunMeta>[1]),
-      forget: (box) => forgetRunMeta(cfg, box),
+      // Each host keeps the memory of its own boxes; the load merges every enabled host's.
+      load: async () => {
+        const out = new Map<string, Awaited<ReturnType<typeof loadRunMetas>> extends Map<string, infer V> ? V : never>();
+        await Promise.all(
+          hostPool.enabled().map(async (h) => {
+            for (const [k, v] of await loadRunMetas(h.cfg).catch(() => new Map())) out.set(k, v);
+          })
+        );
+        return out;
+      },
+      save: (meta) => saveRunMeta(hcfg(meta.name), meta as Parameters<typeof saveRunMeta>[1]),
+      forget: (box) => forgetRunMeta(hcfg(box), box),
     },
   }
 );
@@ -1301,7 +1330,7 @@ function withStoreLock<T>(kind: string, fn: () => Promise<T>): Promise<T> {
 }
 
 // `@` mentions: a briefly cached file index per box.
-const fileIndex = makeFileIndex(async (box, sh) => (await execInBox(cfg, box, sh)).stdout);
+const fileIndex = makeFileIndex(async (box, sh) => (await execInBox(hcfg(box), box, sh)).stdout);
 
 // Bearer guard on every /mcp method. Fails closed (checkBearer denies when no token).
 const authThrottle = makeAuthThrottle();
@@ -1853,7 +1882,7 @@ app.get("/fleet.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   // The dashboard polls this while it is open, so it doubles as "this person is here": their warm
   // box is prepared while they are still typing, not after they press send.
-  if (noteOwnerActive(cfg, ownerKey(principalOf(res)))) kickRefill(cfg);
+  if (noteOwnerActive(cfg, ownerKey(principalOf(res)))) for (const c of hostPool.warmCfgs()) kickRefill(c);
   try {
     const fleet = await readFleet();
     // Let the broker look at every waiting box (fire-and-forget; guarded once per question).
@@ -1888,7 +1917,7 @@ app.get("/watch.json", async (req: Request, res: Response) => {
   const lines = Number(req.query.lines);
   try {
     res.json(
-      Number.isInteger(lines) && lines > 0 && lines <= 5000 ? redactSnap(await gatherWatch(cfg, session, lines)) : await watchHub.read(session)
+      Number.isInteger(lines) && lines > 0 && lines <= 5000 ? redactSnap(await gatherWatch(hcfg(session), session, lines)) : await watchHub.read(session)
     );
   } catch (e) {
     failWith(res, e);
@@ -1948,7 +1977,7 @@ app.get("/artifact", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const result = await readArtifact(cfg, session, path);
+    const result = await readArtifact(hcfg(session), session, path);
     if ("error" in result) {
       // Map the confinement/read errors to sensible statuses. A bad path is a 400 (client error),
       // a missing file / torn-down box is 404, an oversize file is 413.
@@ -2002,10 +2031,10 @@ app.post("/ask.json", async (req: Request, res: Response) => {
   try {
     // Read-only gh needs GH_TOKEN in env (nothing persists in the box) — resolve the box owner's
     // default account so `gh pr checks` etc. work in the ask lane too. Best-effort.
-    const creds = await withOwner(ownerOf(db, session) ?? null, () => resolveCredsForBox(cfg, session)).catch(() => undefined);
+    const creds = await withOwner(ownerOf(db, session) ?? null, () => resolveCredsForBox(hcfg(session), session)).catch(() => undefined);
     const [result, driverState] = await Promise.all([
-      askInBox(cfg, session, question, { newThread: !!newThread, ghToken: creds?.primaryToken }),
-      driverStateLine(cfg, session),
+      askInBox(hcfg(session), session, question, { newThread: !!newThread, ghToken: creds?.primaryToken }),
+      driverStateLine(hcfg(session), session),
     ]);
     res.json({ ...result, ...("answer" in result && typeof result.answer === "string" ? { answer: redactor.redact(result.answer) } : {}), driverState: driverState ? redactor.redact(driverState) : driverState });
   } catch (e) {
@@ -2066,7 +2095,7 @@ app.post("/resume.json", async (req: Request, res: Response) => {
         // Mirror it into the box: the gate delivers it at the agent's next tool call, inside the
         // turn (src/drivers/inbox-gate.ts). Best-effort — turn-end delivery is the fallback. Never a
         // /compact: compacting is its own turn, after this one ends.
-        if (!behindCompact) mirrorInboxMessage(cfg, session, q).catch((e) => console.error(`[inbox] mirror to ${session} failed: ${(e as Error).message}`));
+        if (!behindCompact) mirrorInboxMessage(hcfg(session), session, q).catch((e) => console.error(`[inbox] mirror to ${session} failed: ${(e as Error).message}`));
         res.json({ queued: true, id: q.id, delivery: behindCompact ? "turn-end" : "next-step" });
         return;
       }
@@ -2117,7 +2146,7 @@ app.post("/send-now.json", async (req: Request, res: Response) => {
   }
   inbox.remove(session, id);
   try {
-    await withOwner(ownerOf(db, session) ?? null, () => interruptAgentRun(cfg, session));
+    await withOwner(ownerOf(db, session) ?? null, () => interruptAgentRun(hcfg(session), session));
     await resumeQuietly(session, msg.text);
     res.json({ ok: true, queued: inbox.list(session) });
   } catch (e) {
@@ -2137,7 +2166,7 @@ app.post("/interrupt.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const stopped = await withOwner(ownerOf(db, session) ?? null, () => interruptAgentRun(cfg, session, "to stop the watch"));
+    const stopped = await withOwner(ownerOf(db, session) ?? null, () => interruptAgentRun(hcfg(session), session, "to stop the watch"));
     res.json({ ok: true, stopped });
   } catch (e) {
     failWith(res, e);
@@ -2282,7 +2311,7 @@ app.post("/repos/attach.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const r = await attachRepoToBox(cfg, session, repo.trim(), ref?.trim() || undefined);
+    const r = await attachRepoToBox(hcfg(session), session, repo.trim(), ref?.trim() || undefined);
     inbox.enqueue(session, `The repository ${repo.trim()} is now checked out at /workspace/${r.name}${ref ? ` (ref ${ref})` : ""}. Use it for the task where relevant.`);
     res.json({ ok: true, name: r.name, login: r.login });
   } catch (e) {
@@ -2723,7 +2752,7 @@ app.post("/agent-prefs.json", (req: Request, res: Response) => {
     forgetOwnerAgent(ownerKey(p));
     // The pool follows this setting (only the picked agent's flavor stays warm) — reconcile now
     // instead of waiting for the maintainer tick, so the first task after switching is warm too.
-    void refillPool(cfg);
+    for (const c of hostPool.warmCfgs()) void refillPool(c);
     res.json({ ...prefs, agents: agentChoices() });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
@@ -3190,7 +3219,7 @@ app.get("/digest.json", async (req: Request, res: Response) => {
       return;
     }
     // A stopped box cannot answer listChanges (exec would boot it); the digest degrades to no files.
-    const files = /^running$/i.test(snap.boxStatus) ? await listChanges(cfg, session).catch(() => []) : [];
+    const files = /^running$/i.test(snap.boxStatus) ? await listChanges(hcfg(session), session).catch(() => []) : [];
     const digest = buildDigest({
       box: session,
       task: snap.task ?? "",
@@ -3293,7 +3322,7 @@ app.get("/changes.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    res.json({ files: await listChanges(cfg, session) });
+    res.json({ files: await listChanges(hcfg(session), session) });
   } catch (e) {
     failWith(res, e);
   }
@@ -3308,7 +3337,7 @@ app.get("/rundiff.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    res.json({ diff: redactor.redact(await readFullDiff(cfg, session)) });
+    res.json({ diff: redactor.redact(await readFullDiff(hcfg(session), session)) });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
   }
@@ -3323,7 +3352,7 @@ app.get("/diff.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const d = await readDiff(cfg, session, path);
+    const d = await readDiff(hcfg(session), session, path);
     res.json({ ...d, ...("diff" in d && typeof d.diff === "string" ? { diff: redactor.redact(d.diff) } : {}), ...("original" in d && typeof d.original === "string" ? { original: redactor.redact(d.original) } : {}) });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
@@ -3351,8 +3380,8 @@ app.post("/discard.json", async (req: Request, res: Response) => {
       res.status(409).json({ error: "The agent is mid-turn — wait for it to finish (or stop it) before discarding its changes." });
       return;
     }
-    const r = await withBoxLock(session, () => discardChange(cfg, session, path, hunk || undefined));
-    res.json({ ok: true, scope: r.scope, path, files: await listChanges(cfg, session).catch(() => []) });
+    const r = await withBoxLock(session, () => discardChange(hcfg(session), session, path, hunk || undefined));
+    res.json({ ok: true, scope: r.scope, path, files: await listChanges(hcfg(session), session).catch(() => []) });
   } catch (e) {
     const msg = clientError(e, 400);
     res.status(/invalid path|@@ header/.test(msg) ? 400 : 422).json({ error: msg });
@@ -3375,7 +3404,7 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
     // `gh` in the box has NO persisted auth (tokens are per-exec env only, by design), so the merge
     // must carry the owner's token the same way the ask lane does. Without it every merge failed
     // with "gh auth login required".
-    const creds = await withOwner(ownerOf(db, session) ?? null, () => resolveCredsForBox(cfg, session)).catch(() => undefined);
+    const creds = await withOwner(ownerOf(db, session) ?? null, () => resolveCredsForBox(hcfg(session), session)).catch(() => undefined);
     if (!creds?.primaryToken) {
       res.status(422).json({ error: "No GitHub account connected for this machine's owner — connect one in Integrations, then retry the merge." });
       return;
@@ -3390,7 +3419,7 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
     // policy. Only meaningful when the connected account actually has bypass rights; the UI keeps
     // it behind its own explicit confirm. --auto and --admin are mutually exclusive in gh.
     const extra = admin ? " --admin" : auto ? " --auto" : "";
-    const r = await execInBox(cfg, session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} ${methodFlag}${extra} 2>&1`, {
+    const r = await execInBox(hcfg(session), session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} ${methodFlag}${extra} 2>&1`, {
       secretEnv: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
     });
     forgetPull(repo, Number(number));
@@ -3418,12 +3447,12 @@ app.post("/pr/approve.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const creds = await withOwner(ownerOf(db, session) ?? null, () => resolveCredsForBox(cfg, session)).catch(() => undefined);
+    const creds = await withOwner(ownerOf(db, session) ?? null, () => resolveCredsForBox(hcfg(session), session)).catch(() => undefined);
     if (!creds?.primaryToken) {
       res.status(422).json({ error: "No GitHub account connected for this machine's owner — connect one in Integrations, then retry." });
       return;
     }
-    const r = await execInBox(cfg, session, `gh pr review ${Number(number)} --repo ${shellQuote(repo)} --approve 2>&1`, {
+    const r = await execInBox(hcfg(session), session, `gh pr review ${Number(number)} --repo ${shellQuote(repo)} --approve 2>&1`, {
       secretEnv: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
     });
     forgetPull(repo, Number(number));
@@ -3457,12 +3486,12 @@ async function runPrAction(req: Request, res: Response, build: (number: number, 
     return;
   }
   try {
-    const creds = await withOwner(ownerOf(db, session) ?? null, () => resolveCredsForBox(cfg, session)).catch(() => undefined);
+    const creds = await withOwner(ownerOf(db, session) ?? null, () => resolveCredsForBox(hcfg(session), session)).catch(() => undefined);
     if (!creds?.primaryToken) {
       res.status(422).json({ error: "No GitHub account connected for this machine's owner — connect one in Integrations, then retry." });
       return;
     }
-    const r = await execInBox(cfg, session, `gh pr ${built} 2>&1`, {
+    const r = await execInBox(hcfg(session), session, `gh pr ${built} 2>&1`, {
       secretEnv: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
     });
     forgetPull(repo, Number(number));
@@ -3567,8 +3596,8 @@ app.post("/keep.json", async (req: Request, res: Response) => {
       res.status(404).json({ error: "no such machine" });
       return;
     }
-    if (keep === false) await unmarkKept(cfg, session);
-    else await markKept(cfg, session);
+    if (keep === false) await unmarkKept(hcfg(session), session);
+    else await markKept(hcfg(session), session);
     res.json({ ok: true, kept: keep !== false });
   } catch (e) {
     failWith(res, e);
@@ -3608,7 +3637,7 @@ app.post("/title.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const existing = (await loadTitles(cfg))[session];
+    const existing = (await loadTitles(hcfg(session)))[session];
     if (existing) {
       res.json({ title: existing });
       return;
@@ -3618,7 +3647,7 @@ app.post("/title.json", async (req: Request, res: Response) => {
       res.json({});
       return;
     }
-    res.json({ title: await generateTitle(cfg, session, box.task) });
+    res.json({ title: await generateTitle(hcfg(session), session, box.task) });
   } catch (e) {
     failWith(res, e);
   }
@@ -3639,7 +3668,7 @@ app.post("/rename.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    await saveTitle(cfg, session, clean);
+    await saveTitle(hcfg(session), session, clean);
     res.json({ title: clean });
   } catch (e) {
     failWith(res, e);
@@ -3658,7 +3687,7 @@ app.post("/wake.json", async (req: Request, res: Response) => {
     // Waking a stopped machine is starting a machine: the trial gate applies here exactly as it
     // does to delegation and resume.
     ownership.assertCanRun();
-    const outcome = await startBoxIfStopped(cfg, session);
+    const outcome = await startBoxIfStopped(hcfg(session), session);
     // Report honestly. Answering `ok` for a box the runtime never started is indistinguishable
     // from a real wake, so the client sits on a progress card forever waiting for a boot that was
     // never asked for. 404 matches the shape a destroyed box already returns elsewhere.
@@ -3688,7 +3717,7 @@ app.post("/sleep.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    await stopBox(cfg, session);
+    await stopBox(hcfg(session), session);
     noteStopped(session);
     watchHub.drop(session); // the cached "running" snapshot must not be served as live
     res.json({ ok: true });
@@ -3717,7 +3746,7 @@ app.post("/memory.json", async (req: Request, res: Response) => {
   }
   try {
     ownership.assertCanRun(); // resize reboots the box back up — same gate as wake
-    await setBoxMemory(cfg, session, memory);
+    await setBoxMemory(hcfg(session), session, memory);
     noteRunning(session);
     watchHub.drop(session);
     res.json({ ok: true, memory });
@@ -3745,7 +3774,7 @@ app.post("/disk.json", async (req: Request, res: Response) => {
   }
   try {
     ownership.assertCanRun(); // resize reboots the box back up — same gate as wake
-    await setBoxDisk(cfg, session, disk);
+    await setBoxDisk(hcfg(session), session, disk);
     noteRunning(session);
     watchHub.drop(session);
     res.json({ ok: true, disk });
@@ -3764,12 +3793,12 @@ app.post("/git.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    if (action === "status") res.json(await gitStatus(cfg, session, repo));
-    else if (action === "commit") res.json(await gitCommitAll(cfg, session, repo, String(message ?? "")));
+    if (action === "status") res.json(await gitStatus(hcfg(session), session, repo));
+    else if (action === "commit") res.json(await gitCommitAll(hcfg(session), session, repo, String(message ?? "")));
     else if (action === "push") {
       // PR-only for automation-started runs, enforced here too — independent of the box-side hook.
-      if (startedByOf(db, session)?.kind === "trigger") await assertPrOnlyPush(cfg, session, repo);
-      res.json({ output: redactor.redact((await gitPush(cfg, session, repo)).output) });
+      if (startedByOf(db, session)?.kind === "trigger") await assertPrOnlyPush(hcfg(session), session, repo);
+      res.json({ output: redactor.redact((await gitPush(hcfg(session), session, repo)).output) });
     }
     else res.status(400).json({ error: "action must be status | commit | push" });
   } catch (e) {
@@ -3789,7 +3818,7 @@ app.get("/tree.json", async (req: Request, res: Response) => {
     // details=1: sizes + mtimes for the workspace records table. Same exclusions, same cap, its own
     // (short-lived) fetch — the plain path index stays the cheap default for @-mention search.
     if (req.query.details === "1") {
-      const out = (await execInBox(cfg, session, fileDetailsCommand())).stdout;
+      const out = (await execInBox(hcfg(session), session, fileDetailsCommand())).stdout;
       const files = parseFileDetails(out);
       res.json({ files, total: files.length, truncated: files.length >= FILE_INDEX_CAP });
       return;
@@ -3831,7 +3860,7 @@ app.put("/file.json", async (req: Request, res: Response) => {
     const abs = `/workspace/${safe.relPath}`;
     const dir = abs.slice(0, abs.lastIndexOf("/"));
     // The body streams over stdin: argv would overflow (E2BIG) on anything larger than an icon.
-    await execInBox(cfg, session, `mkdir -p ${q(dir)} && base64 -d > ${q(abs)} && wc -c < ${q(abs)}`, { input: b64 });
+    await execInBox(hcfg(session), session, `mkdir -p ${q(dir)} && base64 -d > ${q(abs)} && wc -c < ${q(abs)}`, { input: b64 });
     res.json({ ok: true, path: safe.relPath, bytes: isB64 ? Buffer.from(b64, "base64").length : Buffer.byteLength(content, "utf8") });
   } catch (e) {
     res.status(422).json({ error: clientError(e, 400) });
@@ -3847,7 +3876,7 @@ app.get("/search.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const r = await execInBox(cfg, session, searchCommand({ regex: req.query.regex === "1", caseSensitive: req.query.case === "1" }), {
+    const r = await execInBox(hcfg(session), session, searchCommand({ regex: req.query.regex === "1", caseSensitive: req.query.case === "1" }), {
       input: q.replace(/\r?\n/g, " ") + "\n",
     });
     const found = parseSearchOutput(r.stdout);
@@ -3877,7 +3906,7 @@ app.post("/fs.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    await execInBox(cfg, session, fsCommand(confined.op));
+    await execInBox(hcfg(session), session, fsCommand(confined.op));
   } catch (e) {
     const known = fsFailure(exitCodeOf(e));
     if (known) res.status(known.status).json({ error: known.message });
@@ -3926,9 +3955,9 @@ app.post(BROWSER_ACT_PATH, async (req: Request, res: Response) => {
   try {
     const r = await browserQueue(session, async () => {
       // Quick path first (curl to a helper that is already up); the full script only to start one.
-      const fast = await execInBox(cfg, session, browserFastSh(), { input: JSON.stringify(parsed.action), timeoutMs: 70_000 }).catch(() => null);
+      const fast = await execInBox(hcfg(session), session, browserFastSh(), { input: JSON.stringify(parsed.action), timeoutMs: 70_000 }).catch(() => null);
       if (fast && !browserFastMissed(fast.stdout)) return fast;
-      return execInBox(cfg, session, "node -", { input: browserStubScript(parsed.action), timeoutMs: 70_000 });
+      return execInBox(hcfg(session), session, "node -", { input: browserStubScript(parsed.action), timeoutMs: 70_000 });
     });
     res.setHeader("Cache-Control", "no-store");
     res.json(parseBrowserReply(r.stdout));
@@ -3946,7 +3975,7 @@ app.post("/browser/install.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    await browserQueue(session, () => execInBox(cfg, session, moliInstallSh(), { timeoutMs: 240_000 }));
+    await browserQueue(session, () => execInBox(hcfg(session), session, moliInstallSh(), { timeoutMs: 240_000 }));
     res.json({ ok: true });
   } catch (e) {
     console.error(`[browser] install failed in ${session}: ${redactor.redact(String((e as Error)?.message ?? e)).slice(-400)}`);
@@ -3964,7 +3993,7 @@ app.get("/revert-points.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const turns = parseCkptLs((await execInBox(cfg, session, listCmd())).stdout);
+    const turns = parseCkptLs((await execInBox(hcfg(session), session, listCmd())).stdout);
     // Checkpoint t<n> is the restore point for operator message n+1 (see checkpointForMessage).
     res.json({ messages: turns.map((n) => n + 1) });
   } catch {
@@ -3991,7 +4020,7 @@ app.post("/revert.json", async (req: Request, res: Response) => {
     }
     await withBoxLock(session, async () => {
       // The discarded-count for the seam line is computed in-box from the live log (revertCmd).
-      const r = await execInBox(cfg, session, revertCmd(turn));
+      const r = await execInBox(hcfg(session), session, revertCmd(turn));
       if (!/CKPT_RESTORED/.test(r.stdout)) throw new Error(r.stdout.trim().slice(-300) || "restore did not complete");
     });
     watchHub.drop(session); // next poll reads the restored (shorter) log fresh
@@ -4015,14 +4044,14 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
     // honest degradation), and the dedupe rule in archiveRun makes this a no-op when the sweep
     // already recorded the same finish.
     await archiveFinishedRun(session, { withFiles: false }).catch(() => {});
-    await deps.teardown(cfg, session);
+    await deps.teardown(hcfg(session), session);
     watchHub.drop(session);
     inbox.clear(session);
     boxModels.delete(session);
     boxVerify.delete(session);
     boxVerified.delete(session);
     verifyRetrier?.forget(session);
-    void forgetTitle(cfg, session).catch(() => {});
+    void forgetTitle(hcfg(session), session).catch(() => {});
     res.json({ ok: true });
   } catch (e) {
     failWith(res, e);
@@ -4186,7 +4215,7 @@ const dispatcher = makeDispatcher({
   // Every five minutes the dispatcher frees slots held by boxes that are gone. While the host sleeps
   // nothing launches or dies unseen (a launch wakes it first), so the last sweep is the live set; a
   // fresh sweep here was the one SSH that kept a sleeping host from pausing (seen live 2026-11-16).
-  liveBoxes: async () => (hostSleep.asleep() ? (await readFleet()).boxes : await gatherMonitor(cfg)).map((b) => b.name),
+  liveBoxes: async () => (await sweepHosts(cfg)).boxes.map((b) => b.name),
   startRun: startTriggerRun,
   // The receipt comment on the issue/PR that fired the run, with the owner's own GitHub token.
   postComment: async (owner, repo, number, body) => {
@@ -4334,7 +4363,11 @@ registerTriggerRoutes(app, {
   publicUrl: cfg.publicUrl,
   audit: auditTrigger,
   // Chat names for the Scheduled table. Cosmetic: a slow fleet read just shows machine names.
-  titles: () => Promise.race([loadTitles(cfg).catch(() => ({})), new Promise<Record<string, string>>((r) => setTimeout(() => r({}), 1500))]),
+  titles: () =>
+    Promise.race([
+      Promise.all(hostPool.enabled().filter((h) => !h.sleep.asleep() && !h.unreachableSince).map((h) => loadTitles(h.cfg).catch(() => ({})))).then((all) => Object.assign({}, ...all) as Record<string, string>),
+      new Promise<Record<string, string>>((r) => setTimeout(() => r({}), 1500)),
+    ]),
   rejects: (box) => scheduleRejects.get(box) ?? [],
 });
 // Intake (src/intake-routes.ts): email / Slack / pasted links start runs as the owner, through the
@@ -4401,7 +4434,7 @@ registerHarnessRoutes(app, {
   liveDigest: async (box) => {
     const snap = await watchHub.read(box);
     if (snap.boxStatus === "missing") return null;
-    const files = /^running$/i.test(snap.boxStatus) ? await listChanges(cfg, box).catch(() => []) : [];
+    const files = /^running$/i.test(snap.boxStatus) ? await listChanges(hcfg(box), box).catch(() => []) : [];
     return buildDigest({
       box,
       task: snap.task ?? "",
@@ -4731,8 +4764,8 @@ const attempts = makeAttempts({
   },
   archived: (owner, box) => archivedDigestOf(db, owner, box),
   exists: async (box) => (await readFleet()).boxes.some((b) => b.name === box),
-  exec: async (box, script) => (await execInBox(cfg, box, script)).stdout,
-  teardown: (box) => deps.teardown(cfg, box),
+  exec: async (box, script) => (await execInBox(hcfg(box), box, script)).stdout,
+  teardown: (box) => deps.teardown(hcfg(box), box),
   log: (m) => console.error(m),
 });
 // The launching request's context, for the duration of the launch only.
@@ -4751,9 +4784,10 @@ const delegateAttempts = async (body: Record<string, unknown>, principal: Princi
   const owner = principal.kind === "user" ? principal.userId : OPERATOR_OWNER;
   // Fleet + per-user quota for ALL attempts up front: a group is never half-started on purpose.
   const live = await deps.countBoxes(cfg);
-  const free = cfg.maxBoxes - live - reservedBoxes();
+  const capacity = deps.capacity?.(cfg) ?? cfg.maxBoxes;
+  const free = capacity - live - reservedBoxes();
   if (free < n) {
-    return { status: 200, json: { ok: false, question: `Refused: ${n} attempts need ${n} free sandbox slots, but only ${Math.max(0, free)} of ${cfg.maxBoxes} are free. Use fewer attempts, tear a run down, or raise MSB_MAX_BOXES.` } };
+    return { status: 200, json: { ok: false, question: `Refused: ${n} attempts need ${n} free sandbox slots, but only ${Math.max(0, free)} of ${capacity} are free. Use fewer attempts, tear a run down, or raise MSB_MAX_BOXES.` } };
   }
   if (principal.kind === "user") {
     const max = getUser(db, principal.userId)?.max_boxes || cfg.userMaxBoxes;
@@ -4945,7 +4979,7 @@ const canaryRun = async (): Promise<CanaryResult> => {
     }
     return { ...canaryVerdict({ runState: "running", log: "", ms: Date.now() - t0, timedOut: true }), box };
   } finally {
-    void deps.teardown(cfg, box).catch((e) => console.error(`[canary] teardown ${box}: ${(e as Error).message.slice(0, 200)}`));
+    void deps.teardown(hcfg(box), box).catch((e) => console.error(`[canary] teardown ${box}: ${(e as Error).message.slice(0, 200)}`));
   }
 };
 const canary = makeCanary(
@@ -4963,16 +4997,22 @@ let hostDiskState: { reading?: DiskReading; at: number; error?: string } = { at:
 let hostDiskAlertedAt = 0;
 const HOST_DISK_POLL_MS = 10 * 60_000;
 const hostDiskTick = async (): Promise<void> => {
-  if (hostSleep.asleep()) return;
-  try {
-    const reading = await hostDisk(cfg);
-    hostDiskState = { reading, at: Date.now(), ...(reading ? {} : { error: "df failed" }) };
-    if (hostDiskAlarmed(reading, cfg.hostDiskAlertPct) && Date.now() - hostDiskAlertedAt >= 12 * 3600_000) {
-      hostDiskAlertedAt = Date.now();
-      await alertOperator(hostDiskAlertText(reading!, cfg.msbHome, cfg.publicUrl ?? ""), "host-disk");
+  // Every awake host is read; the primary's reading is the one /health.json has always carried.
+  for (const h of hostPool.enabled()) {
+    if (h.sleep.asleep() || h.unreachableSince) continue;
+    let state: typeof hostDiskState;
+    try {
+      const reading = await hostDisk(h.cfg);
+      state = { reading, at: Date.now(), ...(reading ? {} : { error: "df failed" }) };
+      if (hostDiskAlarmed(reading, cfg.hostDiskAlertPct) && Date.now() - hostDiskAlertedAt >= 12 * 3600_000) {
+        hostDiskAlertedAt = Date.now();
+        await alertOperator(hostDiskAlertText(reading!, `${h.spec.id === "primary" ? "" : `${h.spec.name}: `}${h.cfg.msbHome}`, cfg.publicUrl ?? ""), "host-disk");
+      }
+    } catch (e) {
+      state = { at: Date.now(), error: (e as Error).message.slice(0, 200) };
     }
-  } catch (e) {
-    hostDiskState = { at: Date.now(), error: (e as Error).message.slice(0, 200) };
+    hostPool.noteDisk(h.spec.id, state);
+    if (h.spec.id === "primary") hostDiskState = state;
   }
 };
 
@@ -4981,7 +5021,8 @@ let lastOrphanSweep: { at: number; removed: string[]; freedMib?: number; error?:
 const orphanSweepTick = async (): Promise<void> => {
   if (hostSleep.asleep()) return;
   try {
-    const r = await sweepOrphanSandboxDirs(cfg);
+    const all = await Promise.all(hostPool.enabled().filter((h) => !h.sleep.asleep() && !h.unreachableSince).map((h) => sweepOrphanSandboxDirs(h.cfg)));
+    const r = { removed: all.flatMap((x) => x.removed), ...(all.some((x) => x.freedMib) ? { freedMib: all.reduce((n, x) => n + (x.freedMib ?? 0), 0) } : {}) };
     lastOrphanSweep = { at: Date.now(), ...r };
     if (r.removed.length) console.error(`[host-disk] removed ${r.removed.length} orphaned sandbox dir(s)${r.freedMib ? `, ${r.freedMib} MiB` : ""}: ${r.removed.join(" ")}`);
   } catch (e) {
@@ -5064,6 +5105,7 @@ app.get("/health.json", (req: Request, res: Response) => {
       canary: { enabled: cfg.canaryIntervalMs > 0, intervalMs: cfg.canaryIntervalMs, last: c ? { ok: c.ok, ms: c.ms, detail: c.ok ? c.detail : "", at: c.at, failures: c.failures, lastOkAt: c.lastOkAt } : null },
       hostDisk: { at: 0, alertPct: cfg.hostDiskAlertPct, home: "" },
       hostSleep: null,
+      hosts: [],
       orphanSweep: null,
       startFailures: { streak: 0, alertedAt: 0 },
       baked: {},
@@ -5082,6 +5124,7 @@ app.get("/health.json", (req: Request, res: Response) => {
     canary: { enabled: cfg.canaryIntervalMs > 0, intervalMs: cfg.canaryIntervalMs, last: canary.state() },
     hostDisk: { ...hostDiskState, alertPct: cfg.hostDiskAlertPct, home: cfg.msbHome },
     hostSleep: hostSleep.state(),
+    hosts: hostPool.state(),
     orphanSweep: lastOrphanSweep ?? null,
     startFailures: startFailures.state(),
     baked,
@@ -5108,6 +5151,76 @@ app.post("/health/image-update.json", (req: Request, res: Response) => {
     res.status(409).json({ error: (e as Error).message });
   }
 });
+// --- Box hosts (src/host-pool.ts) ---------------------------------------------------------------
+// The registry of machines runs go to. Admins only: a host is the operator's infrastructure.
+app.get("/hosts.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  if (!isAdmin(principalOf(res))) {
+    res.status(403).json({ error: "admins only" });
+    return;
+  }
+  res.json({ hosts: hostPool.state(), capacity: hostPool.capacity() });
+});
+app.post("/hosts.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  if (!isAdmin(principalOf(res))) {
+    res.status(403).json({ error: "admins only" });
+    return;
+  }
+  const body = (req.body ?? {}) as { action?: string; id?: string; spec?: Record<string, unknown> };
+  const id = typeof body.id === "string" ? body.id : "";
+  try {
+    switch (body.action) {
+      case "upsert": {
+        const spec = hostPool.upsert({ ...(body.spec ?? {}), ...(id ? { id } : {}) } as Parameters<typeof hostPool.upsert>[0]);
+        res.locals.auditAction = `host.upsert:${spec.id}`;
+        // A new host's own addresses, before any box starts on it (src/host-guard.ts).
+        void learnHostGuard(hostPool.cfgFor(spec.id));
+        res.json({ ok: true, host: hostPool.state().find((h) => h.id === spec.id), hosts: hostPool.state(), capacity: hostPool.capacity() });
+        return;
+      }
+      case "remove": {
+        const live = hostPool.get(id)?.lastBoxes.filter((b) => /^running$/i.test(b.boxStatus) && b.role !== "pool-free").length ?? 0;
+        if (live) {
+          res.status(409).json({ error: `${live} machine(s) still run on this host; tear them down first, or disable the host and let them finish` });
+          return;
+        }
+        hostPool.remove(id);
+        res.locals.auditAction = `host.remove:${id}`;
+        res.json({ ok: true, hosts: hostPool.state(), capacity: hostPool.capacity() });
+        return;
+      }
+      case "check": {
+        const r = await hostPool.check(id);
+        if (hostPool.get(id)?.spec.provider !== "static") await hostPool.refreshProvider(id).catch(() => {});
+        res.json({ ok: r.ok, check: r, host: hostPool.state().find((h) => h.id === id) });
+        return;
+      }
+      case "wake": {
+        const r = await hostPool.start(id);
+        res.locals.auditAction = `host.wake:${id}`;
+        res.json({ ok: true, providerState: r, host: hostPool.state().find((h) => h.id === id) });
+        return;
+      }
+      case "pause": {
+        const h = hostPool.get(id);
+        if (h?.lastBoxes.some((b) => /^running$/i.test(b.boxStatus) && b.runState === "running")) {
+          res.status(409).json({ error: "an agent is working on this host; wait for it or stop the run first" });
+          return;
+        }
+        const r = await hostPool.pause(id);
+        res.locals.auditAction = `host.pause:${id}`;
+        res.json({ ok: true, providerState: r, host: hostPool.state().find((h) => h.id === id) });
+        return;
+      }
+      default:
+        res.status(400).json({ error: "action must be upsert, remove, check, wake or pause" });
+    }
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  }
+});
+
 app.post("/health/canary.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   try {
@@ -5119,19 +5232,21 @@ app.post("/health/canary.json", async (req: Request, res: Response) => {
 
 app.listen(cfg.httpPort, cfg.httpHost, () => {
   // Before any box is started or rewound: which addresses are the host's own (src/host-guard.ts).
-  void learnHostGuard(cfg);
+  for (const h of hostPool.enabled()) void learnHostGuard(h.cfg);
   // A package build cut off by the last stop leaves its builder box behind; the store itself is fine.
-  void reapStoreBuilders(cfg);
+  for (const h of hostPool.enabled()) void reapStoreBuilders(h.cfg);
+  // Awake time per metered host, counted against its monthly allowance (src/host-pool.ts).
+  setInterval(() => hostPool.tickUsage(), 60_000).unref();
   console.error(`[agent-sandbox] HTTP MCP on ${cfg.httpHost}:${cfg.httpPort} (bearer-guarded)`);
   // Auto-seed the shared warm pool so the first remote delegation is fast too.
-  void refillPool(cfg);
+  for (const c of hostPool.warmCfgs()) void refillPool(c);
   // Pre-warm the model catalog so the first delegate's model validation answers from cache (the
   // stale-while-revalidate in fetchModels keeps it warm from then on). The repo list is per-owner
   // (SaaS) so it cannot be pre-warmed here; its SWR cache covers everything after a user's first task.
   void fetchModels(cfg).catch(() => {});
   // Keep it topped up so a warm box is ALWAYS ready, even through a long lull with no delegations
   // (an unclaimed box idle/max-duration reaped can't trigger its own claim-based reseed).
-  startPoolMaintainer(cfg);
+  startPoolMaintainer(cfg, () => hostPool.warmCfgs());
   // Triggers: fire due schedules (the webhook and finish-edge sources call the dispatcher directly).
   dispatcher.start();
   repoWatcher.start();

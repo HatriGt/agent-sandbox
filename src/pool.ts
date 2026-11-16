@@ -16,7 +16,7 @@ import { stagingPathFor } from "./sync.js";
 import { parseDurationSec } from "./monitor.js";
 import type { Config } from "./config.js";
 import { preferredAgents, type AgentKind } from "./agent-kind.js";
-import { hostSleep } from "./host-sleep.js";
+import { sleepFor } from "./host-sleep.js";
 
 /**
  * A pool box's --max-duration clock starts at BOOT, not at claim. Observed live: a box booted at
@@ -225,7 +225,9 @@ let saidNoRoom = false;
  * whole 6h pool window, eating 1G RAM and one of the 5 capacity slots. Concurrent callers now share
  * the running flight; a caller arriving after it settled starts a fresh one (it re-lists anyway).
  */
-let refillInFlight: Promise<void> | null = null;
+// One flight per host: a refill on the VPS and a refill on a metered VM are unrelated.
+const refillInFlight = new Map<string, Promise<void>>();
+const flightKey = (cfg: Config): string => cfg.hostId ?? cfg.vpsSsh;
 
 /**
  * Reconcile the pool to exactly poolSize open-egress warm boxes: boot the deficit, or trim the
@@ -244,8 +246,10 @@ export function refillPool(
   if ((!claudeOn && !ompOn) || !cfg.egressAllowAll) return Promise.resolve();
   // A sleeping host is left asleep: the warm boxes it holds are frozen with it and come back on
   // the launch that wakes it (and that launch's claim calls back here, awake).
-  if (hostSleep().asleep()) return Promise.resolve();
-  if (refillInFlight) return refillInFlight;
+  if (sleepFor(cfg).asleep()) return Promise.resolve();
+  const key = flightKey(cfg);
+  const running = refillInFlight.get(key);
+  if (running) return running;
   const flight = (async () => {
     try {
       // Reap dead/wedged boxes first so the deficit is real and a fresh boot won't collide with a
@@ -342,9 +346,9 @@ export function refillPool(
     }
   })();
   const tracked = flight.finally(() => {
-    if (refillInFlight === tracked) refillInFlight = null;
+    if (refillInFlight.get(key) === tracked) refillInFlight.delete(key);
   });
-  refillInFlight = tracked;
+  refillInFlight.set(key, tracked);
   return tracked;
 }
 
@@ -353,7 +357,7 @@ export function refillPool(
  * have seen: an owner who just showed up needs their box prepared now, not at the next tick.
  */
 export function kickRefill(cfg: Config): void {
-  const after = refillInFlight;
+  const after = refillInFlight.get(flightKey(cfg));
   if (after) void after.then(() => refillPool(cfg));
   else void refillPool(cfg);
 }
@@ -364,7 +368,7 @@ export function kickRefill(cfg: Config): void {
  * long lull. This periodic refill (which reaps dead boxes first, then boots the deficit) is what
  * makes a warm box ALWAYS ready. Returns a stop handle; unref'd so it never holds the process open.
  */
-export function startPoolMaintainer(cfg: Config): { stop: () => void } {
+export function startPoolMaintainer(cfg: Config, cfgs: () => Config[] = () => [cfg]): { stop: () => void } {
   const claudeOn = cfg.poolSize > 0 && claudeSourceOn(cfg);
   const ompOn = (cfg.ompPoolSize ?? 0) > 0 && ompSourceOn(cfg);
   if ((!claudeOn && !ompOn) || !cfg.egressAllowAll || cfg.poolRefillIntervalMs <= 0) {
@@ -376,7 +380,7 @@ export function startPoolMaintainer(cfg: Config): { stop: () => void } {
     } warm box(es) ready (every ${Math.round(cfg.poolRefillIntervalMs / 1000)}s)`
   );
   const timer = setInterval(() => {
-    void refillPool(cfg);
+    for (const c of cfgs()) void refillPool(c);
   }, cfg.poolRefillIntervalMs);
   // Don't let the interval keep the event loop (and thus the process) alive on its own.
   if (typeof timer.unref === "function") timer.unref();

@@ -478,6 +478,30 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS org_members_user ON org_members(user_id);
   CREATE INDEX IF NOT EXISTS orgs_owner ON orgs(owner_id);
   `,
+  `
+  -- Box hosts (src/hosts.ts): every machine the controller may start sandboxes on, from any provider
+  -- (the VPS from .env, a Freestyle VM, another account). spec_json is the HostSpec; the primary host
+  -- is seeded from .env on boot and its connection fields follow .env. box_hosts remembers which host
+  -- a box was started on so a restart answers before the first sweep; host_usage counts awake time
+  -- per host per billing month for the allowance.
+  CREATE TABLE IF NOT EXISTS hosts (
+    id TEXT PRIMARY KEY,
+    spec_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS box_hosts (
+    box TEXT PRIMARY KEY,
+    host_id TEXT NOT NULL,
+    at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS host_usage (
+    host_id TEXT NOT NULL,
+    month TEXT NOT NULL,
+    awake_ms INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (host_id, month)
+  );
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

@@ -39,39 +39,54 @@ export function hostGuardFlagsFor(addrs: readonly string[]): string[] {
   });
 }
 
-let flags: string[] = [];
-let learned: Promise<void> | null = null;
-let failedAt = 0;
+// One entry per box host (keyed by its SSH target): a second host has its own addresses, and a
+// box on it must be kept off THOSE, not the first host's.
+interface Guard {
+  flags: string[];
+  learned: Promise<void> | null;
+  failedAt: number;
+}
+const guards = new Map<string, Guard>();
+let testFlags: string[] | null = null;
+const guardOf = (key: string): Guard => {
+  let g = guards.get(key);
+  if (!g) {
+    g = { flags: [], learned: null, failedAt: 0 };
+    guards.set(key, g);
+  }
+  return g;
+};
 
-/** The rules learned so far (empty until the host has been asked once). */
-export function hostGuardFlags(): string[] {
-  return flags;
+/** The rules learned so far for a host (empty until it has been asked once). */
+export function hostGuardFlags(cfg?: { vpsSsh: string }): string[] {
+  if (testFlags) return testFlags;
+  return cfg ? guardOf(cfg.vpsSsh).flags : [];
 }
 
 /**
- * Ask the host for its addresses once. `EGRESS_HOST_GUARD=0` turns the guard off. A host that
+ * Ask a host for its addresses once. `EGRESS_HOST_GUARD=0` turns the guard off. A host that
  * cannot be asked leaves the boxes as they were and is asked again a minute later: a run must
  * never fail to start over this.
  */
-export function ensureHostGuard(hostAddrs: () => Promise<string>): Promise<void> {
+export function ensureHostGuard(key: string, hostAddrs: () => Promise<string>): Promise<void> {
   if (process.env.EGRESS_HOST_GUARD === "0") return Promise.resolve();
-  if (learned && !(failedAt && Date.now() - failedAt > 60_000)) return learned;
-  failedAt = 0;
-  learned = hostAddrs().then(
+  const g = guardOf(key);
+  if (g.learned && !(g.failedAt && Date.now() - g.failedAt > 60_000)) return g.learned;
+  g.failedAt = 0;
+  g.learned = hostAddrs().then(
     (out) => {
-      flags = hostGuardFlagsFor(out.split(/\s+/).filter(Boolean));
-      console.error(`[net] boxes are kept off ${flags.length / 2} of the host's own public addresses (ports 80 and 443 stay open)`);
+      g.flags = hostGuardFlagsFor(out.split(/\s+/).filter(Boolean));
+      console.error(`[net] boxes are kept off ${g.flags.length / 2} of the host's own public addresses (ports 80 and 443 stay open)`);
     },
     (e) => {
-      failedAt = Date.now();
+      g.failedAt = Date.now();
       console.error(`[net] could not read the host's addresses; boxes start without the host guard: ${String((e as Error)?.message ?? e).slice(0, 160)}`);
     }
   );
-  return learned;
+  return g.learned;
 }
 
 /** Tests only. */
 export function setHostGuardForTest(addrs: readonly string[] | null): void {
-  flags = addrs ? hostGuardFlagsFor(addrs) : [];
-  learned = addrs ? Promise.resolve() : null;
+  testFlags = addrs ? hostGuardFlagsFor(addrs) : null;
 }

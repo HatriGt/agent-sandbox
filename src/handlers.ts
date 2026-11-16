@@ -45,6 +45,8 @@ export interface DelegationResult {
 export interface HandlerDeps {
   /** Count live boxes for the concurrency cap. */
   countBoxes(cfg: Config): Promise<number>;
+  /** Slots across every box host (src/host-pool.ts); the one host's MSB_MAX_BOXES when absent. */
+  capacity?(cfg: Config): number;
   /**
    * Resolve GitHub access per repo by ACCESS from the login-keyed store (both sources). Returns the
    * owner->token, owner->login maps + a primary. For git a missing/ambiguous account is a question
@@ -513,10 +515,11 @@ export function registerTools(
       const live = await deps.countBoxes(cfg);
       // reserveBox counts concurrent delegations that passed the check but have not booted yet, so
       // a client fanning out parallel delegate calls cannot overshoot MSB_MAX_BOXES.
-      const release = reserveBox(live, cfg.maxBoxes);
+      const capacity = deps.capacity?.(cfg) ?? cfg.maxBoxes;
+      const release = reserveBox(live, capacity);
       if (!release) {
         return text(
-          `Refused: ${live}/${cfg.maxBoxes} boxes already running or starting. Tear one down (teardown) or raise MSB_MAX_BOXES.`
+          `Refused: ${live}/${capacity} boxes already running or starting. Tear one down (teardown) or raise MSB_MAX_BOXES.`
         );
       }
 

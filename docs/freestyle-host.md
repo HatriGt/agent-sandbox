@@ -58,6 +58,11 @@ over its snapshot (`config.ts`), and image layers are stored once per host.
 
 ## The switch
 
+Since 2026-11-17 a Freestyle VM no longer has to replace the VPS: it can be one row in the host
+pool beside it, added from **Fleet view → Box hosts**, with its own sleep clock, pause-on-sleep
+through the API and a monthly allowance; see [hosts.md](hosts.md). What follows is the
+single-host switch, which still works as written.
+
 The VM is left **paused** between uses (a paused VM costs no compute), so start it first:
 
 ```bash
