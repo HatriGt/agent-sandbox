@@ -120,6 +120,31 @@ What a run costs with the gate on, from the live archive (76 runs in the last 30
 run, about 20 host-hours a month, which is 80 vCPU-hours and 160 GiB-hours against the Free
 plan's 200 and 400. A box itself is 1 vCPU and 1 GiB inside the VM; what is billed is the VM.
 
+## What the live test showed (2026-11-16)
+
+Measured with the controller on hostbrr pointed at the VM, `HOST_SLEEP_AFTER_MS=300000`,
+`idleTimeoutSeconds=300`:
+
+- The quiet cycle works: the controller logged "quiet for 5m" at 12:28:09 after a canary, the VM's
+  last network activity stayed at that second, and it was paused by 12:33. Two things had to be
+  fixed first because they kept SSHing while the controller slept: a warm-pool boot counted as
+  work (it does not), and the trigger dispatcher's five-minute reconcile asked for the live box
+  list directly instead of through the sleep-aware fleet reader.
+- The canary that fires five minutes after a controller start lands on the same second the sleep
+  gate opens; it runs, which is fine (it is the deploy check), and the quiet clock restarts after it.
+- The first resume (12:35) was slow but worked: a box had its task 133 s after the request. The
+  second resume (12:47, a controller restart fifty seconds after the VM had paused) never came back:
+  the proxy accepted each SSH and closed it 34 s later, `freestyle vm exec` hung, `vm pause`
+  answered `TOO_MANY_REQUESTS: server is at capacity`, and twenty minutes later the VM still did
+  not answer although the API said `running`. Production was pointed back at hostbrr (the .env
+  with the Freestyle values is kept beside it as `.env.freestyle-<stamp>`) and its canary passed
+  in 18 s.
+
+So the sleep gate is sound, but a paused VM's resume is at the mercy of Freestyle's capacity at
+that moment, and nothing on the controller can tell a slow resume from a dead one except time.
+Before relying on it: let a resume prove itself a few more times on different days, and keep the
+hostbrr .env ready, because the switch back is the only recovery when the VM does not answer.
+
 ## Cost, and why this is temporary
 
 Freestyle meters allocated vCPU and memory per hour while the VM runs; a paused VM only pays
