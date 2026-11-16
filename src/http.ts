@@ -42,6 +42,7 @@ import { detectTransitions, formatNotification, makeNotifier, shouldNotify, togg
 import { StartFailureStreak, isStartFailure, logTail, startFailureAlertText } from "./run-health.js";
 import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, type CanaryResult } from "./canary.js";
 import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-disk.js";
+import { configureHostSleep, makeHostSleep } from "./host-sleep.js";
 import { BAKED_MCP_PACKAGES, BASE_PACKAGES, fetchLatestVersions, imageChanges, packageNameOf, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
 import { clearImageOverride, makeImageUpdater, planImageUpdate, writeImageOverride } from "./image-update.js";
 import { browserFastMissed, browserFastSh, browserStubScript, makeBoxQueue, moliInstallSh, parseBrowserAction, parseBrowserReply } from "./browser.js";
@@ -141,6 +142,10 @@ import { fileURLToPath } from "node:url";
 
 loadDotEnv();
 const cfg = loadConfig();
+// Host sleep (src/host-sleep.ts): the timed loops below ask it before touching the host, and the
+// launch paths in msb.ts wake it. Off (HOST_SLEEP_AFTER_MS unset) it never says asleep.
+const hostSleep = configureHostSleep(makeHostSleep(cfg.hostSleepAfterMs, { log: (m) => console.error(m) }));
+if (hostSleep.enabled) console.error(`[host-sleep] on: the host is left to pause after ${Math.round(cfg.hostSleepAfterMs / 60_000)}m without an agent working`);
 
 if (!cfg.httpToken) {
   console.error(
@@ -1254,6 +1259,7 @@ const readFleet = makeFleetReader(
       const q = inbox.list(b.name);
       return q.length ? { ...b, queued: q.map((m) => m.text) } : b;
     }),
+    sleep: hostSleep,
     store: {
       load: () => loadRunMetas(cfg),
       save: (meta) => saveRunMeta(cfg, meta as Parameters<typeof saveRunMeta>[1]),
@@ -4938,6 +4944,7 @@ const canary = makeCanary(
     run: canaryRun,
     notify: (s, recovered) => alertOperator(canaryAlertText(s, recovered, cfg.publicUrl ?? ""), recovered ? "canary-recovered" : "canary"),
     log: (m) => console.error(m),
+    skip: () => (hostSleep.asleep() ? "host asleep" : undefined),
   },
   { intervalMs: cfg.canaryIntervalMs }
 );
@@ -4947,6 +4954,7 @@ let hostDiskState: { reading?: DiskReading; at: number; error?: string } = { at:
 let hostDiskAlertedAt = 0;
 const HOST_DISK_POLL_MS = 10 * 60_000;
 const hostDiskTick = async (): Promise<void> => {
+  if (hostSleep.asleep()) return;
   try {
     const reading = await hostDisk(cfg);
     hostDiskState = { reading, at: Date.now(), ...(reading ? {} : { error: "df failed" }) };
@@ -4962,6 +4970,7 @@ const hostDiskTick = async (): Promise<void> => {
 /** Sandbox dirs the runtime forgot (src/host-disk.ts): swept two minutes after boot, then daily. */
 let lastOrphanSweep: { at: number; removed: string[]; freedMib?: number; error?: string } | undefined;
 const orphanSweepTick = async (): Promise<void> => {
+  if (hostSleep.asleep()) return;
   try {
     const r = await sweepOrphanSandboxDirs(cfg);
     lastOrphanSweep = { at: Date.now(), ...r };
@@ -5045,6 +5054,7 @@ app.get("/health.json", (req: Request, res: Response) => {
       admin: false,
       canary: { enabled: cfg.canaryIntervalMs > 0, intervalMs: cfg.canaryIntervalMs, last: c ? { ok: c.ok, ms: c.ms, detail: c.ok ? c.detail : "", at: c.at, failures: c.failures, lastOkAt: c.lastOkAt } : null },
       hostDisk: { at: 0, alertPct: cfg.hostDiskAlertPct, home: "" },
+      hostSleep: null,
       orphanSweep: null,
       startFailures: { streak: 0, alertedAt: 0 },
       baked: {},
@@ -5062,6 +5072,7 @@ app.get("/health.json", (req: Request, res: Response) => {
     imageUpdate: imageUpdater.state(),
     canary: { enabled: cfg.canaryIntervalMs > 0, intervalMs: cfg.canaryIntervalMs, last: canary.state() },
     hostDisk: { ...hostDiskState, alertPct: cfg.hostDiskAlertPct, home: cfg.msbHome },
+    hostSleep: hostSleep.state(),
     orphanSweep: lastOrphanSweep ?? null,
     startFailures: startFailures.state(),
     baked,

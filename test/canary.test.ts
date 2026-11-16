@@ -74,3 +74,21 @@ test("canaryAlertText", () => {
   assert.match(canaryAlertText({ ok: false, ms: 1, detail: "exit 1", at: 0, failures: 2 }, false, "https://x/"), /^Canary failed 2 times in a row: .*https:\/\/x\/dashboard\/#\/sandboxes$/);
   assert.match(canaryAlertText({ ok: true, ms: 1, detail: "replied in 9s", at: 0, failures: 0 }, true, ""), /^Canary recovered/);
 });
+
+test("makeCanary: a scheduled tick is skipped while the host sleeps; runNow is not", async () => {
+  let runs = 0;
+  let why: string | undefined = "host asleep";
+  const said: string[] = [];
+  const c = makeCanary(
+    { run: async () => (runs++, { ok: true, ms: 1, detail: "replied in 0.0s" }), notify: () => {}, log: (m) => said.push(m), skip: () => why },
+    { intervalMs: 3600_000, firstDelayMs: 1 }
+  );
+  c.start();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(runs, 0);
+  assert.ok(said.some((m) => /skipped: host asleep/.test(m)));
+  await c.runNow();
+  assert.equal(runs, 1);
+  why = undefined;
+  c.stop();
+});

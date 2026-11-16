@@ -156,3 +156,34 @@ test("makeFleetReader: hydrates sleeping runs from the durable store and persist
   assert.equal(saved.length, 1, "unchanged description is not re-written");
   assert.deepEqual(forgotten, []);
 });
+
+test("makeFleetReader: asleep serves the last snapshot flagged hostAsleep and never sweeps; awake sweeps and reports", async () => {
+  let t = 0;
+  let sweeps = 0;
+  let asleep = false;
+  const seen: number[] = [];
+  const cfg = { idleTimeout: "15m", maxDuration: "1h", maxBoxes: 5, poolSize: 1 } as unknown as Config;
+  const read = makeFleetReader(cfg, async () => (sweeps++, [running("a")]), {
+    ttlMs: 1000,
+    now: () => t,
+    sleep: { asleep: () => asleep, noteFleet: (boxes) => seen.push(boxes.length) },
+  });
+  const first = await read();
+  assert.equal(sweeps, 1);
+  assert.equal(first.hostAsleep, undefined);
+  assert.deepEqual(seen, [1]);
+
+  asleep = true;
+  t += 60_000; // far past the ttl
+  const stale = await read();
+  assert.equal(sweeps, 1, "no sweep while asleep");
+  assert.equal(stale.hostAsleep, true);
+  assert.equal(stale.at, first.at);
+  assert.equal(stale.boxes[0].name, "a");
+
+  asleep = false;
+  const fresh = await read();
+  assert.equal(sweeps, 2);
+  assert.equal(fresh.hostAsleep, undefined);
+  assert.deepEqual(seen, [1, 1]);
+});

@@ -44,6 +44,8 @@ export interface FleetSnapshot {
   lifecycle: FleetLifecycle;
   /** Server time (ms) the sweep completed — lets the client compute honest freshness. */
   at: number;
+  /** The host is being left asleep (src/host-sleep.ts): this is the last sweep, not a fresh one. */
+  hostAsleep?: boolean;
 }
 
 export function lifecycleOf(cfg: Config): FleetLifecycle {
@@ -124,6 +126,8 @@ export function makeFleetReader(
     store?: RunMemoryStore;
     /** How long an in-flight sweep may be shared before a new caller starts its own. */
     sweepTtlMs?: number;
+    /** Host sleep (src/host-sleep.ts): while asleep the last snapshot is served and no sweep runs. */
+    sleep?: { asleep(): boolean; noteFleet(boxes: readonly BoxView[]): void };
   } = {}
 ): () => Promise<FleetSnapshot> {
   const ttl = opts.ttlMs ?? 1500;
@@ -154,6 +158,9 @@ export function makeFleetReader(
   };
 
   return () => {
+    // Asleep: every SSH would wake the host, and the sweep is the one that runs on a timer. Hand
+    // out the last snapshot (flagged, so the UI can say so) until a launch wakes us.
+    if (opts.sleep?.asleep() && cached) return Promise.resolve({ ...cached, hostAsleep: true });
     if (cached && now() - cached.at < ttl) return Promise.resolve(cached);
     // A sweep that never settles must not be shared forever. `inFlight` de-duplicates concurrent
     // callers, but it used to be cleared ONLY in .finally() — so one unsettleable sweep (a wedged
@@ -182,6 +189,7 @@ export function makeFleetReader(
         persist(boxes);
         if (opts.store) for (const name of before) if (!memory.has(name)) void opts.store.forget(name).catch(() => {});
         cached = { boxes: opts.decorate ? opts.decorate(merged) : merged, lifecycle, at: now() };
+        opts.sleep?.noteFleet(boxes);
         return cached;
       })
       .finally(() => {

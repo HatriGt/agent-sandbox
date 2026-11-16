@@ -62,6 +62,7 @@ import { isStalled } from "./stall.js";
 import { EXIT_DISK_FULL } from "./run-health.js";
 import { parseBakedManifest, type LastProvision } from "./package-watch.js";
 import { ensureHostGuard, hostGuardFlags } from "./host-guard.js";
+import { hostSleep } from "./host-sleep.js";
 import { BLANK_OWNER, ownerTag } from "./warm-owners.js";
 import { sharedOwners, withOwner } from "./user-store.js";
 import { MOLI_BIN, MOLI_PROMPT_HINT, browserToolSetup, moliInstallSh } from "./browser.js";
@@ -294,6 +295,7 @@ export interface CreateBoxOpts {
  *  - snapshot    -> boot warm (claude+gh pre-baked), then `msb cp` the staged tree into /workspace
  */
 export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void> {
+  hostSleep().wake(`create ${opts.name}`);
   await learnHostGuard(cfg);
   await learnPkgStore(cfg);
   const common = [
@@ -407,6 +409,7 @@ export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude", owne
   // Flavor rides in the NAME (pool-<ts>-omp-<rand>) so every prefix/age-based pool mechanism
   // covers both flavors unchanged. Callers pass the flavored cfg (ompPoolCfg) for omp boots.
   const name = `${POOL_PREFIX}${Date.now()}-${agent === "omp" ? "omp-" : ""}${Math.random().toString(36).slice(2, 8)}`;
+  hostSleep().wake(`warm ${name}`);
   warming.add(name);
   try {
     await bootAndWarm(cfg, name, agent, owner);
@@ -512,6 +515,7 @@ function ownerMarkSh(owner: string | null): string {
  * so nobody is handed a half-prepared box. Costs no extra RAM, which is the point.
  */
 export async function adoptWarmBox(cfg: Config, box: string, agent: AgentKind, owner: string): Promise<void> {
+  hostSleep().wake(`adopt ${box}`);
   warming.add(box);
   try {
     await exec(cfg, box, "rm -f /.ready");
@@ -2110,6 +2114,7 @@ export async function runAgentTask(
   // a task and the dashboard renders "starting" instead. agentSh re-writes the same content on
   // launch (first-run marks), which is harmless. Best-effort: rides stdin, never argv.
   const t0 = Date.now();
+  hostSleep().wake(`task ${box}`);
   await exec(cfg, box, `cat > ${TASK_MARK}`, { input: `${task}\n` }).catch(() => {});
   const t1 = Date.now();
   await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg, agent)]);
@@ -2283,6 +2288,7 @@ export type StartOutcome =
  * returned outcome instead.
  */
 export async function startBoxIfStopped(cfg: Config, box: string): Promise<StartOutcome> {
+  hostSleep().wake(`resume ${box}`);
   const r = await msb(cfg, ["ls", "--format", "json"], false);
   const entry = parseLsJson(r.stdout).find((e) => e.name === box);
   if (!entry) return "absent";
@@ -2345,6 +2351,7 @@ export async function resumeAgentTask(
   // inbox delivery, send-now, the credential broker, an elicited answer) only has a box id and used
   // to pass undefined here, which resumed a single-repo box in /workspace and lost the session.
   const workdir = repos?.length ? agentWorkdir(repos) : await boxAgentWorkdir(cfg, box);
+  hostSleep().wake(`message ${box}`);
   const r = await msb(cfg, ["exec", box, ...env, ...(isCompactCommand(message) ? [] : skillHintFlags(box, message, skills, false)), "--", "sh", "-lc", guardedAgentSh(workdir, true, agent)]);
   const full = diskFullFromLaunch(r.stdout);
   if (full) throw new DiskFullError(box, full.freeKb, full.totalKb);
@@ -2806,6 +2813,7 @@ export async function runAgentOnly(cfg: Config, box: string, task: string) {
 
 /** Boot a plain box (no repo copy) from the base image — used to bake a warm-start snapshot. */
 export async function createBareBox(cfg: Config, name: string): Promise<void> {
+  hostSleep().wake(`bake ${name}`);
   await msb(cfg, [
     "run",
     "-d",

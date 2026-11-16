@@ -529,6 +529,8 @@ export interface HealthResponse {
     last: { ok: boolean; ms: number; detail: string; box?: string; at: number; failures: number; lastOkAt?: number } | null;
   };
   hostDisk: { reading?: { totalMib: number; usedMib: number; availMib: number; usedPct: number }; at: number; error?: string; alertPct: number; home: string };
+  /** Host sleep (a metered host left to pause itself); absent or null for a non-admin, enabled=false when off. */
+  hostSleep?: { enabled: boolean; asleep: boolean; since: number; lastWorkAt: number; afterMs: number } | null;
   orphanSweep: { at: number; removed: string[]; freedMib?: number; error?: string } | null;
   startFailures: { streak: number; last?: { box: string; at: number; tail: string }; alertedAt: number };
   baked: Record<string, string>;

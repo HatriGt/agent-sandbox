@@ -80,6 +80,15 @@ export function ServiceHealth() {
                 {!d ? "host disk unknown" : `host disk ${d.usedPct}% · ${(d.availMib / 1024).toFixed(0)} GiB free`}
               </span>
             </StatusDot>,
+            ...(data.hostSleep?.enabled
+              ? [
+                  <StatusDot tone={data.hostSleep.asleep ? "muted" : "ok"} className="font-normal">
+                    <span title={`The host is left to pause itself after ${Math.round(data.hostSleep.afterMs / 60_000)} quiet minutes; the next task wakes it`}>
+                      {data.hostSleep.asleep ? `host asleep · since ${fmtAgo(Math.floor(data.hostSleep.since / 1000))}` : "host awake"}
+                    </span>
+                  </StatusDot>,
+                ]
+              : []),
             ...(source ? [source] : []),
           ]}
         />

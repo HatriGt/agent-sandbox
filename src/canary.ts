@@ -60,6 +60,8 @@ export interface CanaryIO {
   notify: (s: CanaryState, recovered: boolean) => Promise<void> | void;
   log?: (m: string) => void;
   now?: () => number;
+  /** A reason to leave this scheduled tick alone (the host is asleep); `runNow` is never skipped. */
+  skip?: () => string | undefined;
 }
 
 /**
@@ -110,13 +112,24 @@ export function makeCanary(io: CanaryIO, opts: { intervalMs: number; alertCooldo
     return inFlight;
   };
 
+  // A scheduled tick asks first: a canary through a sleeping host would wake it for a quarter
+  // of an hour every interval, which is the opposite of what the sleep is for.
+  const scheduled = () => {
+    const why = io.skip?.();
+    if (why) {
+      log(`[canary] skipped: ${why}`);
+      return;
+    }
+    void tick();
+  };
+
   return {
     /** Arm the timer (unref'd: it never keeps the process alive). First run after `firstDelayMs`. */
     start(): void {
       if (opts.intervalMs <= 0 || timer) return;
-      const first = setTimeout(() => void tick(), opts.firstDelayMs ?? Math.min(opts.intervalMs, 5 * 60_000));
+      const first = setTimeout(scheduled, opts.firstDelayMs ?? Math.min(opts.intervalMs, 5 * 60_000));
       first.unref?.();
-      timer = setInterval(() => void tick(), opts.intervalMs);
+      timer = setInterval(scheduled, opts.intervalMs);
       timer.unref?.();
     },
     stop(): void {

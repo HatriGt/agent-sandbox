@@ -40,6 +40,11 @@ export interface Config {
   /** Host-disk alert threshold, percent used of the filesystem under msbHome. */
   hostDiskAlertPct: number;
   /**
+   * How long the fleet may be quiet (no agent working) before the controller stops touching the
+   * host so a metered host can pause itself (src/host-sleep.ts, docs/freestyle-host.md). 0 = never.
+   */
+  hostSleepAfterMs: number;
+  /**
    * Pinned Claude Code CLI version installed in every box. The in-box install is version-aware
    * (claudeInstallSh): bumping this reaches cold boxes, warm-pool boxes AND baked snapshots on
    * their next bootstrap — no rebake required (a rebake just makes the next cold boot faster).
@@ -253,6 +258,7 @@ export function loadConfig(): Config {
     msbHome: (process.env.MSB_HOME || "/root/.microsandbox").replace(/\/+$/, ""),
     canaryIntervalMs: Math.max(0, Number(process.env.CANARY_INTERVAL_MS ?? "3600000") || 0),
     hostDiskAlertPct: Math.min(100, Math.max(1, Number(process.env.HOST_DISK_ALERT_PCT ?? "85") || 85)),
+    hostSleepAfterMs: Math.max(0, Number(process.env.HOST_SLEEP_AFTER_MS ?? "0") || 0),
     claudeCodeVersion: image.claudeCodeVersion,
     ompVersion: req("OMP_VERSION", "latest"),
     ompSnapshot: process.env.MSB_OMP_SNAPSHOT || "",

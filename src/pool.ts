@@ -16,6 +16,7 @@ import { stagingPathFor } from "./sync.js";
 import { parseDurationSec } from "./monitor.js";
 import type { Config } from "./config.js";
 import { preferredAgents, type AgentKind } from "./agent-kind.js";
+import { hostSleep } from "./host-sleep.js";
 
 /**
  * A pool box's --max-duration clock starts at BOOT, not at claim. Observed live: a box booted at
@@ -241,6 +242,9 @@ export function refillPool(
   const claudeOn = cfg.poolSize > 0 && claudeSourceOn(cfg);
   const ompOn = (cfg.ompPoolSize ?? 0) > 0 && ompSourceOn(cfg);
   if ((!claudeOn && !ompOn) || !cfg.egressAllowAll) return Promise.resolve();
+  // A sleeping host is left asleep: the warm boxes it holds are frozen with it and come back on
+  // the launch that wakes it (and that launch's claim calls back here, awake).
+  if (hostSleep().asleep()) return Promise.resolve();
   if (refillInFlight) return refillInFlight;
   const flight = (async () => {
     try {

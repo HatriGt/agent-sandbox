@@ -1,0 +1,96 @@
+/**
+ * Host sleep: let a metered box host (a Freestyle VM, docs/freestyle-host.md) pause itself when
+ * nobody is running anything.
+ *
+ * The host pauses on its own after a few minutes without network traffic and wakes on the next SSH
+ * connection, so the controller never starts or stops it. What the controller has to do is go
+ * QUIET: the fleet sweep (every 15s), the warm-pool refill (every minute), the host-disk reading
+ * and the canary each open an SSH connection, and any one of them keeps the host awake around the
+ * clock. This module is the one decision those loops ask before touching the host:
+ *
+ *   - a box whose agent is working keeps the host awake;
+ *   - a fleet with no working box for `afterMs` puts the controller to sleep: the loops skip their
+ *     tick and the fleet read serves its last snapshot, marked `hostAsleep`;
+ *   - the launch paths (a new box, a resumed box, an agent exec) call `wake()` first, so the sweep
+ *     that notices the new run is never the thing we are waiting for.
+ *
+ * A box waiting on a question or sitting idle after a finish does not need the host up: the answer
+ * or the follow-up message is a launch, and launches wake. `afterMs` 0 turns the whole thing off
+ * (a host of our own never sleeps). Pure: the clock is injected, no IO.
+ */
+
+export interface HostSleepState {
+  enabled: boolean;
+  asleep: boolean;
+  /** When the controller went quiet (ms), 0 while awake. */
+  since: number;
+  /** The last moment work was seen or asked for (ms). */
+  lastWorkAt: number;
+  afterMs: number;
+}
+
+export interface SleepyBox {
+  boxStatus: string;
+  runState: string;
+  role: string;
+}
+
+/** A box whose agent is working right now: the one thing that keeps the host up by itself. */
+export function isWorkingBox(b: SleepyBox): boolean {
+  return /^running$/i.test(b.boxStatus) && b.role !== "pool-free" && b.runState === "running";
+}
+
+export interface HostSleep {
+  readonly enabled: boolean;
+  /** Something needs the host now (a launch). Clears sleep and restarts the quiet clock. */
+  wake(reason?: string): void;
+  /** What a real sweep saw. Working boxes keep the host up; a quiet fleet for `afterMs` sleeps. */
+  noteFleet(boxes: readonly SleepyBox[]): void;
+  asleep(): boolean;
+  state(): HostSleepState;
+}
+
+export function makeHostSleep(afterMs: number, opts: { now?: () => number; log?: (m: string) => void } = {}): HostSleep {
+  const now = opts.now ?? Date.now;
+  const log = opts.log ?? (() => {});
+  const enabled = afterMs > 0;
+  let lastWorkAt = now();
+  let asleep = false;
+  let since = 0;
+  return {
+    enabled,
+    wake(reason) {
+      lastWorkAt = now();
+      if (!asleep) return;
+      asleep = false;
+      since = 0;
+      log(`[host-sleep] awake${reason ? `: ${reason}` : ""}`);
+    },
+    noteFleet(boxes) {
+      if (!enabled) return;
+      if (boxes.some(isWorkingBox)) {
+        lastWorkAt = now();
+        return;
+      }
+      if (asleep || now() - lastWorkAt < afterMs) return;
+      asleep = true;
+      since = now();
+      log(`[host-sleep] quiet for ${Math.round(afterMs / 60_000)}m: letting the host sleep`);
+    },
+    asleep: () => asleep,
+    state: () => ({ enabled, asleep, since, lastWorkAt, afterMs }),
+  };
+}
+
+// One controller, one host: the launch paths in msb.ts and the loops in http.ts share this.
+let shared: HostSleep = makeHostSleep(0);
+
+/** Install the configured instance (http.ts, at boot). Before that, nothing sleeps. */
+export function configureHostSleep(sleep: HostSleep): HostSleep {
+  shared = sleep;
+  return shared;
+}
+
+export function hostSleep(): HostSleep {
+  return shared;
+}
