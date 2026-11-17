@@ -16,6 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import crypto from "node:crypto";
+import { execFile } from "node:child_process";
 import type { Config } from "./config.js";
 
 /**
@@ -53,11 +54,60 @@ export function directRoute(target: string): DirectRoute | undefined {
 }
 
 /**
+ * Targets no SSH may be opened to right now: a host being paused at its provider, until it is
+ * started again. The provider's proxy answers a session that is open when the pause lands, or that
+ * arrives while the VM is paused, by resuming the VM (four pauses in a row were undone that way
+ * live, 2026-11-17), so the pause closes every session first and shuts the door behind it. A gated
+ * command fails at once, locally, without a connection: ProxyCommand=false and no master.
+ */
+const sshGates = new Set<string>();
+
+export function gateSsh(target: string, closed: boolean): void {
+  if (closed) sshGates.add(target);
+  else sshGates.delete(target);
+}
+
+export function sshGated(target: string): boolean {
+  return sshGates.has(target);
+}
+
+/** The ssh -o flags that make a command fail locally, at once, without reaching the network. */
+export const SSH_GATED_OPTS = ["-o", "ProxyCommand=false", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "BatchMode=yes"];
+
+/** The multiplexing sockets a target's commands share: the proxy's and the direct route's. */
+export function sshMasterSockets(target: string): string[] {
+  const tag = sshTargetTag(target);
+  return [path.join(SOCK_DIR, `${tag}.sock`), path.join(SOCK_DIR, `${tag}d.sock`)];
+}
+
+/**
+ * Close the target's master connections (`ssh -O exit` on each socket) and wait, briefly, for the
+ * sockets to go. Commands in flight on them fail ("read from master failed"); the caller has
+ * decided that is better than a session still open at the proxy. Errors are swallowed: a socket
+ * that is not there is the wanted state.
+ */
+export async function closeSshMasters(target: string, settleMs = 1_000): Promise<void> {
+  const socks = sshMasterSockets(target).filter((p) => fs.existsSync(p));
+  await Promise.all(
+    socks.map(
+      (sock) =>
+        new Promise<void>((resolve) => {
+          const c = execFile("ssh", ["-O", "exit", "-o", `ControlPath=${sock}`, "asb-master"], { timeout: 3_000 }, () => resolve());
+          c.on("error", () => resolve());
+        })
+    )
+  );
+  const until = Date.now() + settleMs;
+  while (Date.now() < until && socks.some((p) => fs.existsSync(p))) await new Promise((r) => setTimeout(r, 50));
+}
+
+/**
  * ssh -o flags enabling connection reuse. Applied identically to ssh and rsync's ssh.
  * `direct: false` forces the proxy (the tunnel's own key install and probe); a route forces that
  * route (its check before it is registered); unset takes the registered route when there is one.
  */
 export function sshMuxOpts(cfg: Config, o: { direct?: false | DirectRoute } = {}): string[] {
+  if (sshGates.has(cfg.vpsSsh)) return [...SSH_GATED_OPTS, ...(cfg.sshExtraOpts ?? [])];
   const route = o.direct === false ? undefined : (o.direct ?? directRoute(cfg.vpsSsh));
   const tag = sshTargetTag(cfg.vpsSsh);
   // A separate socket per route: a master to the proxy must not answer for the direct route or the other way round.

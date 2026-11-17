@@ -26,6 +26,7 @@ import { isWorkingBox, makeHostSleep, registerSleepResolver, type HostSleep } fr
 import { pickHost, totalCapacity, type HostCandidate, type PickResult } from "./host-pick.js";
 import { providerFor, type ProviderState } from "./host-providers.js";
 import { dropTunnel, ensureTunnel } from "./ssh-tunnel.js";
+import { gateSsh } from "./ssh.js";
 import {
   PRIMARY_HOST_ID,
   addAwakeMs,
@@ -65,6 +66,8 @@ export interface HostRuntime {
   readyFailedAt?: number;
   /** When the provider first said paused or stopped (the reading itself is refreshed every minute). */
   dormantSince?: number;
+  /** A pause is being asked for: dormant already, so no loop opens a session that would undo it. */
+  pausing?: boolean;
   /** Boots in flight (picked, not yet in `msb ls`). */
   reserved: number;
   /** Awake milliseconds this billing month (metered hosts), mirrored from the table. */
@@ -123,7 +126,13 @@ export interface HostPoolOpts {
   /** Tests: how often ready() asks the provider for the VM's state (5 s; 1.5 s once a start is out). */
   readyPollMs?: number;
   /** The direct SSH route to a proxied host (src/ssh-tunnel.ts); tests pass their own or none. */
-  tunnel?: { ensure: (cfg: Config, wanted: () => boolean) => Promise<boolean>; drop: (cfg: Config) => void } | null;
+  tunnel?: { ensure: (cfg: Config, wanted: () => boolean) => Promise<boolean>; drop: (cfg: Config, graceMs?: number) => void } | null;
+  /**
+   * Before a pause: close every SSH session to the host (the masters, src/ssh.ts closeSshMasters)
+   * and let the proxy notice, so no session is open when the pause lands. Injected so this module
+   * stays IO-free; tests leave it out.
+   */
+  quiesce?: (cfg: Config) => Promise<void>;
 }
 
 /** Boxes that hold a session on a host: the figure capacity is measured against. */
@@ -258,7 +267,7 @@ export function dormant(h: HostRuntime): boolean {
   // that reached it) does not answer SSH for a minute; a loop that tried would time out and call it
   // unreachable, and `readyForBox` would skip the wait a reply needs (seen live 2026-11-17: 172 s).
   const p = h.provider?.state;
-  return h.sleep.asleep() || p === "paused" || p === "stopped" || p === "starting";
+  return !!h.pausing || h.sleep.asleep() || p === "paused" || p === "stopped" || p === "starting";
 }
 
 /** A host that `ready` gave up on is left out of the ranking this long, so every run does not pay the wait again. */
@@ -394,12 +403,29 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
   const providerSync = async (h: HostRuntime, what: "pause" | "start"): Promise<void> => {
     const p = providerFor(h.spec);
     if (!p.metered) return;
-    // Before the pause lands: a forward still open to a VM that pauses would be re-dialled through
-    // the proxy, and that SSH would resume it.
-    if (what === "pause") tunnel?.drop(h.cfg);
-    const r = await p[what](h.spec);
+    if (what === "pause") {
+      // Nothing may be open at the proxy when the pause lands, and nothing may arrive while the VM
+      // is paused: the proxy answers either by resuming the VM (seen live 2026-11-17, four pauses
+      // in a row undone within a second: the forward and a mux master still open, then a sweep's
+      // command that reached the proxy as the pause landed; a pause with nothing open held). So:
+      // dormant from here (no loop starts a command), the gate shut (a command that slips through
+      // fails locally), the forward killed now, the masters closed, a moment for the proxy.
+      h.pausing = true;
+      gateSsh(h.cfg.vpsSsh, true);
+      tunnel?.drop(h.cfg, 0);
+      if (opts.quiesce) await opts.quiesce(h.cfg).catch(() => {});
+    } else gateSsh(h.cfg.vpsSsh, false);
+    let r: ProviderState;
+    try {
+      r = await p[what](h.spec);
+    } finally {
+      h.pausing = false;
+    }
     // A call that failed says nothing about the VM: the last good reading stays, with the error on it.
     setProvider(h, r.state === "unknown" && h.provider && h.provider.state !== "unknown" ? { ...h.provider, detail: r.detail } : r);
+    // A pause that did not land leaves a running VM: the gate opens again, or the host would read
+    // awake and answer nothing.
+    if (what === "pause" && !dormant(h)) gateSsh(h.cfg.vpsSsh, false);
     log(`[hosts] ${what} ${h.spec.id}: ${r.state}${r.detail ? ` (${r.detail})` : ""}`);
   };
 
@@ -783,6 +809,8 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     const wasAsleep = dormant(h);
     // The clock directly, not wake(): the provider start is this function's, with the wait that follows.
     h.sleep.wake(reason);
+    // The host is being brought up: its SSH may open again (the start below, the probe after it).
+    gateSsh(h.cfg.vpsSsh, false);
     const p = providerFor(h.spec);
     const cap = opts.answerTimeoutMs ?? HOST_ANSWER_TIMEOUT_MS;
     const patience = o.patienceMs ?? 150_000;

@@ -43,6 +43,7 @@ import { StartFailureStreak, isStartFailure, logTail, startFailureAlertText } fr
 import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, type CanaryResult } from "./canary.js";
 import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-disk.js";
 import { configureHostPool, makeHostPool } from "./host-pool.js";
+import { closeSshMasters } from "./ssh.js";
 import { PRIMARY_HOST_ID } from "./hosts.js";
 import { sweepHosts } from "./host-sweep.js";
 import { countBoxes as countBoxesOnHost } from "./msb.js";
@@ -162,6 +163,7 @@ const db = openDb(cfg.dataDir);
 const hostPool = configureHostPool(
   makeHostPool(cfg, db, {
     log: (m) => console.error(m),
+    quiesce: (c) => closeSshMasters(c.vpsSsh).then(() => new Promise<void>((r) => setTimeout(r, 1_500))),
     probe: async (c) => {
       const [live, disk] = await Promise.all([countBoxesOnHost(c), hostDisk(c).catch(() => undefined)]);
       return `${live} live box(es)${disk ? `, disk ${disk.usedPct}% used` : ""}`;

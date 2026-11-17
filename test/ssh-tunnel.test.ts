@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Config } from "../src/config.ts";
 import { directPort, directUser, dropTunnel, ensureTunnel, resetTunnelsForTest, routeFor, tunnelArgs, tunnelState, type TunnelIO } from "../src/ssh-tunnel.ts";
-import { directRoute, sshMuxOpts } from "../src/ssh.ts";
+import { directRoute, gateSsh, sshGated, sshMasterSockets, sshMuxOpts, SSH_GATED_OPTS } from "../src/ssh.ts";
 
 const cfg = { vpsSsh: "asb-host+root:tok@beta-ssh.freestyle.sh", hostId: "fs-1", sshPersist: "120", sshExtraOpts: ["-i", "/k/id", "-o", "StrictHostKeyChecking=accept-new"] } as unknown as Config;
 
@@ -160,4 +160,23 @@ test("routeFor and tunnelArgs are pure", () => {
   const r = routeFor(cfg.vpsSsh);
   assert.ok(r.alias.startsWith("asb-direct-") && r.knownHosts.endsWith(".known"));
   assert.deepEqual(tunnelArgs(cfg, r), tunnelArgs(cfg, r));
+});
+
+test("gateSsh: a gated target's commands fail locally (ProxyCommand=false, no master), with the extras kept; the sockets are the proxy's and the direct route's", () => {
+  resetTunnelsForTest();
+  gateSsh(cfg.vpsSsh, false);
+  assert.ok(sshMuxOpts(cfg).includes("ControlMaster=auto"));
+  gateSsh(cfg.vpsSsh, true);
+  assert.equal(sshGated(cfg.vpsSsh), true);
+  const o = sshMuxOpts(cfg);
+  assert.deepEqual(o.slice(0, SSH_GATED_OPTS.length), SSH_GATED_OPTS);
+  assert.ok(o.includes("/k/id"), "the identity is still given: ssh must not prompt or look for another");
+  assert.ok(!o.join(" ").includes("ControlMaster=auto"));
+  assert.ok(!o.join(" ").includes(".sock"));
+  gateSsh(cfg.vpsSsh, false);
+  assert.equal(sshGated(cfg.vpsSsh), false);
+  assert.ok(sshMuxOpts(cfg).includes("ControlMaster=auto"));
+  const socks = sshMasterSockets(cfg.vpsSsh);
+  assert.equal(socks.length, 2);
+  assert.ok(socks[0].endsWith(".sock") && socks[1].endsWith("d.sock"));
 });

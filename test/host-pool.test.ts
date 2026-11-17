@@ -7,6 +7,7 @@ import { configureHostPool, makeHostPool, sessionBoxes } from "../src/host-pool.
 import { sleepFor, registerSleepResolver } from "../src/host-sleep.ts";
 import { setProviderForTest, type ProviderState } from "../src/host-providers.ts";
 import { awakeMsOf } from "../src/hosts.ts";
+import { sshGated, sshMuxOpts } from "../src/ssh.ts";
 
 const cfg = {
   vpsSsh: "root@vps",
@@ -20,6 +21,16 @@ const cfg = {
 } as unknown as Config;
 
 const box = (name: string, runState: BoxView["runState"] = "running", role: BoxView["role"] = "session", boxStatus = "Running"): BoxView => ({ name, role, boxStatus, runState });
+
+/** A provider that answers at once; the pause a sleeping clock issues lands on the next tick. */
+let clock = (): number => 0;
+const instantProvider = {
+  metered: true,
+  state: async (): Promise<ProviderState> => ({ state: "running", at: clock() }),
+  pause: async (): Promise<ProviderState> => ({ state: "paused", at: clock() }),
+  start: async (): Promise<ProviderState> => ({ state: "running", at: clock() }),
+};
+const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
 
 const vmSpec = { id: "fs-1", name: "Freestyle 1", provider: "freestyle" as const, ssh: "a+root:t@beta-ssh.freestyle.sh", freestyle: { vmId: "vm-1", apiKey: "k" }, priority: 10, sleepAfterMs: 5 * 60_000, allowance: { vcpuHours: 200, vcpu: 4, resetDay: 1 } };
 
@@ -37,8 +48,10 @@ test("a pool with only the .env host routes everything to it and never sleeps", 
   registerSleepResolver(null);
 });
 
-test("adding a host: routing by box, per-host sleep, reservations, unreachable, capacity", () => {
+test("adding a host: routing by box, per-host sleep, reservations, unreachable, capacity", async () => {
+  setProviderForTest("freestyle", instantProvider);
   let t = 1_000_000;
+  clock = () => t;
   const said: string[] = [];
   const db = openMemoryDb();
   const pool = makeHostPool(cfg, db, { now: () => t, log: (m) => said.push(m) });
@@ -75,10 +88,12 @@ test("adding a host: routing by box, per-host sleep, reservations, unreachable, 
   t += 6 * 60_000;
   pool.noteSweep("fs-1", [box("sess-a", "done")]);
   assert.equal(pool.get("fs-1")!.sleep.asleep(), true);
+  await tick(); // the pause the clock issued has landed
   assert.equal(pool.allAsleep(), false, "the primary is a host of our own and is never asleep");
   // Asleep hosts rank behind awake ones at equal priority; a launch wakes them.
   pool.wake("fs-1", "task sess-a");
   assert.equal(pool.get("fs-1")!.sleep.asleep(), false);
+  await tick(); // the start the wake issued has landed
 
   // A failed sweep marks the host unreachable: it is skipped by the picker until a sweep succeeds.
   pool.noteSweepError("fs-1", "ssh: connect to host timed out");
@@ -97,10 +112,13 @@ test("adding a host: routing by box, per-host sleep, reservations, unreachable, 
   assert.equal(pool.cfgForBox("sess-a").hostId, "primary");
   assert.throws(() => pool.remove("primary"), /cannot be removed/);
   registerSleepResolver(null);
+  setProviderForTest("freestyle", null);
 });
 
-test("awake time is counted per month against a metered host, and the picker prefers the fuller allowance", () => {
+test("awake time is counted per month against a metered host, and the picker prefers the fuller allowance", async () => {
+  setProviderForTest("freestyle", instantProvider);
   let t = Date.UTC(2026, 10, 16, 12, 0, 0);
+  clock = () => t;
   const db = openMemoryDb();
   const pool = makeHostPool(cfg, db, { now: () => t });
   pool.upsert(vmSpec);
@@ -117,12 +135,14 @@ test("awake time is counted per month against a metered host, and the picker pre
   t += 6 * 60_000;
   pool.noteSweep("fs-1", []);
   assert.equal(pool.get("fs-1")!.sleep.asleep(), true);
+  await tick(); // the pause the clock issued has landed
   t += 60_000;
   pool.tickUsage();
   assert.equal(awakeMsOf(db, "fs-1", "2026-11"), 120_000 + 6 * 60_000, "the minutes before it slept count, the one after does not");
   assert.equal(awakeMsOf(db, "fs-2", "2026-11"), 9 * 60_000);
   // Fill the primary so the VMs compete: the one with more allowance left wins (fs-1 used less).
   pool.wake("fs-1");
+  await tick(); // the start the wake issued has landed
   pool.noteSweep("primary", Array.from({ length: 5 }, (_, i) => box(`s${i}`)));
   assert.equal(pool.pick().host?.spec.id, "fs-1");
   const view = pool.state().find((h) => h.id === "fs-2")!;
@@ -133,6 +153,7 @@ test("awake time is counted per month against a metered host, and the picker pre
   pool.tickUsage();
   assert.equal(pool.state().find((h) => h.id === "fs-2")!.allowance?.month, "2026-12");
   registerSleepResolver(null);
+  setProviderForTest("freestyle", null);
 });
 
 test("a metered host is paused through its provider when it falls asleep, and started on a wake", async () => {
@@ -881,4 +902,65 @@ test("pick: a slot reserved before a reload is released on the rebuilt runtime, 
   assert.equal(pool.state().find((h) => h.id === "fs-1")?.reserved, 0, "the new runtime is free again");
   picked.release();
   assert.equal(pool.state().find((h) => h.id === "fs-1")?.reserved, 0, "a second release is a no-op");
+});
+
+test("pause: the host is dormant and its SSH shut before the provider is asked; a start opens it again", async () => {
+  const order: string[] = [];
+  const fake = {
+    metered: true,
+    state: async (): Promise<ProviderState> => ({ state: "running", at: 0 }),
+    pause: async (): Promise<ProviderState> => {
+      order.push("provider pause");
+      return { state: "paused", at: 0 };
+    },
+    start: async (): Promise<ProviderState> => {
+      order.push("provider start");
+      return { state: "running", at: 0 };
+    },
+  };
+  setProviderForTest("freestyle", fake);
+  try {
+    let t = 1_000_000;
+    let pool: ReturnType<typeof makeHostPool>;
+    pool = makeHostPool(cfg, openMemoryDb(), {
+      now: () => t,
+      tunnel: { ensure: async () => true, drop: (_c, graceMs) => void order.push(`drop grace=${graceMs}`) },
+      quiesce: async (c) => {
+        // While the masters are being closed: no loop may open a session, and a command that tries fails locally.
+        order.push(`quiesce dormant=${pool.dormant("fs-1")} gated=${sshGated(c.vpsSsh)}`);
+        assert.ok(sshMuxOpts(c).includes("ProxyCommand=false"), "a gated command does not reach the network");
+      },
+    });
+    pool.upsert(vmSpec);
+    pool.noteSweep("fs-1", []);
+    assert.equal(sshGated(pool.cfgFor("fs-1").vpsSsh), false);
+    await pool.pause("fs-1");
+    assert.deepEqual(order, ["drop grace=0", "quiesce dormant=true gated=true", "provider pause"]);
+    assert.equal(pool.dormant("fs-1"), true, "paused at the provider");
+    assert.equal(sshGated(pool.cfgFor("fs-1").vpsSsh), true, "shut while the VM is paused: a session arriving at the proxy would resume it");
+    assert.ok(!sshMuxOpts(pool.cfgFor("fs-1")).includes("ControlMaster=auto"));
+    // The operator's start, or a run's ready: the gate opens before the provider is asked.
+    await pool.start("fs-1");
+    assert.deepEqual(order.slice(3), ["provider start"]);
+    assert.equal(sshGated(pool.cfgFor("fs-1").vpsSsh), false);
+    assert.ok(sshMuxOpts(pool.cfgFor("fs-1")).includes("ControlMaster=auto"));
+    // The clock's own pause (the host fell asleep) goes the same way.
+    order.length = 0;
+    pool.noteSweep("fs-1", []);
+    t += 6 * 60_000;
+    pool.noteSweep("fs-1", []);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(order, ["drop grace=0", "quiesce dormant=true gated=true", "provider pause"]);
+    await pool.ready("fs-1", "a run");
+    assert.equal(sshGated(pool.cfgFor("fs-1").vpsSsh), false, "ready opens the gate");
+    // A pause the provider could not do leaves a running VM: the gate opens again.
+    order.length = 0;
+    fake.pause = async () => ({ state: "unknown", detail: "aborted", at: 0 });
+    await pool.pause("fs-1");
+    assert.equal(pool.dormant("fs-1"), false);
+    assert.equal(sshGated(pool.cfgFor("fs-1").vpsSsh), false, "nothing to protect: the VM runs");
+  } finally {
+    setProviderForTest("freestyle", null);
+    registerSleepResolver(null);
+  }
 });
