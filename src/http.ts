@@ -833,8 +833,10 @@ const startFailures = new StartFailureStreak();
  * remote, so this works after a controller restart too. A user-edited profile is never touched.
  */
 const collectRepoSetup = async (box: string, owner: string): Promise<Array<{ name: string; slug: string }>> => {
+  // The box's own host: with the primary's config this ran `msb exec` where the box was not, so a
+  // run on a Freestyle VM never filed its memory notes under its repos (seen live 2026-11-17).
   const r = await execInBox(
-    cfg,
+    hcfg(box),
     box,
     `for d in /workspace/*/; do n=$(basename "$d"); u=$(git -C "$d" remote get-url origin 2>/dev/null); [ -n "$u" ] && echo "@@R $n|$u"; done; ` +
       `[ -f ${SETUP_SENTINEL} ] && { echo "@@S"; head -c 50000 ${SETUP_SENTINEL}; }; true`,
@@ -985,7 +987,20 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
   }
 };
 
+// Boxes whose finish edge is being read right now (diff, changed files, repo setup): a few SSHes
+// to the box's host seconds after `done`. An operator's pause landing in that window would turn
+// the next of them into the provider proxy's own slow resume, so the pause route waits them out.
+const finishing = new Set<string>();
+const finishingOn = (hostId: string): boolean => [...finishing].some((b) => (hostPool.hostOfBox(b) ?? PRIMARY_HOST_ID) === hostId);
 const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet?: boolean } = { withFiles: true }): Promise<void> => {
+  finishing.add(box);
+  try {
+    await archiveFinishedRunInner(box, opts);
+  } finally {
+    finishing.delete(box);
+  }
+};
+const archiveFinishedRunInner = async (box: string, opts: { withFiles: boolean; quiet?: boolean }): Promise<void> => {
   const snap = await watchHub.read(box);
   if (snap.boxStatus === "missing") return;
   // Only a genuinely FINISHED run earns a record. Testing for "not running and not waiting" is not
@@ -5240,6 +5255,10 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
         }
         if (h?.reserved) {
           res.status(409).json({ error: "a run is being started on this host; pause it once the run is up" });
+          return;
+        }
+        if (finishingOn(id)) {
+          res.status(409).json({ error: "a run on this host just finished and its changes are being read; try again in a few seconds" });
           return;
         }
         const r = await hostPool.pause(id);
