@@ -615,7 +615,7 @@ const resumeQuietly = (session: string, message: string, extraSecrets?: Record<s
       );
       // The controller started this turn itself, so the next sweep that reads the box "done" is a
       // finish edge even if no sweep caught it running (see turnStarted).
-      turnStarted.add(session);
+      turnStarted.set(session, Date.now());
       return out;
     } catch (e) {
       // The optimistic "running" note above was wrong — the resume never happened. Roll it back and
@@ -669,8 +669,11 @@ let prevRunViews: BoxRunView[] = [];
 // shorter than one sweep interval (`date -u`, a one-line answer) went done→done between two
 // sweeps and so left no finish edge: no notification, no history row, no memory notes, no
 // checkpoint (seen live 2026-11-17, a 20 s reply turn on the Freestyle host). The sweep reads
-// such a box as "running" in the previous view, so its next "done" is the edge it is.
-const turnStarted = new Set<string>();
+// such a box as "running" in the previous view, so its next "done" is the edge it is. Keyed by
+// when the turn started: only a sweep that BEGAN after that consumes the mark. A sweep already in
+// flight read the box before the reply and would report the old "done" as a second finish (seen
+// live: a duplicate done push one second after the reply).
+const turnStarted = new Map<string, number>();
 const notifyCtx = new Map<string, { title?: string; task?: string }>();
 const sendNotification = async (ev: NotifyEvent): Promise<void> => {
   const owner = ownerOf(db, ev.box) ?? OPERATOR_OWNER;
@@ -1181,6 +1184,7 @@ const harnessLineOf = (box: string): { harness: { id: string; name: string; line
 const readFleet = makeFleetReader(
   cfg,
   async () => {
+    const sweepAt = Date.now();
     const { boxes, kept, claims, titles } = await sweepHosts(cfg);
     // A box seen Running last sweep and Stopped now just fell asleep: re-stamp its claim so the sleep
     // TTL (and the "asleep for" figure) count from the nap rather than from when the run started.
@@ -1199,8 +1203,9 @@ const readFleet = makeFleetReader(
         .filter((b) => b.role !== "pool-free")
         .map((b) => ({ name: b.name, runState: b.runState, exitCode: b.exitCode, question: b.question, stalled: b.stalled, lastOutputAt: b.lastOutputAt }));
       if (turnStarted.size) {
-        prevRunViews = prevRunViews.map((v) => (turnStarted.has(v.name) && (v.runState === "done" || v.runState === "idle") ? { ...v, runState: "running" } : v));
-        turnStarted.clear();
+        const ripe = new Set([...turnStarted].filter(([, t]) => t < sweepAt).map(([name]) => name));
+        prevRunViews = prevRunViews.map((v) => (ripe.has(v.name) && (v.runState === "done" || v.runState === "idle") ? { ...v, runState: "running" } : v));
+        for (const name of ripe) turnStarted.delete(name);
       }
       for (const ev0 of detectTransitions(prevRunViews, nextRunViews)) {
         const edgeTask = boxes.find((b) => b.name === ev0.box)?.task;
