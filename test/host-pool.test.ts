@@ -255,6 +255,125 @@ test("sweepHosts: a host that does not answer in time is served from memory and 
   }
 });
 
+test("pick: exclude skips the hosts a boot already failed on", () => {
+  const pool = makeHostPool(cfg, openMemoryDb());
+  pool.upsert({ id: "b", name: "b", ssh: "root@b", priority: -1 });
+  assert.equal(pool.pick().host?.spec.id, "b");
+  assert.equal(pool.pick({ exclude: ["b"] }).host?.spec.id, "primary");
+  assert.match(pool.pick({ exclude: ["b", "primary"] }).reason ?? "", /no box host/);
+  registerSleepResolver(null);
+});
+
+test("ready: a paused VM is started and waited for, then probed until it answers; a VM that never comes up throws", async () => {
+  const states: string[] = ["paused", "starting", "starting", "running"];
+  const calls: string[] = [];
+  let probes = 0;
+  setProviderForTest("freestyle", {
+    metered: true,
+    state: async (): Promise<ProviderState> => ({ state: states.length > 1 ? states.shift()! : states[0], at: 0 }),
+    pause: async (): Promise<ProviderState> => ({ state: "paused", at: 0 }),
+    start: async (): Promise<ProviderState> => {
+      calls.push("start");
+      return { state: "starting", at: 0 };
+    },
+  });
+  try {
+    let t = 1_000_000;
+    const pool = makeHostPool(cfg, openMemoryDb(), {
+      now: () => t,
+      readyPollMs: 1,
+      answerTimeoutMs: 50,
+      probe: async (c) => {
+        if (c.hostId !== "fs-1") return "ok";
+        probes++;
+        if (probes < 3) throw new Error("Connection closed by remote host");
+        return "0 live box(es)";
+      },
+    });
+    pool.upsert(vmSpec);
+    pool.noteSweep("fs-1", []);
+    t += 6 * 60_000;
+    pool.noteSweep("fs-1", []);
+    assert.equal(pool.get("fs-1")!.sleep.asleep(), true);
+    await pool.ready("fs-1", "run x");
+    assert.deepEqual(calls, ["start"], "started once through the provider");
+    assert.equal(probes, 3, "two SSH failures while the VM crawls, then an answer");
+    assert.equal(pool.get("fs-1")!.sleep.asleep(), false);
+    assert.equal(pool.state().find((h) => h.id === "fs-1")?.providerState?.state, "running");
+    assert.equal(pool.state().find((h) => h.id === "fs-1")?.unreachable, false);
+    // Awake and answering: ready is a no-op apart from the state read.
+    probes = 0;
+    await pool.ready("fs-1");
+    assert.equal(probes, 0);
+    // The primary (static): nothing to start, nothing to probe while it is awake.
+    await pool.ready("primary");
+
+    // A VM that never answers its probes: unreachable, and the caller is told.
+    states.splice(0, states.length, "running");
+    probes = -100;
+    await pool.ready("fs-1");
+    assert.equal(pool.state().find((h) => h.id === "fs-1")?.unreachable, false, "probes were skipped: it was awake and reachable");
+    // Marked unreachable by a sweep: it has to answer a probe again, and here it never does.
+    pool.noteSweepError("fs-1", "x");
+    await assert.rejects(() => pool.ready("fs-1"), /did not answer: Connection closed/);
+    assert.equal(pool.state().find((h) => h.id === "fs-1")?.unreachable, true);
+  } finally {
+    setProviderForTest("freestyle", null);
+    registerSleepResolver(null);
+  }
+});
+
+test("placeRun: a boot that fails before the box exists moves to the next host; after the box exists the error is the run's", async () => {
+  const { placeRun } = await import("../src/host-pool.ts");
+  const said: string[] = [];
+  const pool = makeHostPool(cfg, openMemoryDb(), { probe: async () => "ok" });
+  pool.upsert({ id: "b", name: "b", ssh: "root@b", priority: -1, maxBoxes: 2 });
+  const attempts: string[] = [];
+  const out = await placeRun(pool, cfg, "run t", async (hostCfg, onAcquired) => {
+    attempts.push(hostCfg.hostId!);
+    if (hostCfg.hostId === "b") throw new Error("ssh: Connection closed by remote host");
+    onAcquired();
+    return { box: "box-1", host: hostCfg.hostId };
+  }, (m) => said.push(m));
+  assert.deepEqual(attempts, ["b", "primary"]);
+  assert.deepEqual(out, { box: "box-1", host: "primary" });
+  assert.equal(pool.state().find((h) => h.id === "b")?.unreachable, true, "the host that failed is out until a sweep gets through");
+  assert.match(pool.state().find((h) => h.id === "b")?.lastError ?? "", /boot failed: ssh/);
+  assert.ok(said.some((m) => /boot on b failed/.test(m)));
+  assert.equal(pool.get("primary")!.reserved, 0, "every slot released");
+  assert.equal(pool.get("b")!.reserved, 0);
+
+  // Once the box exists the run stays: no second host, the error comes back as is.
+  pool.noteSweep("b", []);
+  attempts.length = 0;
+  await assert.rejects(
+    () =>
+      placeRun(pool, cfg, "run u", async (hostCfg, onAcquired) => {
+        attempts.push(hostCfg.hostId!);
+        onAcquired();
+        throw new Error("agent exited 1");
+      }, () => {}),
+    /agent exited 1/
+  );
+  assert.deepEqual(attempts, ["b"]);
+
+  // Every host failing before the box: the last error with the hosts named.
+  attempts.length = 0;
+  await assert.rejects(
+    () =>
+      placeRun(pool, cfg, "run v", async (hostCfg) => {
+        attempts.push(hostCfg.hostId!);
+        throw new Error(`${hostCfg.hostId} is down`);
+      }, () => {}),
+    /primary is down/
+  );
+  assert.deepEqual(attempts, ["b", "primary"]);
+
+  // Without a pool the attempt runs once on the given config.
+  assert.equal(await placeRun(null, cfg, "run w", async (c) => c.vpsSsh), "root@vps");
+  registerSleepResolver(null);
+});
+
 test("the shared pool answers cfgForBox and warmCfgs; without one the given config is used", async () => {
   const { cfgForBox, warmCfgs, poolCapacity, hostPool } = await import("../src/host-pool.ts");
   assert.equal(hostPool(), null);

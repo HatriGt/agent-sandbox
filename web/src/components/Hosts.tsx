@@ -87,7 +87,10 @@ export function HostsPanel({ onChanged }: { onChanged?: () => void }) {
             Box hosts
           </h2>
           <p className="text-muted-foreground mt-0.5 text-micro">
-            Where machines boot. A run goes to the lowest order number with a free slot; equal hosts share by what is warm, awake and least used this month.
+            Where machines boot. A run goes to the lowest order number with a free slot; equal hosts share by what is warm, awake and least used this month.{" "}
+            <a className="text-foreground/70 hover:text-foreground underline underline-offset-2" href="https://github.com/HatriGt/agent-sandbox/blob/main/docs/hosts.md" target="_blank" rel="noreferrer">
+              How box hosts work
+            </a>
           </p>
         </div>
         <Button size="sm" variant="outline" onClick={() => setEditing("new")}>

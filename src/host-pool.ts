@@ -111,6 +111,8 @@ export interface HostPoolOpts {
   probe?: (cfg: Config) => Promise<string>;
   /** Tests: a shorter cap on the probe than HOST_ANSWER_TIMEOUT_MS. */
   answerTimeoutMs?: number;
+  /** Tests: how often ready() asks the provider for the VM's state (5 s). */
+  readyPollMs?: number;
 }
 
 /** Boxes that hold a session on a host: the figure capacity is measured against. */
@@ -130,7 +132,14 @@ export interface HostPool {
   forgetBox(box: string): void;
   /** Hosts that keep warm boxes, as bound configs (for the pool refill loops). */
   warmCfgs(): Config[];
-  pick(opts?: { warmReady?: (h: HostRuntime) => boolean; minAllowanceHours?: number }): PickResult & { host?: HostRuntime; release: () => void };
+  pick(opts?: { warmReady?: (h: HostRuntime) => boolean; minAllowanceHours?: number; exclude?: readonly string[] }): PickResult & { host?: HostRuntime; release: () => void };
+  /**
+   * The host is awake and answering before a run is launched on it: wakes the clock, starts a paused
+   * VM through its provider and waits for "running", then for one probe to get through (a resumed VM
+   * crawls for about a minute while memory pages back in). Throws when it never answers, so the
+   * caller can place the run elsewhere.
+   */
+  ready(id: string, reason?: string): Promise<void>;
   capacity(): number;
   noteSweep(id: string, boxes: BoxView[]): void;
   noteSweepError(id: string, err: string): void;
@@ -148,6 +157,44 @@ export interface HostPool {
   pause(id: string): Promise<ProviderState>;
   start(id: string): Promise<ProviderState>;
   reload(): void;
+}
+
+/**
+ * One run, placed: pick a host, bring it up, attempt. A failure before the box exists (the host
+ * did not wake, SSH died, msb refused) is the host's fault, not the task's, so that host is marked
+ * unreachable and the run is attempted on the next one; once `onAcquired` has been called the
+ * run stays where it is and its error is the caller's. Without a pool the attempt runs on `cfg`.
+ */
+export async function placeRun<T>(
+  pool: HostPool | null,
+  cfg: Config,
+  label: string,
+  attempt: (hostCfg: Config, onAcquired: () => void) => Promise<T>,
+  log: (m: string) => void = (m) => console.error(m)
+): Promise<T> {
+  const tried: string[] = [];
+  for (;;) {
+    const picked = pool?.pick({ minAllowanceHours: 1, exclude: tried });
+    if (picked && !picked.host) {
+      throw new Error(tried.length ? `No other box host can take this run after ${tried.join(", ")} failed: ${picked.reason}.` : `No box host can take this run: ${picked.reason}.`);
+    }
+    const hostCfg: Config = picked?.host ? { ...cfg, ...picked.host.cfg } : cfg;
+    let acquired = false;
+    try {
+      if (picked?.host && pool) await pool.ready(picked.host.spec.id, label);
+      return await attempt(hostCfg, () => (acquired = true));
+    } catch (e) {
+      const id = picked?.host?.spec.id;
+      const others = pool && id ? pool.enabled().filter((h) => h.spec.id !== id && !tried.includes(h.spec.id)).length : 0;
+      if (acquired || !id || !others) throw e;
+      const msg = String((e as Error).message ?? e);
+      log(`[hosts] boot on ${id} failed before the box existed, trying another host: ${msg.slice(0, 200)}`);
+      pool!.noteSweepError(id, `boot failed: ${msg.slice(0, 200)}`);
+      tried.push(id);
+    } finally {
+      picked?.release();
+    }
+  }
 }
 
 /** How long one host gets to answer a sweep or a check before it is treated as unreachable this round. */
@@ -295,7 +342,8 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     },
     warmCfgs: () => enabled().filter((h) => h.spec.warm && !h.unreachableSince).map((h) => h.cfg),
     pick: (o = {}) => {
-      const r = pickHost(candidates(o.warmReady, o.minAllowanceHours));
+      const skip = new Set(o.exclude ?? []);
+      const r = pickHost(candidates(o.warmReady, o.minAllowanceHours).filter((c) => !skip.has(c.id)));
       const host = r.id ? get(r.id) : undefined;
       if (!host) return { ...r, release: () => {} };
       host.reserved++;
@@ -456,6 +504,49 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       }
       h.check = r;
       return r;
+    },
+    ready: async (id, reason) => {
+      const h = get(id);
+      if (!h) throw new Error(`no host "${id}"`);
+      const wasAsleep = h.sleep.asleep();
+      // The clock directly, not wake(): the provider start is this function's, with the wait that follows.
+      h.sleep.wake(reason);
+      const p = providerFor(h.spec);
+      const cap = opts.answerTimeoutMs ?? HOST_ANSWER_TIMEOUT_MS;
+      const pollMs = opts.readyPollMs ?? 5_000;
+      let cameUp = false;
+      if (p.metered && h.spec.freestyle?.apiKey) {
+        // Up to 2.5 minutes for the provider to say running (a Freestyle resume answered in 18 s to 2 min live).
+        const t0 = now();
+        let state = (h.provider = await p.state(h.spec).catch((e): ProviderState => ({ state: "unknown", detail: String((e as Error).message ?? e), at: now() })));
+        if (state.state !== "running") {
+          cameUp = true;
+          if (state.state === "paused" || state.state === "stopped") await providerSync(h, "start").catch(() => {});
+          while (now() - t0 < 150_000) {
+            await new Promise((r) => setTimeout(r, pollMs));
+            state = h.provider = await p.state(h.spec).catch(() => state);
+            if (state.state === "running") break;
+          }
+          if (state.state !== "running") throw new Error(`host ${id} is ${state.state} after ${Math.round((now() - t0) / 1000)}s${state.detail ? ` (${state.detail})` : ""}`);
+        }
+      }
+      // A host that was asleep, unreachable or just came up has to answer once before a box is launched on it.
+      if (!opts.probe || (!wasAsleep && !cameUp && !h.unreachableSince)) return;
+      let lastErr = "";
+      for (let i = 0; i < 3; i++) {
+        try {
+          await withTimeout(opts.probe(h.cfg), cap, `probe of ${id}`);
+          h.lastError = undefined;
+          h.unreachableSince = undefined;
+          return;
+        } catch (e) {
+          lastErr = (e as Error).message;
+          log(`[hosts] ${id} not answering yet (${i + 1}/3): ${lastErr.slice(0, 120)}`);
+        }
+      }
+      h.lastError = lastErr.slice(0, 300);
+      h.unreachableSince ??= now();
+      throw new Error(`host ${id} did not answer: ${lastErr}`);
     },
     refreshProvider: async (id) => {
       const h = get(id);

@@ -16,7 +16,7 @@ import { acquireBox, refillPool, poolEligible, ompPoolEligible, poolStatus } fro
 import { noteOwnerActive, noteOwnerAgent } from "./warm-owners.js";
 import { ownerKey } from "./user-store.js";
 import { isCanaryTask } from "./canary.js";
-import { cfgForBox, hostPool, sessionBoxes, warmCfgs } from "./host-pool.js";
+import { cfgForBox, hostPool, placeRun, sessionBoxes, warmCfgs } from "./host-pool.js";
 import { sweepBoxes } from "./host-sweep.js";
 import {
   runAgentTask,
@@ -482,36 +482,12 @@ export const deps: HandlerDeps = {
   ): Promise<DelegationResult> {
     // A thread's model provider needs its endpoint reachable: derived, never typed in twice.
     if (plan.provider) allowDomains = Array.from(new Set([...(allowDomains ?? []), ...providerEgressDomains(plan.provider)]));
-    // Which host takes this run (src/host-pick.ts). The slot is held until the box is in `msb ls`
-    // so a parallel fan-out cannot overshoot one host while the total gate still passes.
-    const picked = hostPool()?.pick({ minAllowanceHours: 1 });
-    if (picked && !picked.host) throw new Error(`No box host can take this run: ${picked.reason}.`);
-    const hostCfg: Config = picked?.host ? { ...cfg, ...picked.host.cfg } : cfg;
-    const releaseSlot = (): void => picked?.release();
-    // Per-call egress extras merge onto the curated allowlist for this delegation only.
-    let runCfg = allowDomains?.length
-      ? { ...hostCfg, egressDomains: Array.from(new Set([...hostCfg.egressDomains, ...allowDomains])) }
-      : hostCfg;
-    // An omp run cold-boots from the base image with a bigger root disk: bun + omp need ~1.5 GB
-    // the 1G snapshot rootfs cannot hold, and growing a claimed box requires a restart during
-    // which the pool maintainer reaps it as unexecable (measured live). snapshot:"" also makes
-    // this box pool-INELIGIBLE below, so a pooled 1G box is never claimed for it.
-    if (plan.agent === "omp") {
-      // Memory too: bun + per-session npx MCP servers crashed a 1G microVM mid-run (healed as
-      // "sandbox restarted"); omp boxes get the 2G tier from boot. When an agent-omp snapshot is
-      // baked (MSB_OMP_SNAPSHOT), boot from it — bun + omp pre-installed on the 4G rootfs, so the
-      // ~90s per-thread install disappears; otherwise cold-boot from the image and install.
-      runCfg = { ...runCfg, ...ompRootSource(hostCfg), rootDisk: OMP_MIN_DISK, memory: OMP_MIN_MEMORY, cpus: OMP_CPUS };
-    } else {
-      // Every other driver runs in the claude box: the baked claude image when one is configured
-      // (MSB_CLAUDE_IMAGE), else the snapshot, else a cold install from the base image.
-      runCfg = { ...runCfg, ...claudeRootSource(hostCfg) };
-    }
-    try {
-      return await runOnHost(runCfg, hostCfg, plan, allowDomains, creds, interact, releaseSlot);
-    } finally {
-      releaseSlot();
-    }
+    // Which host takes this run (src/host-pick.ts; placeRun holds the slot until the box is in
+    // `msb ls`, so a parallel fan-out cannot overshoot one host while the total gate still passes,
+    // and moves the run to the next host when this one fails before the box exists).
+    return placeRun(hostPool(), cfg, `run ${plan.task.slice(0, 40)}`, (hostCfg, onAcquired) =>
+      runOnHost(prepareRunCfg(hostCfg, plan, allowDomains), hostCfg, plan, allowDomains, creds, interact, onAcquired)
+    );
   },
 
   async status(cfg, session, interact) {
@@ -701,8 +677,32 @@ export const deps: HandlerDeps = {
   },
 };
 
-/** The delegation on its chosen host; `releaseSlot` is called once the box holds the slot itself. */
-async function runOnHost(runCfg: Config, cfg: Config, plan: DelegatePlan, allowDomains: string[] | undefined, creds: AgentCreds | undefined, interact: Interact | undefined, releaseSlot: () => void): Promise<DelegationResult> {
+/** The delegation on its chosen host; `onAcquired` is called once the box exists (placeRun releases the slot and stops moving the run). */
+/** The Config a run boots with on its host: egress extras, then the root source and size per agent. */
+function prepareRunCfg(hostCfg: Config, plan: DelegatePlan, allowDomains: string[] | undefined): Config {
+  // Per-call egress extras merge onto the curated allowlist for this delegation only.
+  let runCfg = allowDomains?.length
+    ? { ...hostCfg, egressDomains: Array.from(new Set([...hostCfg.egressDomains, ...allowDomains])) }
+    : hostCfg;
+  // An omp run cold-boots from the base image with a bigger root disk: bun + omp need ~1.5 GB
+  // the 1G snapshot rootfs cannot hold, and growing a claimed box requires a restart during
+  // which the pool maintainer reaps it as unexecable (measured live). snapshot:"" also makes
+  // this box pool-INELIGIBLE below, so a pooled 1G box is never claimed for it.
+  if (plan.agent === "omp") {
+    // Memory too: bun + per-session npx MCP servers crashed a 1G microVM mid-run (healed as
+    // "sandbox restarted"); omp boxes get the 2G tier from boot. When an agent-omp snapshot is
+    // baked (MSB_OMP_SNAPSHOT), boot from it — bun + omp pre-installed on the 4G rootfs, so the
+    // ~90s per-thread install disappears; otherwise cold-boot from the image and install.
+    runCfg = { ...runCfg, ...ompRootSource(hostCfg), rootDisk: OMP_MIN_DISK, memory: OMP_MIN_MEMORY, cpus: OMP_CPUS };
+  } else {
+    // Every other driver runs in the claude box: the baked claude image when one is configured
+    // (MSB_CLAUDE_IMAGE), else the snapshot, else a cold install from the base image.
+    runCfg = { ...runCfg, ...claudeRootSource(hostCfg) };
+  }
+  return runCfg;
+}
+
+async function runOnHost(runCfg: Config, cfg: Config, plan: DelegatePlan, allowDomains: string[] | undefined, creds: AgentCreds | undefined, interact: Interact | undefined, onAcquired: () => void): Promise<DelegationResult> {
 
   const id = newSessionId();
   // Phase timings for start-latency work: one [timing] line per delegation, ms per phase.
@@ -776,7 +776,8 @@ async function runOnHost(runCfg: Config, cfg: Config, plan: DelegatePlan, allowD
   const { box, warm } = await acquireBox(runCfg, id, sessionRoot, eligible, poolAgent, boxOwner);
   mark("acquire");
   if (runCfg.hostId) hostPool()?.rememberBox(box, runCfg.hostId);
-  releaseSlot();
+  // The box exists: the slot is released and from here a failure is the run's, not the host's.
+  onAcquired();
 
   // Operator attachments (pasted screenshots) land in the box before the agent's first tool call.
   for (const a of plan.attachments ?? []) {

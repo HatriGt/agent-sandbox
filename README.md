@@ -141,7 +141,7 @@ Every console action has a route behind it (`/fleet.json`, `/watch.sse`, `/ask.j
 - [Tools](#tools) — `delegate` · `status` · `resume` · `monitor` · `watch` · `ask` · …
 - [How delegation flows (A2A)](#how-delegation-flows-a2a) — the blocking wait loop and the question protocol
 - [Connect your IDE](#connect-your-ide) — Cursor, VS Code, Windsurf, Zed, Claude Code, Cline, CI
-- [Layout](#layout) · [Deploy](#deploy-the-remote-http-entry)
+- [Layout](#layout) · [Deploy](#deploy-the-remote-http-entry) · [Box hosts](docs/hosts.md) — a pool of machines runs go to: your VPS, Freestyle accounts, any host with msb
 - [Security](#security) · [Contributing](#contributing) · [License](#license)
 
 ---
@@ -443,6 +443,12 @@ the container→host SSH settings, and builds. Then:
 
 The container drives `msb` on the VPS **host** over SSH (msb needs KVM on the host), reaching it
 as `host.docker.internal`. Everything site-specific lives in `.env`; the repo ships no secrets.
+
+That VPS is the **primary box host**. More hosts can be added from the dashboard (Fleet view →
+Box hosts) without touching `.env`: Freestyle VMs that pause themselves between runs, or any
+machine with `msb` that answers SSH. Runs are routed across them by order number, warmth,
+wakefulness and monthly allowance, and a host that is down or spent is skipped. See
+[`docs/hosts.md`](docs/hosts.md).
 
 
 ## Multi-user mode
