@@ -130,9 +130,17 @@ export function makeFleetReader(
     sleep?: { asleep(): boolean; noteFleet(boxes: readonly BoxView[]): void };
     /** Slots across every box host (src/host-pool.ts), read per snapshot so an added host shows at once. */
     capacity?: () => number;
+    /**
+     * Stale-while-revalidate: a snapshot older than ttl but younger than this is handed out at
+     * once and a sweep is started behind it. 0 (the default) waits for the sweep. The dashboard
+     * polls every 3 s and a sweep over a Freestyle VM's SSH proxy takes ~3.4 s, so without this
+     * every poll waited on a sweep and the page was always a sweep behind anyway.
+     */
+    staleMs?: number;
   } = {}
-): () => Promise<FleetSnapshot> {
+): FleetReader {
   const ttl = opts.ttlMs ?? 1500;
+  const stale = opts.staleMs ?? 0;
   // Comfortably above a healthy sweep (~1.2s measured with 3 boxes) and below the client's own
   // patience, so a wedged sweep costs one slow response rather than every response thereafter.
   const sweepTtl = opts.sweepTtlMs ?? 20_000;
@@ -159,18 +167,7 @@ export function makeFleetReader(
     }
   };
 
-  return () => {
-    // Asleep: every SSH would wake the host, and the sweep is the one that runs on a timer. Hand
-    // out the last snapshot (flagged, so the UI can say so) until a launch wakes us.
-    if (opts.sleep?.asleep() && cached) return Promise.resolve({ ...cached, hostAsleep: true });
-    if (cached && now() - cached.at < ttl) return Promise.resolve(cached);
-    // A sweep that never settles must not be shared forever. `inFlight` de-duplicates concurrent
-    // callers, but it used to be cleared ONLY in .finally() — so one unsettleable sweep (a wedged
-    // `msb exec` into a box caught mid-shutdown) meant every later reader was handed that same dead
-    // promise and the dashboard hung on skeletons until the controller was restarted. Observed in
-    // production. Stop sharing a sweep that has outlived any plausible runtime; the next caller
-    // starts a fresh one, and the abandoned promise settles (or doesn't) harmlessly on its own.
-    if (inFlight && now() - inFlightAt < sweepTtl) return inFlight;
+  const run = (): Promise<FleetSnapshot> => {
     inFlightAt = now();
     const mine = (async () => {
       if (!hydrated && opts.store) {
@@ -202,4 +199,32 @@ export function makeFleetReader(
     inFlight = mine;
     return mine;
   };
+  const read = (): Promise<FleetSnapshot> => {
+    // Asleep: every SSH would wake the host, and the sweep is the one that runs on a timer. Hand
+    // out the last snapshot (flagged, so the UI can say so) until a launch wakes us.
+    if (opts.sleep?.asleep() && cached) return Promise.resolve({ ...cached, hostAsleep: true });
+    if (cached && now() - cached.at < ttl) return Promise.resolve(cached);
+    const serveStale = !!cached && now() - cached.at < stale;
+    // A sweep that never settles must not be shared forever. `inFlight` de-duplicates concurrent
+    // callers, but it used to be cleared ONLY in .finally() — so one unsettleable sweep (a wedged
+    // `msb exec` into a box caught mid-shutdown) meant every later reader was handed that same dead
+    // promise and the dashboard hung on skeletons until the controller was restarted. Observed in
+    // production. Stop sharing a sweep that has outlived any plausible runtime; the next caller
+    // starts a fresh one, and the abandoned promise settles (or doesn't) harmlessly on its own.
+    if (inFlight && now() - inFlightAt < sweepTtl) return serveStale ? Promise.resolve(cached!) : inFlight;
+    const mine = run();
+    if (serveStale) {
+      mine.catch(() => {});
+      return Promise.resolve(cached!);
+    }
+    return mine;
+  };
+  // A box the controller itself just destroyed: out of the snapshot now, so a stale-while-revalidate
+  // read a moment later does not show the machine the user watched disappear.
+  read.forget = (name: string) => {
+    if (cached) cached = { ...cached, boxes: cached.boxes.filter((b) => b.name !== name) };
+  };
+  return read;
 }
+
+export type FleetReader = (() => Promise<FleetSnapshot>) & { forget: (name: string) => void };

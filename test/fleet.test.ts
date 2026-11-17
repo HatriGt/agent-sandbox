@@ -187,3 +187,45 @@ test("makeFleetReader: asleep serves the last snapshot flagged hostAsleep and ne
   assert.equal(fresh.hostAsleep, undefined);
   assert.deepEqual(seen, [1, 1]);
 });
+
+test("makeFleetReader: stale-while-revalidate answers from the last snapshot while a sweep runs behind it; forget drops a box at once", async () => {
+  let sweeps = 0;
+  let t = 0;
+  let boxes = [running("a"), running("b")];
+  const cfg = { idleTimeout: "15m", poolIdleTimeout: "6h", maxDuration: "1h", maxBoxes: 5, poolSize: 1, sleepTtl: "1h" } as Config;
+  let release: (() => void) | null = null;
+  const read = makeFleetReader(
+    cfg,
+    () => {
+      sweeps++;
+      return new Promise<BoxView[]>((resolve) => {
+        release = () => resolve(boxes);
+      });
+    },
+    { ttlMs: 1000, staleMs: 10_000, now: () => t }
+  );
+  const first = read();
+  release!();
+  assert.equal((await first).boxes.length, 2);
+  // Past ttl, inside the stale window: the old snapshot comes back at once and a sweep starts.
+  t = 3000;
+  const second = await read();
+  assert.equal(second.boxes.length, 2);
+  assert.equal(sweeps, 2, "a sweep started behind the stale answer");
+  // The sweep is still running; another read shares it without waiting.
+  assert.equal((await read()).at, 0);
+  // Forgotten: gone from the snapshot before the sweep lands.
+  read.forget("b");
+  assert.deepEqual((await read()).boxes.map((b) => b.name), ["a"]);
+  boxes = [running("a")];
+  release!();
+  await new Promise((r) => setTimeout(r, 0));
+  t = 3500;
+  assert.equal((await read()).at, 3000, "the sweep's answer is the snapshot now");
+  // Past the stale window: a read waits for the sweep.
+  t = 20_000;
+  const third = read();
+  assert.equal(sweeps, 3);
+  release!();
+  assert.equal((await third).at, 20_000);
+});

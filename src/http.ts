@@ -1000,19 +1000,24 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
   }
 };
 
-// Boxes whose finish edge is being read right now (diff, changed files, repo setup): a few SSHes
-// to the box's host seconds after `done`. An operator's pause landing in that window would turn
-// the next of them into the provider proxy's own slow resume, so the pause route waits them out.
-const finishing = new Set<string>();
-const finishingOn = (hostId: string): boolean => [...finishing].some((b) => (hostPool.hostOfBox(b) ?? PRIMARY_HOST_ID) === hostId);
-const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet?: boolean } = { withFiles: true }): Promise<void> => {
-  finishing.add(box);
+// Boxes whose finish edge is being wrapped up right now: the diff and changed files, the repo
+// setup, a verify clause, the turn checkpoint - SSHes to the box's host for seconds (a verify:
+// minutes) after `done`. An operator's pause landing in that window turned the next of them into
+// the provider proxy's own slow resume (seen live twice, once from the archive's diff read and
+// once from the checkpoint tar), so the pause route refuses while any of it is in flight.
+const finishing = new Map<string, number>();
+const withFinishing = async <T>(box: string, fn: () => Promise<T>): Promise<T> => {
+  finishing.set(box, (finishing.get(box) ?? 0) + 1);
   try {
-    await archiveFinishedRunInner(box, opts);
+    return await fn();
   } finally {
-    finishing.delete(box);
+    const n = (finishing.get(box) ?? 1) - 1;
+    if (n <= 0) finishing.delete(box);
+    else finishing.set(box, n);
   }
 };
+const finishingOn = (hostId: string): boolean => [...finishing.keys()].some((b) => (hostPool.hostOfBox(b) ?? PRIMARY_HOST_ID) === hostId);
+const archiveFinishedRun = (box: string, opts: { withFiles: boolean; quiet?: boolean } = { withFiles: true }): Promise<void> => withFinishing(box, () => archiveFinishedRunInner(box, opts));
 const archiveFinishedRunInner = async (box: string, opts: { withFiles: boolean; quiet?: boolean }): Promise<void> => {
   const snap = await watchHub.read(box);
   if (snap.boxStatus === "missing") return;
@@ -1249,7 +1254,7 @@ const readFleet = makeFleetReader(
         };
         // Off the sweep: a workflow check may run `npm test` for minutes, and the fleet read is what
         // the dashboard polls on.
-        void (async () => {
+        void withFinishing(ev.box, async () => {
           // Workflows (src/workflow-engine.ts): a finish that only advances to the next step is the
           // workflow's business — no notification, no archive row, no verify clause yet. The engine
           // returns false when the finish is the run's own (no workflow, or it just ended), and the
@@ -1263,7 +1268,9 @@ const readFleet = makeFleetReader(
           if (vplan) boxVerify.delete(ev.box);
           if (vplan && ev.kind === "done" && (ev.exitCode ?? 0) === 0 && deps.verify) {
             const runState = nextRunViews.find((b) => b.name === ev.box)?.runState ?? "done";
-            void deps
+            // Awaited (this block is already off the sweep) so the host counts the run as finishing
+            // until the verification and the settle behind it are done.
+            await deps
               .verify(hcfg(ev.box), ev.box, vplan)
               .then((r) => boxVerified.set(ev.box, r))
               .catch(() => {})
@@ -1278,16 +1285,16 @@ const readFleet = makeFleetReader(
                   boxVerify.set(ev.box, vplan);
                   return;
                 }
-                void settle();
+                return settle();
               });
           } else {
-            void settle();
+            await settle();
           }
-        })().catch((e) => console.error(`[finish] ${ev.box}: ${String((e as Error).message ?? e).slice(0, 200)}`));
+        }).catch((e) => console.error(`[finish] ${ev.box}: ${String((e as Error).message ?? e).slice(0, 200)}`));
         // Turn-end checkpoint: the moment a turn settles (done or paused on a question) is the
         // restore point for whatever the operator sends next. Online in-box tar (~1 s, no VM stop)
         // behind the per-box lock so a fast follow-up queues instead of racing the capture.
-        if (ev.kind === "done" || ev.kind === "waiting") void captureTurnCheckpoint(ev.box);
+        if (ev.kind === "done" || ev.kind === "waiting") void withFinishing(ev.box, () => captureTurnCheckpoint(ev.box));
       }
       prevRunViews = nextRunViews;
     }
@@ -1321,6 +1328,10 @@ const readFleet = makeFleetReader(
     }),
     sleep: { asleep: () => hostPool.allAsleep(), noteFleet: () => {} },
     capacity: () => hostPool.capacity(),
+    // The dashboard's poll is answered from the last sweep while the next one runs behind it; a
+    // snapshot older than this waits for the sweep (the background sweep below runs every 15 s,
+    // so this is reached only when a sweep is wedged).
+    staleMs: 12_000,
     store: {
       // Each host keeps the memory of its own boxes; the load merges every enabled host's.
       load: async () => {
@@ -4092,6 +4103,7 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
     // already recorded the same finish.
     await archiveFinishedRun(session, { withFiles: false }).catch(() => {});
     await deps.teardown(hcfg(session), session);
+    readFleet.forget(session);
     watchHub.drop(session);
     inbox.clear(session);
     boxModels.delete(session);
@@ -5277,7 +5289,7 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
           return;
         }
         if (finishingOn(id)) {
-          res.status(409).json({ error: "a run on this host just finished and its changes are being read; try again in a few seconds" });
+          res.status(409).json({ error: "a run on this host just finished and is being wrapped up (changes read, checks run); try again shortly" });
           return;
         }
         const r = await hostPool.pause(id);

@@ -294,7 +294,7 @@ for), and the hourly canary had woken the VM for nothing.
 | A reply on a thread takes a minute to show the run | The box's VM was paused; the reply started it and waited. | Nothing. Raise the host's sleep-after if this happens often. |
 | "draining · 1" on a disabled host | Machines still run there; the host is swept for them and takes no new run. | Let them finish, or tear them down, then remove the host. |
 | "pause" is refused with "a run is being started on this host" | A run picked this host and its box is booting. | Wait for the box to appear, then pause. |
-| "pause" is refused with "a run on this host just finished and its changes are being read" | The finish edge (diff, changed files, repo setup) is still SSHing the box; a pause now would make the next SSH the proxy's own slow resume. | Try again a few seconds later. |
+| "pause" is refused with "a run on this host just finished and is being wrapped up" | The finish edge (diff, changed files, repo setup, a verify clause, the turn checkpoint) is still SSHing the box; a pause now would make the next SSH the proxy's own slow resume. | Try again shortly; a verify clause can take minutes. |
 | The canary says "every box host is asleep, and this run does not wake one" | Every enabled host is dormant; the hourly check never wakes a VM. | Nothing; a real run wakes it. |
 
 ## What is not covered
