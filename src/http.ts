@@ -608,11 +608,15 @@ const resumeQuietly = (session: string, message: string, extraSecrets?: Record<s
     await captureBeforeMessage(session).catch(() => {});
     try {
       const secrets = await grantedSecretsOf(session, extraSecrets);
-      return await withOwner(ownerOf(db, session) ?? null, () =>
+      const out = await withOwner(ownerOf(db, session) ?? null, () =>
         rawResumeDetached
           ? rawResumeDetached(hcfg(session), session, message, secrets, boxModels.get(session))
           : rawResume(hcfg(session), session, message, secrets, {}, boxModels.get(session)).then(() => undefined)
       );
+      // The controller started this turn itself, so the next sweep that reads the box "done" is a
+      // finish edge even if no sweep caught it running (see turnStarted).
+      turnStarted.add(session);
+      return out;
     } catch (e) {
       // The optimistic "running" note above was wrong — the resume never happened. Roll it back and
       // drop the (now doubly wrong) cache so the fleet shows the honest stopped state immediately
@@ -661,6 +665,12 @@ const brokerConsider = makeCredentialBroker({
  * short timeout. All failures are logged and swallowed — a webhook can never break the sweep.
  */
 let prevRunViews: BoxRunView[] = [];
+// Boxes whose turn the controller itself started since the last sweep (a reply delivered). A turn
+// shorter than one sweep interval (`date -u`, a one-line answer) went done→done between two
+// sweeps and so left no finish edge: no notification, no history row, no memory notes, no
+// checkpoint (seen live 2026-11-17, a 20 s reply turn on the Freestyle host). The sweep reads
+// such a box as "running" in the previous view, so its next "done" is the edge it is.
+const turnStarted = new Set<string>();
 const notifyCtx = new Map<string, { title?: string; task?: string }>();
 const sendNotification = async (ev: NotifyEvent): Promise<void> => {
   const owner = ownerOf(db, ev.box) ?? OPERATOR_OWNER;
@@ -1188,6 +1198,10 @@ const readFleet = makeFleetReader(
       const nextRunViews = boxes
         .filter((b) => b.role !== "pool-free")
         .map((b) => ({ name: b.name, runState: b.runState, exitCode: b.exitCode, question: b.question, stalled: b.stalled, lastOutputAt: b.lastOutputAt }));
+      if (turnStarted.size) {
+        prevRunViews = prevRunViews.map((v) => (turnStarted.has(v.name) && (v.runState === "done" || v.runState === "idle") ? { ...v, runState: "running" } : v));
+        turnStarted.clear();
+      }
       for (const ev0 of detectTransitions(prevRunViews, nextRunViews)) {
         const edgeTask = boxes.find((b) => b.name === ev0.box)?.task;
         // The canary's runs are the controller's own: no notification, no history row, no memory.
