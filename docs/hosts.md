@@ -52,15 +52,22 @@ asks the pool for a host:
 3. When nothing qualifies the delegation is refused with the reason: "every box host is full
    (a 5/5, b 4/4)", "every box host with room has used up its monthly allowance", and so on.
 
-A pick reserves a slot on that host until the box is acquired or the boot fails, so a parallel
-fan-out cannot overshoot one host while the total gate still passes. The global capacity shown on
-the Fleet page is the sum of every enabled host's slots.
+A pick reserves a slot on that host until the box exists or the boot fails, so a parallel
+fan-out cannot overshoot one host while the total gate still passes. The moment the box exists it
+is counted as running on that host (the next sweep lists it for real) and the reservation is given
+back, so a box mid-bootstrap is never counted twice. The global capacity shown on the Fleet page
+is the sum of every enabled host's slots.
 
 Before the box is launched the host is made ready (`ready` in src/host-pool.ts): the host's clock
 is woken, a paused VM is started through its provider and waited for (up to 2.5 minutes for the
 provider to say running), and a host that was asleep, unreachable or just came up has to answer
-one probe (`msb ls` over SSH, three tries of 45 s) before a box is started on it. A resumed VM
-crawls for about a minute while its memory pages back in, which is what the three tries absorb.
+one probe (`msb ls` over SSH, three tries of 45 s, ten seconds apart) before a box is started on
+it. A resumed VM crawls for about a minute while its memory pages back in, which is what the three
+tries absorb. A start call the provider refuses (a pause still landing) is tried again a few polls
+later; when the provider cannot be asked at all (API down, wrong key) the wait is skipped and the
+probe decides. A host that `ready` gave up on sits out of the ranking for five minutes
+(`READY_COOLDOWN_MS`), so each run does not pay the same wait again; a sweep or a check that gets
+through ends the cooldown early.
 
 **Failover.** A failure before the box exists (the VM never came up, SSH was closed, `msb`
 refused, staging failed to copy) is the host's fault, not the task's: that host is marked
@@ -119,8 +126,16 @@ paused VM and thaw with it.
 **The VM is paused at the provider while the controller thinks it is awake** (paused by hand, by
 the provider's own idle timer, or before a controller restart). SSH to it fails, the provider is
 asked, and the answer "paused" makes the host dormant rather than unreachable: served from its last
-sweep, ranked as asleep, not SSHed to by any loop, and started by `ready` when a run picks it. A
-check on it says "paused at the provider; it is started for the next run" and passes.
+sweep, ranked as asleep, not SSHed to by any loop, and started by `ready` when a run picks it, or
+by any launch on a box it holds (a reply, a resume). A check on it says "paused at the provider; it
+is started for the next run" and passes. A frozen warm box on it does not count as "warm ready":
+a resume plus a claim is slower than a cold boot on an awake host.
+
+**The VM runs at the provider while the controller has it asleep** (the pause call failed, or
+somebody started it by hand). A dormant metered host is asked for its provider state once a
+minute; "running" for longer than 90 s past the clock's sleep with nothing working on it is
+paused again, and the minutes it ran are billed. A pause or start call that fails never
+overwrites the last good reading; its error is shown with it.
 
 **A host stops answering.** A sweep gets 45 s per host per round; past that the host is served
 from its last sweep, marked unreachable (red "unreachable" on its row, with the error) and skipped
@@ -244,6 +259,8 @@ for), and the hourly canary had woken the VM for nothing.
 | A run says "No box host can take this run: every box host is full (…)" | Every enabled host is at its slot cap. | Raise a host's slots, add a host, or wait. |
 | The Fleet page shows boxes the host no longer has | The host is asleep or unreachable and the page serves its last sweep. | Click check; if the host is really gone, disable it. |
 | Provider state "unknown" | The API key is wrong or the API did not answer. | Edit the host and paste the key again; check runs the state read too. |
+| "unreachable" with "host … is paused after 150s" and the host is skipped for a while | The VM did not come up within the patience; the run went elsewhere and the host sits out for five minutes. | Click wake, then check. If "starting" never becomes "running", look at the VM in the provider's console. |
+| The primary is disabled after a restart | You disabled it while another host was enabled; that choice is kept. | Enable it on its row. With no other enabled host it is always on. |
 
 ## What is not covered
 

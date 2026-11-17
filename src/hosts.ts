@@ -252,8 +252,11 @@ export function removeHostSpec(db: Db, id: string): boolean {
 export function seedPrimaryHost(db: Db, cfg: Config): HostSpec {
   const env = primaryHostSpec(cfg);
   const stored = getHostSpec(db, PRIMARY_HOST_ID);
+  // An operator who disabled the primary keeps it disabled across a restart, as long as some other
+  // host is enabled; with nothing else to run on, the .env host is always on (the single-host install).
+  const othersEnabled = listHostSpecs(db).some((s) => s.id !== PRIMARY_HOST_ID && s.enabled);
   const spec: HostSpec = stored
-    ? { ...stored, ssh: env.ssh, sshExtraOpts: env.sshExtraOpts, msb: env.msb, msbHome: env.msbHome, stagingDir: env.stagingDir, maxBoxes: env.maxBoxes, enabled: true, snapshot: undefined, ompSnapshot: undefined, claudeImage: undefined, ompImage: undefined }
+    ? { ...stored, ssh: env.ssh, sshExtraOpts: env.sshExtraOpts, msb: env.msb, msbHome: env.msbHome, stagingDir: env.stagingDir, maxBoxes: env.maxBoxes, enabled: stored.enabled !== false || !othersEnabled, snapshot: undefined, ompSnapshot: undefined, claudeImage: undefined, ompImage: undefined }
     : env;
   // The env's sleep setting wins when it is set at all: it is the knob the runbook documents.
   if (cfg.hostSleepAfterMs > 0 || !stored) spec.sleepAfterMs = cfg.hostSleepAfterMs;

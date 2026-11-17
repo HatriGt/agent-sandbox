@@ -177,6 +177,25 @@ test("a metered host is paused through its provider when it falls asleep, and st
     assert.equal((await pool.pause("fs-1")).state, "paused");
     assert.equal((await pool.start("fs-1")).state, "running");
     assert.equal((await pool.refreshProvider("fs-1")).state, "running");
+    // Paused at the provider while the clock reads awake (the operator's button, the provider's own
+    // idle timer): a launch path's wake starts it all the same.
+    calls.length = 0;
+    await pool.pause("fs-1");
+    assert.equal(pool.get("fs-1")!.sleep.asleep(), false);
+    assert.equal(pool.dormant("fs-1"), true);
+    sleepFor(pool.cfgFor("fs-1")).wake("message box");
+    await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(calls, ["pause", "start"]);
+    // The wake button on a host asleep by its clock: one start, not one from the clock and one from the button.
+    calls.length = 0;
+    pool.noteSweep("fs-1", []);
+    t += 6 * 60_000;
+    pool.noteSweep("fs-1", []);
+    await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(calls, ["pause"]);
+    await pool.start("fs-1");
+    await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(calls, ["pause", "start"]);
     // A static host has no provider to call.
     assert.equal((await pool.pause("primary")).state, "n/a");
   } finally {
@@ -344,6 +363,172 @@ test("ready: a paused VM is started and waited for, then probed until it answers
     pool.noteSweepError("fs-1", "x");
     await assert.rejects(() => pool.ready("fs-1"), /did not answer: Connection closed/);
     assert.equal(pool.state().find((h) => h.id === "fs-1")?.unreachable, true);
+  } finally {
+    setProviderForTest("freestyle", null);
+    registerSleepResolver(null);
+  }
+});
+
+test("ready: a start call that fails is tried again; an unanswerable provider hands over to the probe; a host ready gave up on sits out", async () => {
+  const { READY_COOLDOWN_MS } = await import("../src/host-pool.ts");
+  let vm = "paused";
+  let startsLeftToFail = 1;
+  let stuck = false;
+  let t = 1_000_000;
+  const calls: string[] = [];
+  setProviderForTest("freestyle", {
+    metered: true,
+    state: async (): Promise<ProviderState> => {
+      // A stuck VM: every read costs a minute and the state never changes.
+      if (stuck) t += 60_000;
+      return { state: vm, at: 0 };
+    },
+    pause: async (): Promise<ProviderState> => ({ state: (vm = "paused"), at: 0 }),
+    start: async (): Promise<ProviderState> => {
+      calls.push("start");
+      if (startsLeftToFail-- > 0) return { state: "unknown", detail: "POST /start → 409: vm is pausing", at: 0 };
+      if (stuck) return { state: "starting", at: 0 };
+      vm = "running";
+      return { state: "running", at: 0 };
+    },
+  });
+  let probeOk = true;
+  let probes = 0;
+  try {
+    const pool = makeHostPool(cfg, openMemoryDb(), {
+      now: () => t,
+      readyPollMs: 1,
+      answerTimeoutMs: 50,
+      probe: async (c) => {
+        if (c.hostId !== "fs-1") return "ok";
+        probes++;
+        if (!probeOk) throw new Error("Connection closed by remote host");
+        return "0 live box(es)";
+      },
+    });
+    pool.upsert({ ...vmSpec, priority: -1 });
+    await pool.refreshProvider("fs-1");
+    // The first start is refused (the pause is still landing); the next one, a few polls later, takes.
+    await pool.ready("fs-1", "run");
+    assert.deepEqual(calls, ["start", "start"]);
+    assert.equal(pool.state().find((h) => h.id === "fs-1")?.providerState?.state, "running");
+
+    // The provider cannot be asked at all: no wait for "running", the probe decides.
+    vm = "unknown";
+    calls.length = 0;
+    probes = 0;
+    await pool.ready("fs-1", "run");
+    assert.deepEqual(calls, []);
+    assert.equal(probes, 1, "one probe answered, so the host is ready");
+
+    // The probe never answers an awake VM: unreachable, as before.
+    probeOk = false;
+    await assert.rejects(() => pool.ready("fs-1", "run"), /did not answer/);
+    assert.equal(pool.state().find((h) => h.id === "fs-1")?.unreachable, true);
+    pool.noteSweep("fs-1", []);
+
+    // The VM never leaves "paused" within the patience: ready gives up. "Paused" is dormant, which would
+    // keep the host pickable, so the next run would pay the same wait; it sits out for a while instead.
+    vm = "paused";
+    stuck = true;
+    startsLeftToFail = 0;
+    await assert.rejects(() => pool.ready("fs-1", "run", { patienceMs: 150_000 }), /is paused after/);
+    assert.equal(pool.dormant("fs-1"), true);
+    assert.equal(pool.pick().host?.spec.id, "primary", "fs-1 sits out");
+    t += READY_COOLDOWN_MS + 1;
+    assert.equal(pool.pick().host?.spec.id, "fs-1", "and is back after the cooldown");
+    // A successful sweep ends the cooldown early.
+    await assert.rejects(() => pool.ready("fs-1", "run", { patienceMs: 150_000 }));
+    assert.equal(pool.pick().host?.spec.id, "primary");
+    pool.noteSweep("fs-1", []);
+    assert.equal(pool.pick().host?.spec.id, "fs-1");
+  } finally {
+    setProviderForTest("freestyle", null);
+    registerSleepResolver(null);
+  }
+});
+
+test("placeRun: the slot is given back the moment the box exists, and the box counts until the next sweep lists it", async () => {
+  const { placeRun } = await import("../src/host-pool.ts");
+  const pool = makeHostPool(cfg, openMemoryDb(), { probe: async () => "ok" });
+  pool.upsert({ id: "b", name: "b", ssh: "root@b", priority: -1, maxBoxes: 2 });
+  let seen: { reserved: number; running: number } | undefined;
+  await placeRun(pool, cfg, "run t", async (hostCfg, onAcquired) => {
+    assert.equal(hostCfg.hostId, "b");
+    assert.equal(pool.get("b")!.reserved, 1, "reserved while the box boots");
+    onAcquired("box-1");
+    const v = pool.state().find((h) => h.id === "b")!;
+    seen = { reserved: v.reserved, running: v.running };
+    // Bootstrap is still running here; a second pick must see one slot taken, not two.
+    const again = pool.pick();
+    assert.equal(again.host?.spec.id, "b");
+    again.release();
+    return "ok";
+  });
+  assert.deepEqual(seen, { reserved: 0, running: 1 });
+  assert.equal(pool.hostOfBox("box-1"), "b");
+  assert.equal(pool.get("b")!.reserved, 0);
+  // The sweep that lists the box replaces the placeholder.
+  pool.noteSweep("b", [box("box-1")]);
+  assert.equal(pool.state().find((h) => h.id === "b")!.running, 1);
+  registerSleepResolver(null);
+});
+
+test("usage: a VM that runs at its provider while the clock says asleep is billed and paused again", async () => {
+  let vm = "running";
+  let pausesToFail = 0;
+  const calls: string[] = [];
+  setProviderForTest("freestyle", {
+    metered: true,
+    state: async (): Promise<ProviderState> => ({ state: vm, at: t }),
+    pause: async (): Promise<ProviderState> => {
+      calls.push("pause");
+      if (pausesToFail-- > 0) return { state: "unknown", detail: "POST /pause → 500", at: t };
+      return { state: (vm = "paused"), at: t };
+    },
+    start: async (): Promise<ProviderState> => ({ state: (vm = "running"), at: t }),
+  });
+  let t = 1_000_000;
+  try {
+    const pool = makeHostPool(cfg, openMemoryDb(), { now: () => t });
+    pool.upsert(vmSpec);
+    pool.tickUsage();
+    pool.noteSweep("fs-1", []);
+    t += 6 * 60_000;
+    pool.noteSweep("fs-1", []);
+    await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(calls, ["pause"], "paused when it fell asleep");
+    // Six minutes awake were billed; from here nothing, while it is paused.
+    pool.tickUsage();
+    const used = () => pool.state().find((h) => h.id === "fs-1")!.allowance!.usedHours;
+    assert.ok(Math.abs(used() - (6 / 60) * 4) < 1e-9);
+    t += 60_000;
+    pool.tickUsage();
+    await new Promise((r) => setTimeout(r, 5));
+    assert.ok(Math.abs(used() - (6 / 60) * 4) < 1e-9, "paused: not billed");
+    // Someone starts the VM by hand. The minute refresh notices and pauses it again; that first pause
+    // call fails, so the VM keeps running: a failed call does not overwrite the "running" reading, the
+    // minutes are billed, and the next tick pauses it for real.
+    vm = "running";
+    pausesToFail = 1;
+    t += 60_000;
+    pool.tickUsage();
+    await new Promise((r) => setTimeout(r, 5));
+    assert.deepEqual(calls, ["pause", "pause"], "paused again, nothing was working on it");
+    assert.equal(pool.state().find((h) => h.id === "fs-1")!.providerState?.state, "running", "the failed call kept the reading");
+    assert.match(pool.state().find((h) => h.id === "fs-1")!.providerState?.detail ?? "", /500/);
+    const before = used();
+    t += 2 * 60_000;
+    pool.tickUsage();
+    await new Promise((r) => setTimeout(r, 5));
+    assert.ok(Math.abs(used() - before - (2 / 60) * 4) < 1e-9, "the two minutes it ran anyway were billed");
+    assert.deepEqual(calls, ["pause", "pause", "pause"]);
+    assert.equal(pool.state().find((h) => h.id === "fs-1")!.providerState?.state, "paused");
+    assert.equal(pool.get("fs-1")!.sleep.asleep(), true, "the clock still reads asleep");
+    const after = used();
+    t += 60_000;
+    pool.tickUsage();
+    assert.equal(used(), after, "paused again: nothing more");
   } finally {
     setProviderForTest("freestyle", null);
     registerSleepResolver(null);

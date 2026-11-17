@@ -55,6 +55,15 @@ test("seedPrimaryHost: the .env host is the primary; its connection follows .env
   assert.deepEqual(moved.allowance, { vcpuHours: 100, vcpu: 4, resetDay: 1 });
   assert.equal(listHostSpecs(db).length, 1);
   assert.throws(() => removeHostSpec(db, PRIMARY_HOST_ID), /cannot be removed/);
+  // Disabled by the operator: it stays disabled across a restart while another host is enabled,
+  // and comes back on when it is the only host left.
+  saveHostSpec(db, { ...moved, enabled: false });
+  assert.equal(seedPrimaryHost(db, cfg).enabled, true, "alone, the .env host is always on");
+  saveHostSpec(db, { ...moved, enabled: false });
+  saveHostSpec(db, { ...moved, id: "other", ssh: "root@other", enabled: true });
+  assert.equal(seedPrimaryHost(db, cfg).enabled, false, "with another host enabled, disabled stays disabled");
+  saveHostSpec(db, { ...moved, id: "other", ssh: "root@other", enabled: false });
+  assert.equal(seedPrimaryHost(db, cfg).enabled, true, "the other host went off: the primary is back");
 });
 
 test("configForHost: the primary keeps the base config; another host swaps the connection and the pool size", () => {

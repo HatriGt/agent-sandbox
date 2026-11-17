@@ -54,12 +54,14 @@ export function setSweepForTest(impl: ((cfg: Config, id: string) => Promise<OneS
 
 /** One host's read, shared with any round still waiting on it, capped for this round. */
 function sweepHost(cfg: Config, id: string): Promise<OneSweep> {
-  let p = inFlight.get(id);
+  // Keyed by the target too: a host re-pointed at another machine must not attach to the old read.
+  const key = `${id}|${cfg.vpsSsh}`;
+  let p = inFlight.get(key);
   if (!p) {
     p = sweepOneImpl(cfg, id).finally(() => {
-      if (inFlight.get(id) === p) inFlight.delete(id);
+      if (inFlight.get(key) === p) inFlight.delete(key);
     });
-    inFlight.set(id, p);
+    inFlight.set(key, p);
   }
   return withTimeout(p, answerTimeoutMs, `sweep of ${id}`);
 }

@@ -5178,7 +5178,14 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
         res.locals.auditAction = `host.upsert:${spec.id}`;
         // A new target, or one switched back on, is checked now (capped by HOST_ANSWER_TIMEOUT_MS): the
         // dialog shows the answer and a dead host is unreachable, so not picked, until a sweep gets through.
-        const connectionChanged = !before || before.ssh !== spec.ssh || before.msb !== spec.msb || before.msbHome !== spec.msbHome || (!before.enabled && spec.enabled);
+        const connectionChanged =
+          !before ||
+          before.ssh !== spec.ssh ||
+          before.msb !== spec.msb ||
+          before.msbHome !== spec.msbHome ||
+          JSON.stringify(before.sshExtraOpts ?? []) !== JSON.stringify(spec.sshExtraOpts ?? []) ||
+          before.freestyle?.vmId !== spec.freestyle?.vmId ||
+          (!before.enabled && spec.enabled);
         const check = spec.enabled && spec.id !== PRIMARY_HOST_ID && connectionChanged ? await hostPool.check(spec.id) : undefined;
         // A new host's own addresses, before any box starts on it (src/host-guard.ts).
         if (spec.enabled) void learnHostGuard(hostPool.cfgFor(spec.id));
@@ -5201,8 +5208,8 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
         return;
       }
       case "check": {
+        // check() asks a metered host's provider on the way in, so the row's state is fresh already.
         const r = await hostPool.check(id);
-        if (hostPool.get(id)?.spec.provider !== "static") await hostPool.refreshProvider(id).catch(() => {});
         res.json({ ok: r.ok, check: r, host: hostPool.state().find((h) => h.id === id) });
         return;
       }

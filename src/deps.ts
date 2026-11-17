@@ -451,9 +451,10 @@ export const deps: HandlerDeps = {
     let firstError: Error | undefined;
     await Promise.all(
       pool.enabled().map(async (h) => {
-        if (h.sleep.asleep() || h.unreachableSince) {
+        // Dormant covers a VM paused at its provider: an SSH there would wake it, or die on the proxy.
+        if (pool.dormant(h.spec.id) || h.unreachableSince) {
           total += sessionBoxes(h.lastBoxes);
-          answered ||= h.sleep.asleep();
+          answered ||= pool.dormant(h.spec.id);
           return;
         }
         try {
@@ -708,7 +709,7 @@ function prepareRunCfg(hostCfg: Config, plan: DelegatePlan, allowDomains: string
   return runCfg;
 }
 
-async function runOnHost(runCfg: Config, cfg: Config, plan: DelegatePlan, allowDomains: string[] | undefined, creds: AgentCreds | undefined, interact: Interact | undefined, onAcquired: () => void): Promise<DelegationResult> {
+async function runOnHost(runCfg: Config, cfg: Config, plan: DelegatePlan, allowDomains: string[] | undefined, creds: AgentCreds | undefined, interact: Interact | undefined, onAcquired: (box: string) => void): Promise<DelegationResult> {
 
   const id = newSessionId();
   // Phase timings for start-latency work: one [timing] line per delegation, ms per phase.
@@ -779,11 +780,19 @@ async function runOnHost(runCfg: Config, cfg: Config, plan: DelegatePlan, allowD
     noteOwnerActive(cfg, boxOwner);
     noteOwnerAgent(boxOwner, poolAgent);
   }
-  const { box, warm } = await acquireBox(runCfg, id, sessionRoot, eligible, poolAgent, boxOwner);
+  let acquiredBox: { box: string; warm: boolean };
+  try {
+    acquiredBox = await acquireBox(runCfg, id, sessionRoot, eligible, poolAgent, boxOwner);
+  } catch (e) {
+    // No box: the staged checkout would otherwise sit on this host (placeRun may try another one next).
+    if (sessionRoot) void cleanupStaging(runCfg, sessionRoot);
+    throw e;
+  }
+  const { box, warm } = acquiredBox;
   mark("acquire");
   if (runCfg.hostId) hostPool()?.rememberBox(box, runCfg.hostId);
   // The box exists: the slot is released and from here a failure is the run's, not the host's.
-  onAcquired();
+  onAcquired(box);
 
   // Operator attachments (pasted screenshots) land in the box before the agent's first tool call.
   for (const a of plan.attachments ?? []) {
