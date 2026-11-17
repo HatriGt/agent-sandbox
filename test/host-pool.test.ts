@@ -867,3 +867,18 @@ test("pick: awakeOnly with every host asleep says so, and a paused VM is dormant
     registerSleepResolver(null);
   }
 });
+
+test("pick: a slot reserved before a reload is released on the rebuilt runtime, not the old object", () => {
+  const pool = makeHostPool(cfg, openMemoryDb());
+  pool.upsert({ ...vmSpec, priority: -1 });
+  const picked = pool.pick({});
+  assert.equal(picked.host?.spec.id, "fs-1");
+  assert.equal(pool.state().find((h) => h.id === "fs-1")?.reserved, 1);
+  // The operator edits the host meanwhile: the runtime is rebuilt with the count carried over.
+  pool.upsert({ ...vmSpec, priority: -1, name: "renamed" });
+  assert.equal(pool.state().find((h) => h.id === "fs-1")?.reserved, 1);
+  picked.release();
+  assert.equal(pool.state().find((h) => h.id === "fs-1")?.reserved, 0, "the new runtime is free again");
+  picked.release();
+  assert.equal(pool.state().find((h) => h.id === "fs-1")?.reserved, 0, "a second release is a no-op");
+});

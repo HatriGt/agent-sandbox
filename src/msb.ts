@@ -1112,15 +1112,8 @@ function agentWorkdir(repos?: RepoLayout[]): string {
  * task was, then reviewed a PR in the wrong repo). Only when the mark is absent (a box bootstrapped
  * by an older controller) does the layout-derived guess apply; it is correct as long as the layout
  * has not changed since the first run. Falls back to `/workspace` if the probe fails entirely.
+ * Read by boxAgentMeta below, in the same exec as the agent kind.
  */
-async function boxAgentWorkdir(cfg: Config, box: string): Promise<string> {
-  try {
-    const r = await exec(cfg, box, WORKDIR_PROBE_SH);
-    return workdirFromProbe(r.stdout);
-  } catch {
-    return "/workspace";
-  }
-}
 
 // The FIRST run's cwd — where the Claude session lives, so resumes land there even after the repo
 // layout changes (attach_repo). Declared here, above the "stable in-box paths" block, because the
@@ -1214,6 +1207,26 @@ export function boxAgentKindFrom(stdout: string): AgentKind {
 }
 
 /** Read the thread's agent kind from the box; claude when unreadable (older boxes, probe failure). */
+/** The kind mark and the workdir probe in ONE exec: the two reads every resume lane needs, one round trip. */
+export const AGENT_META_PROBE_SH = `cat ${KIND_MARK} 2>/dev/null; echo ---asb-meta---; ${WORKDIR_PROBE_SH}`;
+
+/** Pure: splits AGENT_META_PROBE_SH's output into the agent kind and the resume workdir. */
+export function agentMetaFromProbe(stdout: string): { agent: AgentKind; workdir: string } {
+  const sep = stdout.indexOf("---asb-meta---");
+  return {
+    agent: boxAgentKindFrom(sep >= 0 ? stdout.slice(0, sep) : stdout),
+    workdir: workdirFromProbe(sep >= 0 ? stdout.slice(sep + "---asb-meta---".length) : ""),
+  };
+}
+
+async function boxAgentMeta(cfg: Config, box: string): Promise<{ agent: AgentKind; workdir: string }> {
+  try {
+    return agentMetaFromProbe((await exec(cfg, box, AGENT_META_PROBE_SH)).stdout);
+  } catch {
+    return { agent: "claude", workdir: "/workspace" };
+  }
+}
+
 export async function boxAgentKind(cfg: Config, box: string): Promise<AgentKind> {
   try {
     const r = await exec(cfg, box, `cat ${KIND_MARK} 2>/dev/null || true`);
@@ -2332,8 +2345,10 @@ export async function resumeAgentTask(
   void unmarkParked(cfg, box).catch(() => {});
   // Which agent this thread runs on is the BOX's decision (the .agent.kind mark from the first
   // run), never the caller's: every resume lane only has a box id, and a mid-thread agent switch
-  // would resume a session that does not exist in the other CLI's store.
-  const agent = await boxAgentKind(cfg, box);
+  // would resume a session that does not exist in the other CLI's store. The workdir rides the
+  // same exec: on a host behind a proxy every round trip is ~0.4 s of the reply.
+  const meta = await boxAgentMeta(cfg, box);
+  const agent = meta.agent;
   // Ephemeral secrets are appended as extra -e flags on THIS exec only (not stored).
   const env = [...agentEnvFlags(cfg, message, repos, creds?.primaryToken, model, agent), ...secretEnvFlags(secrets)];
   // The formatter AND the hooks are refreshed here too, not only at bootstrap: a box bootstrapped
@@ -2359,7 +2374,7 @@ export async function resumeAgentTask(
   // The cwd is read from the box, not taken from `repos`: every resume path (dashboard follow-up,
   // inbox delivery, send-now, the credential broker, an elicited answer) only has a box id and used
   // to pass undefined here, which resumed a single-repo box in /workspace and lost the session.
-  const workdir = repos?.length ? agentWorkdir(repos) : await boxAgentWorkdir(cfg, box);
+  const workdir = repos?.length ? agentWorkdir(repos) : meta.workdir;
   sleepFor(cfg).wake(`message ${box}`);
   const r = await msb(cfg, ["exec", box, ...env, ...(isCompactCommand(message) ? [] : skillHintFlags(box, message, skills, false)), "--", "sh", "-lc", guardedAgentSh(workdir, true, agent)]);
   const full = diskFullFromLaunch(r.stdout);

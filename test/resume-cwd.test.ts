@@ -18,7 +18,14 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { WORKSPACE_DIRS_SH, WORKDIR_PROBE_SH, workdirFromWorkspaceListing, workdirFromProbe } from "../src/msb.ts";
+import { AGENT_META_PROBE_SH, WORKSPACE_DIRS_SH, WORKDIR_PROBE_SH, agentMetaFromProbe, workdirFromWorkspaceListing, workdirFromProbe } from "../src/msb.ts";
+
+test("the kind and the workdir come from one probe: the mark before the separator, the workdir probe after it", () => {
+  assert.ok(AGENT_META_PROBE_SH.includes(WORKDIR_PROBE_SH));
+  assert.deepEqual(agentMetaFromProbe("omp\n---asb-meta---\n/workspace/app\n---\napp\n"), { agent: "omp", workdir: "/workspace/app" });
+  assert.deepEqual(agentMetaFromProbe("\n---asb-meta---\n---\napp\n"), { agent: "claude", workdir: "/workspace/app" });
+  assert.deepEqual(agentMetaFromProbe(""), { agent: "claude", workdir: "/workspace" });
+});
 
 test("a single-repo box resumes in the repo dir, not /workspace", () => {
   // The regression: this returned "/workspace", so `claude -c` started a new session every follow-up.

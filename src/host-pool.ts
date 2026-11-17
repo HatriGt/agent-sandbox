@@ -492,7 +492,12 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
         release: () => {
           if (released) return;
           released = true;
-          host.reserved = Math.max(0, host.reserved - 1);
+          // On the host's CURRENT runtime: a reload between the pick and the release (an edit on
+          // the Fleet page while a run was being placed) rebuilds the runtime with the count copied
+          // over, and a release on the old object left the new one reserved for good (seen live
+          // 2026-11-17: "pause" refused with "a run is being started" an hour after the run).
+          const cur = runtimes.get(host.spec.id) ?? host;
+          cur.reserved = Math.max(0, cur.reserved - 1);
         },
       };
     },
