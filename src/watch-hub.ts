@@ -49,6 +49,11 @@ export interface WatchHubOpts {
   read: (session: string) => Promise<WatchSnapshot>;
   /** Reads the whole log (redacted) for readFull when the snapshot's tail window is truncated. */
   readLog?: (session: string) => Promise<string>;
+  /**
+   * The box cannot be read right now and nobody should try (its host is asleep or its VM paused: an
+   * SSH would hang, or wake a metered VM for a look). The last snapshot is served as fresh instead.
+   */
+  skip?: (session: string) => boolean;
   /** Tail cadence while the run is live. */
   tickMs?: number;
   /** Tail cadence once the run is terminal (done/idle). */
@@ -82,10 +87,12 @@ export class WatchHub {
   private readonly freshMs: number;
   private readonly now: () => number;
   private readonly readFn: (session: string) => Promise<WatchSnapshot>;
+  private readonly skipFn?: (session: string) => boolean;
   private readonly readLogFn?: (session: string) => Promise<string>;
 
   constructor(opts: WatchHubOpts) {
     this.readFn = opts.read;
+    this.skipFn = opts.skip;
     this.readLogFn = opts.readLog;
     this.tickMs = opts.tickMs ?? 800;
     this.idleTickMs = opts.idleTickMs ?? 3000;
@@ -209,16 +216,24 @@ export class WatchHub {
 
   private async tick(session: string, e: Entry): Promise<void> {
     if (e.inFlight) return;
-    e.inFlight = this.readFn(session);
     let snap: WatchSnapshot | null = null;
-    try {
-      snap = await e.inFlight;
+    // Parked: the host is asleep or paused, so the last snapshot stands in for a read (nothing
+    // SSHes it) and the loop idles at the terminal cadence until the host is back.
+    const parked = !!e.snap && !!this.skipFn?.(session);
+    if (parked) {
+      snap = e.snap;
       e.failures = 0;
-    } catch {
-      // Transient SSH blip: keep the last snapshot, back off a little, try again.
-      e.failures++;
-    } finally {
-      e.inFlight = null;
+    } else {
+      e.inFlight = this.readFn(session);
+      try {
+        snap = await e.inFlight;
+        e.failures = 0;
+      } catch {
+        // Transient SSH blip: keep the last snapshot, back off a little, try again.
+        e.failures++;
+      } finally {
+        e.inFlight = null;
+      }
     }
     if (!this.entries.has(session)) return; // dropped while reading (drop() settled the waiters)
     if (snap) {
@@ -248,7 +263,7 @@ export class WatchHub {
       this.prune();
       return;
     }
-    const terminal = e.snap ? isTerminal(e.snap.runState) || e.snap.boxStatus === "missing" || e.snap.boxStatus === "stopped" : false;
+    const terminal = parked || (e.snap ? isTerminal(e.snap.runState) || e.snap.boxStatus === "missing" || e.snap.boxStatus === "stopped" : false);
     const base = terminal ? this.idleTickMs : this.tickMs;
     const backoff = e.failures ? Math.min(base * 2 ** e.failures, 10_000) : base;
     e.timer = setTimeout(() => {

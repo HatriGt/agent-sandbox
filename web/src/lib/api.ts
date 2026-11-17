@@ -513,6 +513,8 @@ export interface FleetSnapshot {
   boxes: BoxView[];
   lifecycle: FleetLifecycle;
   at: number;
+  /** Hosts whose VM is asleep, paused or still starting: a box there takes a minute to wake, not seconds. */
+  hostsAsleep?: string[];
 }
 
 export interface WatchSnapshot extends Omit<BoxView, "role"> {
@@ -540,6 +542,8 @@ export interface HostView {
   reserved: number;
   asleep: boolean;
   sleepSince: number;
+  /** When the host's clock will put it to sleep if nothing starts working; absent while it works or sleeps. */
+  sleepsAt?: number;
   draining?: boolean;
   unreachable: boolean;
   lastError?: string;

@@ -153,3 +153,21 @@ test("hub: readFull serves the whole log once the window is truncated, and grows
   assert.equal(w.log.split("\n").length, 40, "read() still serves the tail window");
   hub.close();
 });
+
+test("a parked box (its host asleep or paused) is served its last snapshot without a read", async () => {
+  let t = 1_000_000;
+  let reads = 0;
+  let parked = false;
+  const hub = new WatchHub({ read: async () => (reads++, snap("a")), skip: () => parked, tickMs: 10_000, freshMs: 5_000, now: () => t });
+  assert.equal((await hub.read("b")).log, "a");
+  assert.equal(reads, 1);
+  parked = true;
+  t += 60_000;
+  assert.equal((await hub.read("b")).log, "a", "the last snapshot stands in");
+  assert.equal(reads, 1, "nothing SSHed the box");
+  parked = false;
+  t += 60_000;
+  await hub.read("b");
+  assert.equal(reads, 2, "read again once the host is back");
+  hub.close();
+});

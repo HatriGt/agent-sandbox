@@ -13,6 +13,9 @@ import { Segmented } from "@/components/ui/segmented";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DataTable, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
+import { NumberTicker } from "@/components/ui/number-ticker";
+import { ProgressRing } from "@/components/ui/progress-ring";
+import { useNow } from "@/hooks/useNow";
 import { cn } from "@/lib/utils";
 
 /**
@@ -66,7 +69,7 @@ export function HostsPanel({ onChanged }: { onChanged?: () => void }) {
 
   const columns: Column<HostView>[] = [
     { id: "host", header: "Host", primary: true, cell: (h) => <HostCell host={h} /> },
-    { id: "state", header: "State", width: "w-[9rem]", cell: (h) => stateDot(h) },
+    { id: "state", header: "State", width: "w-[10rem]", cell: (h) => <StateCell host={h} /> },
     { id: "machines", header: "Machines", width: "w-[7rem]", align: "end", sort: (h) => h.running, cell: (h) => <MachinesCell host={h} /> },
     { id: "allowance", header: "This month", width: "w-[11rem]", hideBelow: "md", cell: (h) => <AllowanceCell host={h} /> },
     { id: "order", header: "Order", width: "w-[5rem]", align: "end", hideBelow: "sm", sort: (h) => h.priority, cell: (h) => <span className="stamp text-muted-foreground">{h.priority}</span> },
@@ -115,7 +118,9 @@ export function HostsPanel({ onChanged }: { onChanged?: () => void }) {
   );
 }
 
-const stateDot = (h: HostView) => {
+function StateCell({ host: h }: { host: HostView }) {
+  // "awake · sleeps in 4m": the clock is the host's own, so it ticks here once a minute.
+  const now = useNow(!!h.sleepsAt, 30_000);
   if (!h.enabled)
     return h.draining ? (
       <Tooltip>
@@ -140,12 +145,26 @@ const stateDot = (h: HostView) => {
         <TooltipContent>{h.lastError ?? "The last sweep failed"}</TooltipContent>
       </Tooltip>
     );
+  // Starting before asleep: a resuming VM counts as dormant to the pool (nothing SSHes it yet), but
+  // what the operator wants to see is that it is on its way up.
+  if (h.providerState?.state === "starting") return <StatusDot tone="live" pulse>starting</StatusDot>;
   if (h.asleep) return <StatusDot tone="sleep">asleep{h.sleepSince ? ` · ${fmtAgo(Math.floor(h.sleepSince / 1000))}` : ""}</StatusDot>;
   if (h.providerState?.state === "paused") return <StatusDot tone="sleep">paused</StatusDot>;
-  if (h.providerState?.state === "starting") return <StatusDot tone="live" pulse>starting</StatusDot>;
   if (h.running > 0) return <StatusDot tone="live" pulse>working</StatusDot>;
+  const sleepsIn = h.sleepsAt ? Math.max(0, Math.ceil((h.sleepsAt - now) / 60_000)) : 0;
+  if (h.sleepsAt && sleepsIn <= 15)
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            <StatusDot tone="ok">awake · sleeps in {sleepsIn < 1 ? "<1m" : `${sleepsIn}m`}</StatusDot>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>Nothing is working here; the VM is paused when the sleep-after passes. A new run resets the clock.</TooltipContent>
+      </Tooltip>
+    );
   return <StatusDot tone="ok">awake</StatusDot>;
-};
+}
 
 function HostCell({ host: h }: { host: HostView }) {
   return (
@@ -177,13 +196,14 @@ function HostCell({ host: h }: { host: HostView }) {
 
 function MachinesCell({ host: h }: { host: HostView }) {
   const used = h.running + h.reserved;
+  const full = used >= h.maxBoxes;
+  // A ring beside the count: a slot filling springs the arc, a box leaving unwinds it. The number
+  // ticks with the same spring so the two never disagree mid-motion.
   return (
     <span className="stamp text-muted-foreground inline-flex items-center gap-2" title={h.reserved ? `${h.running} running, ${h.reserved} starting` : undefined}>
-      <span className={cn(used >= h.maxBoxes && "text-foreground")}>
-        {used}/{h.maxBoxes}
-      </span>
-      <span className="bg-border block h-1 w-10 overflow-hidden rounded-full" aria-hidden>
-        <span className={cn("block h-full origin-left rounded-full", used >= h.maxBoxes ? "bg-foreground/70" : "bg-live")} style={{ transform: `scaleX(${Math.min(1, used / Math.max(1, h.maxBoxes))})` }} />
+      <ProgressRing value={used / Math.max(1, h.maxBoxes)} tone={used > 0 && !full ? "live" : "foreground"} size={16} />
+      <span className={cn(full && "text-foreground")}>
+        <NumberTicker value={used} from={used} />/{h.maxBoxes}
       </span>
     </span>
   );
@@ -193,15 +213,16 @@ function AllowanceCell({ host: h }: { host: HostView }) {
   const a = h.allowance;
   if (!a) return <span className="stamp text-faint">unmetered</span>;
   const nearly = a.pct >= 85;
+  const left = Math.round(a.leftHours);
+  // The ring is what is used (it fills as the month is spent, warn past 85 %); the words say what
+  // is left, which is the number an operator acts on.
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="flex flex-col gap-1">
+        <span className="inline-flex items-center gap-2">
+          <ProgressRing value={a.pct / 100} tone={nearly ? "warn" : "ok"} size={16} label={`${a.pct}% of this month's allowance used`} />
           <span className={cn("stamp text-micro", nearly ? "text-warn-text" : "text-muted-foreground")}>
-            {Math.round(a.leftHours)} of {a.vcpuHours} vCPU-h left
-          </span>
-          <span className="bg-border block h-1 w-24 max-w-full overflow-hidden rounded-full" aria-hidden>
-            <span className={cn("block h-full origin-left rounded-full", nearly ? "bg-warn" : "bg-ok")} style={{ transform: `scaleX(${Math.min(1, a.pct / 100)})` }} />
+            <NumberTicker value={left} from={left} /> of {a.vcpuHours} vCPU-h left
           </span>
         </span>
       </TooltipTrigger>

@@ -666,10 +666,15 @@ test("the shared pool answers cfgForBox and warmCfgs; without one the given conf
 
 test("readyForBox: a reply to a box on a paused VM waits for the start; callers in flight share it; an awake host answers at once", async () => {
   let vm = "paused";
+  let reads = 0;
   const calls: string[] = [];
   setProviderForTest("freestyle", {
     metered: true,
-    state: async (): Promise<ProviderState> => ({ state: vm, at: 0 }),
+    state: async (): Promise<ProviderState> => {
+      // A VM resuming on its own (the proxy started it): running on the second read.
+      if (vm === "starting" && ++reads >= 2) vm = "running";
+      return { state: vm, at: 0 };
+    },
     pause: async (): Promise<ProviderState> => ({ state: (vm = "paused"), at: 0 }),
     start: async (): Promise<ProviderState> => {
       calls.push("start");
@@ -703,6 +708,16 @@ test("readyForBox: a reply to a box on a paused VM waits for the start; callers 
     // A box nobody mapped is the primary's, which never waits.
     assert.equal((await pool.readyForBox("old-box")).hostId, "primary");
     assert.equal(probes, 1);
+    // The VM is resuming (the provider's proxy started it on an SSH that reached it): dormant, so the
+    // loops leave it alone, and a reply waits for "running" and one probe instead of dying on SSH.
+    vm = "starting";
+    reads = 0;
+    await pool.refreshProvider("fs-1");
+    assert.equal(pool.dormant("fs-1"), true);
+    await pool.readyForBox("box-q", "message box-q");
+    assert.deepEqual(calls, ["start"], "no start issued for a VM already starting");
+    assert.equal(probes, 2);
+    assert.equal(pool.dormant("fs-1"), false);
   } finally {
     setProviderForTest("freestyle", null);
     registerSleepResolver(null);

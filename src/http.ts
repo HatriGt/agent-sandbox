@@ -466,6 +466,9 @@ const withMemoryNew = (snap: WatchSnapshot, box: string): WatchSnapshot => {
 };
 const watchHub = new WatchHub({
   read: async (s) => withMemoryNew(redactSnap(await gatherWatch(hcfg(s), s, undefined, { metrics: false })), s),
+  // A thread open on a box whose host is asleep or paused is served its last snapshot: an SSH would
+  // hang on the proxy, and on a Freestyle VM it would start a resume nobody asked for.
+  skip: (s) => hostPool.dormant(hostPool.hostOfBox(s) ?? PRIMARY_HOST_ID),
   // The live thread's first frame of a long run: the whole log, not the tail window (readFull).
   readLog: async (s) => redactor.redact(await readAgentLogFull(hcfg(s), s)),
 });
@@ -1896,13 +1899,16 @@ app.get("/fleet.json", async (req: Request, res: Response) => {
           console.error(`[broker] consider ${b.name} failed: ${(e as Error).message}`)
         );
     }
+    // Which hosts are asleep or paused, so a thread can say "waking the host" (a minute) rather than
+    // "waking the sandbox" (seconds) when its box lives on one.
+    const hostsAsleep = hostPool.state().filter((h) => h.asleep).map((h) => h.id);
     if (!ownership.isUser()) {
-      res.json(fleet);
+      res.json({ ...fleet, hostsAsleep });
       return;
     }
     const p = principalOf(res);
     const max = (p.kind === "user" && getUser(db, p.userId)?.max_boxes) || cfg.userMaxBoxes;
-    res.json({ ...fleet, boxes: ownership.visible(fleet.boxes), lifecycle: { ...fleet.lifecycle, capacity: Math.min(max, fleet.lifecycle.capacity || max) } });
+    res.json({ ...fleet, hostsAsleep, boxes: ownership.visible(fleet.boxes), lifecycle: { ...fleet.lifecycle, capacity: Math.min(max, fleet.lifecycle.capacity || max) } });
   } catch (e) {
     failWith(res, e);
   }
@@ -2088,6 +2094,9 @@ app.post("/resume.json", async (req: Request, res: Response) => {
         return;
       }
     }
+    // The box's host first: the read below would otherwise SSH a paused VM (and the provider's proxy
+    // would begin a slow resume behind our back) before the reply's own wait for the host.
+    await hostPool.readyForBox(session, `message ${session}`);
     // Mid-turn: a second `claude -c` would race the running one, so the message waits in the inbox
     // and is delivered the moment the run finishes. `force` (answering a question) bypasses.
     if (!force) {

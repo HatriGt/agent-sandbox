@@ -91,6 +91,8 @@ export interface HostStateView {
   reserved: number;
   asleep: boolean;
   sleepSince: number;
+  /** When the host's clock will put it to sleep if nothing starts working (awake, clock on, nothing working). */
+  sleepsAt?: number;
   /** Disabled, but boxes still live on it: swept until they are gone, never picked. */
   draining: boolean;
   unreachable: boolean;
@@ -249,7 +251,11 @@ export function isTaskFault(msg: string): boolean {
  * VM is expected, and an unreachable host would never be picked, so never woken.
  */
 export function dormant(h: HostRuntime): boolean {
-  return h.sleep.asleep() || h.provider?.state === "paused" || h.provider?.state === "stopped";
+  // "starting" too: a VM resuming (by `ready`, by the operator, or by the provider's proxy on an SSH
+  // that reached it) does not answer SSH for a minute; a loop that tried would time out and call it
+  // unreachable, and `readyForBox` would skip the wait a reply needs (seen live 2026-11-17: 172 s).
+  const p = h.provider?.state;
+  return h.sleep.asleep() || p === "paused" || p === "stopped" || p === "starting";
 }
 
 /** A host that `ready` gave up on is left out of the ranking this long, so every run does not pay the wait again. */
@@ -629,6 +635,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
             reserved: h.reserved,
             asleep: dormant(h),
             sleepSince: h.sleep.state().since || h.dormantSince || 0,
+            ...(h.sleep.enabled && h.spec.enabled && !dormant(h) && !h.lastBoxes.some(isWorkingBox) ? { sleepsAt: h.sleep.state().lastWorkAt + h.spec.sleepAfterMs } : {}),
             draining: draining(h),
             unreachable: !!h.unreachableSince && !dormant(h),
             lastError: h.lastError,

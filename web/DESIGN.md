@@ -56,6 +56,15 @@ and `.pill`.
 - [beste](https://ui.beste.co) — @withbeste. Grey tonal cards on white with white inner tiles, dashed
   chart grids, tabular numerals, big stats; every motion piece declares a reduced-motion fallback.
 
+**Motion references (2026-11-17).** [d3motion resources](https://d3motion.pro/resources) — 52
+animated components (counters, rings, bars, timelines, toggles, staggered lists, typewriters,
+sheens) that look expensive because every one of them is *time-driven*: one easing curve, a
+delay per element, a spring on every number, nothing cutting. They are frame-rendered demos for
+video, one shared JS harness, not React components and under no licence that permits reuse, so
+nothing from them is copied; what they teach is written into the primitives below (ring, ticker,
+swap, collapse, stagger) and the Motion section. [Motion](https://github.com/motiondivision/motion)
+is the library every primitive is built on: `layout`, `AnimatePresence`, springs, `pathLength`.
+
 **Component libraries and kits (settings surfaces, sheets, segmented controls, list states)**
 
 - [skiper ui](https://skiper-ui.com) — @Gur__vi. The bouncy accordion in the app is credited to it.
@@ -1608,3 +1617,27 @@ vCPU-hours / vCPUs billed / resets on day with the Free-plan figures as the hint
 sources sit under a Collapse because nobody sets them on a first add. Verified in both schemes
 with `.shots/hosts-fixture.mjs` (every route mocked; `--panel` for the section alone,
 `--open=new|edit` for the dialogs).
+
+## Round: d3 motion pass (2026-11-17)
+
+The brief was the 52 d3motion components: use them wherever they fit. Opened every one of them.
+They are one time-driven harness (a clock, an easing, a per-element delay) rendered frame by frame
+for video; the taste is reusable, the code is not (and is not licensed for it). What each family
+maps to here, so nobody re-does this survey:
+
+| d3 family (count) | Here |
+|---|---|
+| Counters, odometers, percentage tickers (9) | `NumberTicker` already springs every count; now also the machines and allowance figures on Box hosts. |
+| Rings, arcs, radial progress (6) | **New** `ui/progress-ring` `ProgressRing`: an SVG arc whose `pathLength` springs to the value; track at 15 % of the same ink; tone only from machine state (live while slots fill, warn past 85 % of an allowance, foreground when full or empty). Replaces the scaleX bars on Box hosts. |
+| Horizontal bars, segmented meters (7) | `Capacity` slots and `UsageMeter` already; the bar on Box hosts gave way to the ring (a ratio against a hard limit beside its number reads better round than as a 40 px bar). |
+| Staggered lists, cascading cards (8) | Rows already `layout`-animate; the Hub's three blocks stagger once. Not extended: a stagger on every poll would be motion that does not earn its place. |
+| Toggles, switches, segmented pills (5) | `FilterChip` `layoutId` ink, `Segmented`, `Switch`, `IconSwap`. Covered. |
+| Typewriters, text reveals, word swaps (6) | The streaming caret and `Swap` on labels. A typewriter on agent prose would fake a pace the model does not have; not used. |
+| Timelines, step indicators (4) | The `WakingCard` stages crossfade as the boot advances; now with a second, longer set of stages for a box whose host's VM has to resume first ("Waking the host", 150 s before "taking longer"). |
+| Sheens, shimmers, glows (4) | `sheen` on an occupied slot, `shimmer` skeletons. Covered; no glows (ink on paper). |
+| Charts (3) | Not applicable: meters, not charts (Data honesty). |
+
+Also in this round: the State column on Box hosts says "awake · sleeps in 4m" (from the host's
+own clock, `sleepsAt`) once the sleep-after is within 15 minutes, so the operator sees the pause
+coming; a resuming VM says "starting" even though the pool counts it as dormant. Verified in both
+schemes with `.shots/hosts-fixture.mjs --panel`.

@@ -145,7 +145,11 @@ asked, and the answer "paused" makes the host dormant rather than unreachable: s
 sweep, ranked as asleep, not SSHed to by any loop, and started by `ready` when a run picks it, or
 by any launch on a box it holds (a reply, a resume). A check on it says "paused at the provider; it
 is started for the next run" and passes. A frozen warm box on it does not count as "warm ready":
-a resume plus a claim is slower than a cold boot on an awake host.
+a resume plus a claim is slower than a cold boot on an awake host. "Starting" counts as dormant
+too: a VM resuming does not answer SSH for up to a minute, so the loops leave it alone and a reply
+waits for "running" plus one probe. A thread open on a box of a dormant host is served its last
+snapshot (the watch hub does not SSH it, which on a Freestyle VM would start a resume nobody
+asked for); the thread's own wake, or a reply, brings the host up.
 
 **The VM runs at the provider while the controller has it asleep** (the pause call failed, or
 somebody started it by hand). A dormant metered host is asked for its provider state once a

@@ -11,21 +11,34 @@ import { useNow } from "@/hooks/useNow";
  * dots in the live blue, a bold label, the current boot stage as a quiet mono chip that crossfades
  * as it advances, and the elapsed seconds. Done swaps the dots for a check; stuck (45s) offers a
  * retry inside the pill; error dims to the alarm colour.
+ *
+ * A box on a host whose VM is paused (`slowHost`) is a different wait: the VM resumes first (20 s
+ * to a minute, through the provider), then the sandbox inside it. The stages and the "taking
+ * longer" threshold stretch to match, so the card never cries stuck at 45 s of a normal minute.
  */
 const STAGES = [
   { at: 0, text: "starting the sandbox" },
   { at: 4, text: "restoring workspace + session" },
   { at: 9, text: "reconnecting the transcript" },
 ];
+const HOST_STAGES = [
+  { at: 0, text: "starting the host's VM" },
+  { at: 15, text: "the VM is coming up" },
+  { at: 45, text: "starting the sandbox" },
+  { at: 60, text: "restoring workspace + session" },
+  { at: 75, text: "reconnecting the transcript" },
+];
 const STUCK_AT = 45;
+const HOST_STUCK_AT = 150;
 
-export function WakingCard({ awake, startedAt, error, onRetry }: { awake: boolean; startedAt: number; error?: string | null; onRetry?: () => void }) {
+export function WakingCard({ awake, startedAt, error, onRetry, slowHost = false }: { awake: boolean; startedAt: number; error?: string | null; onRetry?: () => void; slowHost?: boolean }) {
   const now = useNow(!awake && !error, 500);
   const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
-  const stage = awake ? STAGES.length - 1 : Math.min(STAGES.length - 1, STAGES.filter((s) => elapsed >= s.at).length - 1);
-  const stuck = !awake && !error && elapsed >= STUCK_AT;
-  const label = error ? "Could not wake the sandbox" : awake ? "Awake" : stuck ? "Taking longer than usual" : "Waking the sandbox";
-  const detail = error ? null : awake ? "back — the transcript follows" : stuck ? null : STAGES[stage].text;
+  const stages = slowHost ? HOST_STAGES : STAGES;
+  const stage = awake ? stages.length - 1 : Math.min(stages.length - 1, stages.filter((s) => elapsed >= s.at).length - 1);
+  const stuck = !awake && !error && elapsed >= (slowHost ? HOST_STUCK_AT : STUCK_AT);
+  const label = error ? "Could not wake the sandbox" : awake ? "Awake" : stuck ? "Taking longer than usual" : slowHost ? "Waking the host" : "Waking the sandbox";
+  const detail = error ? null : awake ? "back — the transcript follows" : stuck ? null : stages[stage].text;
 
   return (
     <motion.div

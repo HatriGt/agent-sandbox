@@ -1080,6 +1080,7 @@ export default function App() {
                     box={!selectedBox.task && selectedBox.name === launched && launchTask.current ? { ...selectedBox, task: launchTask.current } : selectedBox}
                     lifecycle={lifecycle}
                     fleet={boxes}
+                    hostAsleep={!!selectedBox.host && !!data?.hostsAsleep?.includes(selectedBox.host)}
                     onOpenBox={(b) => go({ view: "box", name: b })}
                     inferredRepos={inferredNotes[selectedBox.name]}
                     replies={replies[selectedBox.name] ?? []}

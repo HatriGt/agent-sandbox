@@ -92,9 +92,12 @@ export function Thread({
   onRepliesFlushed,
   density = "chat",
   onDensity = () => {},
+  hostAsleep = false,
 }: {
   box: BoxView;
   lifecycle: FleetLifecycle;
+  /** The box's host is asleep, paused or starting: a wake takes a minute, and the card says so. */
+  hostAsleep?: boolean;
   /** Every visible machine, for the inspector's Fleet tab. */
   fleet?: BoxView[];
   onOpenBox?: (name: string) => void;
@@ -118,8 +121,12 @@ export function Thread({
   onReplyFailed?: (text: string) => void;
 }) {
   // Opening a sleeping sandbox wakes it at once — nobody should have to type to see their run.
-  const [wake, setWake] = React.useState<{ startedAt: number; error: string | null } | null>(null);
+  const [wake, setWake] = React.useState<{ startedAt: number; error: string | null; slowHost: boolean } | null>(null);
   const wokeRef = React.useRef<string | null>(null);
+  // Read at the moment a wake starts, not as a dependency: the host's state changing mid-wake
+  // must not restart the effect.
+  const hostAsleepRef = React.useRef(hostAsleep);
+  hostAsleepRef.current = hostAsleep;
 
   const sleeping = isSleeping(box);
   // Name the run once it has a task and is awake; the fleet poll carries the title back.
@@ -132,7 +139,7 @@ export function Thread({
   React.useEffect(() => {
     if (!sleeping || wokeRef.current === box.name) return;
     wokeRef.current = box.name;
-    setWake({ startedAt: Date.now(), error: null });
+    setWake({ startedAt: Date.now(), error: null, slowHost: hostAsleepRef.current });
     api.wake(box.name).catch((e: unknown) => setWake((w) => (w ? { ...w, error: e instanceof Error ? e.message : String(e) } : w)));
   }, [sleeping, box.name]);
   const wasSleeping = React.useRef(false);
@@ -563,7 +570,7 @@ export function Thread({
       .finally(() => setSleepBusy(false));
   };
   const wakeNow = React.useCallback(() => {
-    setWake({ startedAt: Date.now(), error: null });
+    setWake({ startedAt: Date.now(), error: null, slowHost: hostAsleepRef.current });
     api.wake(box.name).catch((e: unknown) => setWake((w) => (w ? { ...w, error: e instanceof Error ? e.message : String(e) } : w)));
   }, [box.name]);
 
@@ -1208,7 +1215,7 @@ export function Thread({
               {sleeping && !wake ? (
                 <SleepingCard key="sleeping" onWake={wakeNow} />
               ) : (
-                wake && <WakingCard key="waking" awake={!sleeping} startedAt={wake.startedAt} error={wake.error} onRetry={wakeNow} />
+                wake && <WakingCard key="waking" awake={!sleeping} startedAt={wake.startedAt} error={wake.error} onRetry={wakeNow} slowHost={wake.slowHost || hostAsleep} />
               )}
             </AnimatePresence>
 
