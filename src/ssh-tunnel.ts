@@ -176,6 +176,10 @@ export function ensureTunnel(cfg: Config, wanted: () => boolean = () => true, io
   if (e.off) return Promise.resolve(false);
   if (e.route) return Promise.resolve(true);
   if (e.starting) return e.starting;
+  // Asked before the dial, not only after a failure: a sweep that finished after the host was
+  // paused asked for the route, and the dial's own SSH to the proxy resumed the VM behind the
+  // pause (seen live 2026-11-17: "up on port" eight seconds after "pause … paused").
+  if (!wanted()) return Promise.resolve(false);
   // A dial already scheduled after a failure keeps its backoff: a sweep every 15 s is not a reason
   // to try sooner (each try is a connection to the proxy and a log line).
   if (e.retry) return Promise.resolve(false);
@@ -197,6 +201,7 @@ async function dial(cfg: Config, e: Entry, io: TunnelIO): Promise<boolean> {
       }
       e.keyInstalled = true;
     }
+    if (!e.wanted()) throw new Error("not wanted any more");
     const child = io.spawn(tunnelArgs(cfg, route), (code) => onExit(cfg, e, child, code, io));
     e.child = child;
     await io.waitPort(route.port, 15_000);

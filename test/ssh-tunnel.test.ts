@@ -135,6 +135,15 @@ test("ensureTunnel: no identity means no tunnel; a VM that refuses the key is no
   resetTunnelsForTest();
 });
 
+test("ensureTunnel: a host that does not want the route (paused) is not dialled, whoever asks", async () => {
+  resetTunnelsForTest();
+  const { io, spawned } = fakeIO();
+  assert.equal(await ensureTunnel(cfg, () => false, io), false);
+  assert.equal(spawned.length, 0, "no SSH to the proxy: it would resume the paused VM");
+  assert.equal(tunnelState(cfg), "down");
+  resetTunnelsForTest();
+});
+
 test("ASB_SSH_DIRECT=0 turns it off", async () => {
   resetTunnelsForTest();
   process.env.ASB_SSH_DIRECT = "0";
