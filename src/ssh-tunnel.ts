@@ -245,8 +245,12 @@ function scheduleRetry(cfg: Config, e: Entry, io: TunnelIO): void {
   e.retry.unref?.();
 }
 
-/** Tear the tunnel down and stop re-dialling: the host is going to sleep, or is gone. */
-export function dropTunnel(cfg: Config): void {
+/**
+ * Tear the tunnel down and stop re-dialling: the host is going to sleep, or is gone. New commands
+ * take the proxy at once; the forward itself is killed after `graceMs`, so a command in flight on
+ * it (a sweep's `msb ls`) finishes instead of dying with "read from master failed".
+ */
+export function dropTunnel(cfg: Config, graceMs = 2_000): void {
   const e = entries.get(cfg.vpsSsh);
   if (!e) return;
   e.wanted = () => false;
@@ -258,7 +262,12 @@ export function dropTunnel(cfg: Config): void {
   e.child = undefined;
   e.route = undefined;
   setDirectRoute(cfg.vpsSsh, undefined);
-  child?.kill();
+  if (!child) return;
+  if (graceMs <= 0) {
+    child.kill();
+    return;
+  }
+  setTimeout(() => child.kill(), graceMs).unref?.();
 }
 
 /** Tests. */

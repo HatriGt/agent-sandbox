@@ -94,8 +94,15 @@ test("ensureTunnel: a forward that ends is dialled again only while wanted; drop
   wanted = true;
   await ensureTunnel(cfg, () => wanted, io);
   assert.equal(tunnelState(cfg), "up");
-  dropTunnel(cfg);
+  dropTunnel(cfg, 0);
   assert.equal(spawned[2].killed, true);
+  // With the grace: the route is gone at once, the forward a moment later.
+  await ensureTunnel(cfg, () => wanted, io);
+  dropTunnel(cfg, 20);
+  assert.equal(directRoute(cfg.vpsSsh), undefined);
+  assert.equal(spawned[3].killed, false);
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(spawned[3].killed, true);
   assert.equal(directRoute(cfg.vpsSsh), undefined);
   assert.equal(tunnelState(cfg), "down");
   resetTunnelsForTest();

@@ -837,6 +837,10 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
         if (startedAt && next.state === "paused" && state.state !== "paused") startedAt = 0;
         state = next;
       }
+      // The direct route is dialled now, beside the probe, not after it: its own check is the same
+      // first SSH, and the reply's commands then find it up (seen live: a resume's commands went
+      // through the proxy for the 5 s the dial took after the probe).
+      if (cameUp && state.state === "running") dialTunnel(h);
     }
     // A host that was asleep, unreachable or just came up has to answer once before a box is launched on it.
     if (!opts.probe || (!wasAsleep && !cameUp && !h.unreachableSince)) {
