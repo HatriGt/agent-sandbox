@@ -540,6 +540,7 @@ export interface HostView {
   reserved: number;
   asleep: boolean;
   sleepSince: number;
+  draining?: boolean;
   unreachable: boolean;
   lastError?: string;
   lastSweepAt: number;

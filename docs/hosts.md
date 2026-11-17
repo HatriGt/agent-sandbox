@@ -55,8 +55,16 @@ asks the pool for a host:
 A pick reserves a slot on that host until the box exists or the boot fails, so a parallel
 fan-out cannot overshoot one host while the total gate still passes. The moment the box exists it
 is counted as running on that host (the next sweep lists it for real) and the reservation is given
-back, so a box mid-bootstrap is never counted twice. The global capacity shown on the Fleet page
-is the sum of every enabled host's slots.
+back, so a box mid-bootstrap is never counted twice. A sweep that began before the box existed
+does not uncount it (a placed box stays counted for 90 s until a sweep lists it). The global
+capacity shown on the Fleet page is the sum of every enabled host's slots, and the capacity gate
+before a delegation is answered from the last sweep when it is under 30 s old, not with another
+SSH round trip per host.
+
+A failure before the box exists is the host's fault and moves the run to the next host, unless it
+is plainly the task's own: a ref that does not exist, a patch that does not apply, a clone the
+token cannot see. Those come back to the caller as they are, and the host is not marked
+unreachable for them (it used to be, one host per attempt, until every host was out).
 
 Before the box is launched the host is made ready (`ready` in src/host-pool.ts): the host's clock
 is woken, a paused VM is started through its provider and waited for (up to 2.5 minutes for the
@@ -123,6 +131,14 @@ another five minutes of billed time). A box waiting on a question, or sitting fi
 keep the host up; a reply is a launch and wakes it. Pinned and sleeping runs are frozen inside the
 paused VM and thaw with it.
 
+**A reply, a resume, a rewind, an ask or a teardown reaches a box whose VM is paused.** Every
+box-scoped call asks the pool for the box's host *ready* first (`readyForBox`): the VM is started
+through the provider and waited for, one probe has to get through, and only then does the SSH that
+carries the message run. Before this the first SSH died on the proxy and the answer was lost. A
+dashboard reply on a paused VM takes the resume time (20 s to a minute) before the thread shows
+the run; the thread's "Waking the sandbox" card covers the wait. Several replies or runs that pick the
+same paused host at once share one start and one set of probes.
+
 **The VM is paused at the provider while the controller thinks it is awake** (paused by hand, by
 the provider's own idle timer, or before a controller restart). SSH to it fails, the provider is
 asked, and the answer "paused" makes the host dormant rather than unreachable: served from its last
@@ -154,13 +170,23 @@ SSH round trip with `msb ls` and a disk reading, capped at 45 s). The toast says
 unreachable when it did not answer, so a typo never takes a run. The controller also learns the
 new host's public addresses so boxes there keep off them (the host guard).
 
-**A host is removed.** Refused while machines run on it; disable it instead and let them finish,
-then remove. Removal forgets the box map for that host; the primary cannot be removed, only
-disabled (which stops routing runs there while leaving its boxes reachable).
+**A host is disabled while machines run on it.** It is *draining*: no new run lands there, its
+slots leave the capacity, but it is still swept, so its runs keep their finish edges, pushes,
+notifications and history, and every reply still reaches them. The row says "draining · 2". When
+two sweeps in a row list none of its boxes it stops being read. A box the sweeps have not listed
+twice is forgotten from the box map at the same time (reaped by its idle timeout, removed by
+hand), so a stale name no longer points at a host.
+
+**A host is removed.** Refused while machines run or boot on it; disable it instead and let them
+finish, then remove. Removal forgets the box map for that host; the primary cannot be removed,
+only disabled.
 
 **A restart of the controller.** The primary is re-seeded from .env, the other rows come from the
 table, each box's host comes from `box_hosts` until the first sweep, and nothing about the hosts
-depends on the container's filesystem.
+depends on the container's filesystem. A metered host is asked for its provider state at once,
+so a VM that was paused when the controller restarted is dormant from the first sweep on instead
+of costing that sweep 45 s on a dead SSH and a false "unreachable"; the boot-time host reads (the
+host guard, the store-builder reaper) skip a paused VM too.
 
 ### What it costs
 
@@ -186,7 +212,7 @@ Both are one number per host in the edit dialog, changed at any time.
 ## Managing hosts
 
 Admins only. **Fleet view → Box hosts** lists every host with its state (working, idle, asleep
-since, unreachable with the last error, off), machines over slots, this month's allowance, the
+since, unreachable with the last error, draining, off), machines over slots, this month's allowance, the
 order number, and per-row actions: check (an SSH round trip and, for a VM, the provider state),
 pause or wake (Freestyle), edit, remove. Removing a host with machines still running is refused;
 disable it and let them finish. **Add host** is a form: name, provider, SSH target, VM id and API
@@ -261,6 +287,10 @@ for), and the hourly canary had woken the VM for nothing.
 | Provider state "unknown" | The API key is wrong or the API did not answer. | Edit the host and paste the key again; check runs the state read too. |
 | "unreachable" with "host … is paused after 150s" and the host is skipped for a while | The VM did not come up within the patience; the run went elsewhere and the host sits out for five minutes. | Click wake, then check. If "starting" never becomes "running", look at the VM in the provider's console. |
 | The primary is disabled after a restart | You disabled it while another host was enabled; that choice is kept. | Enable it on its row. With no other enabled host it is always on. |
+| A reply on a thread takes a minute to show the run | The box's VM was paused; the reply started it and waited. | Nothing. Raise the host's sleep-after if this happens often. |
+| "draining · 1" on a disabled host | Machines still run there; the host is swept for them and takes no new run. | Let them finish, or tear them down, then remove the host. |
+| "pause" is refused with "a run is being started on this host" | A run picked this host and its box is booting. | Wait for the box to appear, then pause. |
+| The canary says "every box host is asleep, and this run does not wake one" | Every enabled host is dormant; the hourly check never wakes a VM. | Nothing; a real run wakes it. |
 
 ## What is not covered
 

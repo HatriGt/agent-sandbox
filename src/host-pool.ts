@@ -62,6 +62,8 @@ export interface HostRuntime {
   unreachableSince?: number;
   /** When `ready` last gave up on this host; it is not picked again for READY_COOLDOWN_MS. */
   readyFailedAt?: number;
+  /** When the provider first said paused or stopped (the reading itself is refreshed every minute). */
+  dormantSince?: number;
   /** Boots in flight (picked, not yet in `msb ls`). */
   reserved: number;
   /** Awake milliseconds this billing month (metered hosts), mirrored from the table. */
@@ -89,6 +91,8 @@ export interface HostStateView {
   reserved: number;
   asleep: boolean;
   sleepSince: number;
+  /** Disabled, but boxes still live on it: swept until they are gone, never picked. */
+  draining: boolean;
   unreachable: boolean;
   lastError?: string;
   lastSweepAt: number;
@@ -125,6 +129,12 @@ export function sessionBoxes(boxes: readonly BoxView[]): number {
 export interface HostPool {
   hosts(): HostRuntime[];
   enabled(): HostRuntime[];
+  /** Enabled hosts plus the disabled ones that still hold boxes (see `draining`): what a sweep reads. */
+  active(): HostRuntime[];
+  /** Disabled with boxes still on it: its runs are watched to their end, no new run lands there. */
+  draining(id: string): boolean;
+  /** The provider readings the pool asked for at construction; http.ts waits for it before the boot-time loops. */
+  init(): Promise<void>;
   get(id: string): HostRuntime | undefined;
   primary(): HostRuntime;
   cfgFor(id: string): Config;
@@ -142,6 +152,12 @@ export interface HostPool {
    * caller can place the run elsewhere.
    */
   ready(id: string, reason?: string, opts?: { patienceMs?: number }): Promise<void>;
+  /**
+   * The Config for a box's host, after that host is up: a reply, a resume or a teardown on a box
+   * whose VM is paused has to wait for the start, not die on the first SSH. An awake host answers
+   * at once.
+   */
+  readyForBox(box: string, reason?: string): Promise<Config>;
   capacity(): number;
   /** A box was just created on a host: it counts as running until the next sweep lists it. */
   notePlaced(id: string, box: string): void;
@@ -191,9 +207,11 @@ export async function placeRun<T>(
       if (picked?.host && pool) {
         // How long to wait for a paused VM: 2.5 minutes when it is the only host that can take the
         // run, 75 s when an awake host with room is standing by (the run goes there, and the VM,
-        // started meanwhile, is up for the next one).
-        const standby = pool.enabled().some((h) => h.spec.id !== picked.host!.spec.id && !tried.includes(h.spec.id) && !pool.dormant(h.spec.id) && !h.unreachableSince && sessionBoxes(h.lastBoxes) + h.reserved < h.cfg.maxBoxes);
-        await pool.ready(picked.host.spec.id, label, { patienceMs: standby ? 75_000 : 150_000 });
+        // started meanwhile, is up for the next one). The picker decides what "standing by" means,
+        // so a host sitting out a cooldown or out of allowance is not counted on.
+        const alt = pool.pick({ minAllowanceHours: 1, exclude: [...tried, picked.host.spec.id], awakeOnly: true });
+        alt.release();
+        await pool.ready(picked.host.spec.id, label, { patienceMs: alt.host ? 75_000 : 150_000 });
       }
       return await attempt(hostCfg, (box) => {
         acquired = true;
@@ -205,8 +223,10 @@ export async function placeRun<T>(
     } catch (e) {
       const id = picked?.host?.spec.id;
       const others = pool && id ? pool.enabled().filter((h) => h.spec.id !== id && !tried.includes(h.spec.id)).length : 0;
-      if (acquired || !id || !others) throw e;
       const msg = String((e as Error).message ?? e);
+      // A bad ref, a patch that does not apply, a clone the token cannot see: the task's, however
+      // early it failed. Marking the host dead for it would knock every host out, one per attempt.
+      if (acquired || !id || !others || isTaskFault(msg)) throw e;
       log(`[hosts] boot on ${id} failed before the box existed, trying another host: ${msg.slice(0, 200)}`);
       pool!.noteSweepError(id, `boot failed: ${msg.slice(0, 200)}`);
       tried.push(id);
@@ -214,6 +234,11 @@ export async function placeRun<T>(
       picked?.release();
     }
   }
+}
+
+/** Failures before the box exists that are the run's own and not the host's (src/git-source.ts, deps.ts). */
+export function isTaskFault(msg: string): boolean {
+  return /Could not check out |Invalid ref |patch too large|The patch does not apply|^attachment: |Nothing was started\./.test(msg);
 }
 
 /**
@@ -248,6 +273,14 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
   const runtimes = new Map<string, HostRuntime>();
   // Where each box was last seen (sweeps) or started (rememberBox); the table backs it.
   const boxHost = new Map<string, string>();
+  // Boxes counted before a sweep listed them (notePlaced), with when; a sweep that began before the
+  // box existed must not drop them. And how many sweeps in a row a mapped box has been missing from.
+  const placedAt = new Map<string, number>();
+  const misses = new Map<string, number>();
+  // One `ready` in flight per host: three runs picking the same paused VM share one start and one probe.
+  const readying = new Map<string, Promise<void>>();
+  // The provider readings asked for at construction (a paused VM is dormant from the first sweep on).
+  const initial: Promise<unknown>[] = [];
 
   const monthOf = (spec: HostSpec): string => billingMonth(now(), spec.allowance?.resetDay ?? 1);
 
@@ -271,9 +304,20 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       usageMonth: month,
       lastUsageTickAt: prev?.lastUsageTickAt ?? now(),
       provider: prev?.provider,
+      dormantSince: prev?.dormantSince,
       check: prev?.check,
       disk: prev?.disk,
     };
+  };
+
+  /** The provider's latest word, and from when the VM has been paused or stopped. */
+  const setProvider = (h: HostRuntime, r: ProviderState): ProviderState => {
+    const off = r.state === "paused" || r.state === "stopped";
+    const wasOff = h.provider?.state === "paused" || h.provider?.state === "stopped";
+    if (off && !wasOff) h.dormantSince = r.at || now();
+    else if (!off) h.dormantSince = undefined;
+    h.provider = r;
+    return r;
   };
 
   const reload = (): void => {
@@ -289,15 +333,23 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       runtimes.set(spec.id, build(spec));
     }
     for (const [box, id] of allBoxHosts(db)) if (runtimes.has(id) && !boxHost.has(box)) boxHost.set(box, id);
+    // A metered host the pool has no reading for yet (a restart while its VM was paused): asked now,
+    // so the first sweep serves it from memory instead of burning HOST_ANSWER_TIMEOUT_MS on a dead SSH.
+    for (const h of runtimes.values()) {
+      if (!h.provider && h.spec.enabled && providerFor(h.spec).metered && h.spec.freestyle?.apiKey) initial.push(refreshProvider(h.spec.id).catch(() => undefined));
+    }
   };
-
-  seedPrimaryHost(db, base);
-  reload();
 
   const primary = (): HostRuntime => runtimes.get(PRIMARY_HOST_ID)!;
   const hosts = (): HostRuntime[] => [...runtimes.values()];
   const enabled = (): HostRuntime[] => hosts().filter((h) => h.spec.enabled);
   const get = (id: string): HostRuntime | undefined => runtimes.get(id);
+  // Disabled, with boxes still on it (seen by a sweep, or started there and not yet torn down): its
+  // runs keep their finish edges, notifications and history, and the operator can "disable the host
+  // and let them finish" as the remove refusal suggests. The mapping of a box two sweeps have not
+  // listed is dropped (noteSweep), so this ends by itself.
+  const draining = (h: HostRuntime): boolean => !h.spec.enabled && (sessionBoxes(h.lastBoxes) > 0 || [...boxHost.values()].includes(h.spec.id));
+  const active = (): HostRuntime[] => hosts().filter((h) => h.spec.enabled || draining(h));
 
   const candidates = (warmReady?: (h: HostRuntime) => boolean, minAllowanceHours?: number): HostCandidate[] =>
     hosts().map((h) => {
@@ -323,18 +375,21 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     if (!p.metered) return;
     const r = await p[what](h.spec);
     // A call that failed says nothing about the VM: the last good reading stays, with the error on it.
-    h.provider = r.state === "unknown" && h.provider && h.provider.state !== "unknown" ? { ...h.provider, detail: r.detail } : r;
+    setProvider(h, r.state === "unknown" && h.provider && h.provider.state !== "unknown" ? { ...h.provider, detail: r.detail } : r);
     log(`[hosts] ${what} ${h.spec.id}: ${r.state}${r.detail ? ` (${r.detail})` : ""}`);
   };
 
-  const refreshProvider = async (id: string): Promise<ProviderState> => {
+  async function refreshProvider(id: string): Promise<ProviderState> {
     const h = get(id);
     if (!h) throw new Error(`no host "${id}"`);
-    h.provider = await providerFor(h.spec).state(h.spec);
+    setProvider(h, await providerFor(h.spec).state(h.spec));
     // SSH failing to a paused VM was expected; it is dormant, not unreachable.
-    if (h.provider.state === "paused" || h.provider.state === "stopped") h.unreachableSince = undefined;
-    return h.provider;
-  };
+    if (h.provider!.state === "paused" || h.provider!.state === "stopped") h.unreachableSince = undefined;
+    return h.provider!;
+  }
+
+  seedPrimaryHost(db, base);
+  reload();
 
   const wake = (id: string, reason?: string): void => {
     const h = get(id);
@@ -362,6 +417,12 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
   const pool: HostPool = {
     hosts,
     enabled,
+    active,
+    draining: (id) => {
+      const h = get(id);
+      return !!h && draining(h);
+    },
+    init: () => withTimeout(Promise.allSettled(initial), 10_000, "provider readings").then(() => undefined, () => undefined),
     get,
     primary,
     cfgFor: (id) => (get(id) ?? primary()).cfg,
@@ -390,9 +451,15 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     pick: (o = {}) => {
       const skip = new Set(o.exclude ?? []);
       // awakeOnly: the controller's own canary never wakes a paused VM; it checks what is up.
-      const r = pickHost(candidates(o.warmReady, o.minAllowanceHours).filter((c) => !skip.has(c.id) && !(o.awakeOnly && c.asleep)));
+      const all = candidates(o.warmReady, o.minAllowanceHours).filter((c) => !skip.has(c.id));
+      const r = pickHost(all.filter((c) => !(o.awakeOnly && c.asleep)));
       const host = r.id ? get(r.id) : undefined;
-      if (!host) return { ...r, release: () => {} };
+      if (!host) {
+        // The refusal names what was really in the way: "no box host is configured" would be wrong
+        // when every host is merely asleep and this caller does not wake one.
+        if (o.awakeOnly && all.some((c) => c.asleep && c.enabled)) return { ...r, reason: "every box host is asleep, and this run does not wake one", release: () => {} };
+        return { ...r, release: () => {} };
+      }
       host.reserved++;
       let released = false;
       return {
@@ -408,9 +475,17 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     capacity: () => totalCapacity(candidates()),
     notePlaced: (id, box) => {
       const h = get(id);
-      if (!h || h.lastBoxes.some((b) => b.name === box)) return;
-      h.lastBoxes = [...h.lastBoxes, { name: box, role: "session", boxStatus: "Running", runState: "idle", host: id }];
+      if (!h) return;
+      placedAt.set(box, now());
+      misses.delete(box);
       boxHost.set(box, id);
+      // A warm box just claimed is listed as pool-free by the last sweep: it holds a session now.
+      const have = h.lastBoxes.find((b) => b.name === box);
+      if (have) {
+        if (have.role === "pool-free") h.lastBoxes = h.lastBoxes.map((b) => (b.name === box ? { ...b, role: "pool-claimed", boxStatus: "Running" } : b));
+        return;
+      }
+      h.lastBoxes = [...h.lastBoxes, { name: box, role: "session", boxStatus: "Running", runState: "idle", host: id }];
     },
     noteSweep: (id, untagged) => {
       const h = get(id);
@@ -418,6 +493,37 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       // Every box carries its host from here on, whoever read it.
       const boxes = untagged.map((b) => (b.host === id ? b : { ...b, host: id }));
       const wasAsleep = h.sleep.asleep();
+      // A box placed a moment ago that this sweep does not list yet (the read began before the box
+      // existed) stays counted for one more round; dropping it would also send its next exec to the
+      // primary (cfgForBox) for fifteen seconds.
+      const listed = new Set(boxes.map((b) => b.name));
+      for (const b of h.lastBoxes) {
+        const at = placedAt.get(b.name);
+        if (at !== undefined && !listed.has(b.name) && now() - at < 90_000) boxes.push(b);
+      }
+      for (const [box, at] of placedAt) if (listed.has(box) || now() - at >= 90_000) placedAt.delete(box);
+      // A box this host was mapped to that two sweeps in a row have not listed is gone (reaped,
+      // removed by hand): its mapping is dropped, so cfgForBox stops answering for it and a disabled
+      // host with nothing left on it stops being swept.
+      for (const [box, owner] of [...boxHost]) {
+        if (owner !== id) continue;
+        if (listed.has(box) || placedAt.has(box)) {
+          misses.delete(box);
+          continue;
+        }
+        const n = (misses.get(box) ?? 0) + 1;
+        if (n < 2) {
+          misses.set(box, n);
+          continue;
+        }
+        misses.delete(box);
+        boxHost.delete(box);
+        try {
+          forgetBoxHost(db, box);
+        } catch {
+          /* the map is what answers */
+        }
+      }
       h.lastBoxes = boxes;
       h.lastSweepAt = now();
       h.lastError = undefined;
@@ -522,7 +628,8 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
             running: sessionBoxes(h.lastBoxes),
             reserved: h.reserved,
             asleep: dormant(h),
-            sleepSince: h.sleep.state().since || (dormant(h) ? (h.provider?.at ?? 0) : 0),
+            sleepSince: h.sleep.state().since || h.dormantSince || 0,
+            draining: draining(h),
             unreachable: !!h.unreachableSince && !dormant(h),
             lastError: h.lastError,
             lastSweepAt: h.lastSweepAt,
@@ -594,15 +701,30 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       h.check = r;
       return r;
     },
-    ready: async (id, reason, o = {}) => {
+    ready: (id, reason, o = {}) => {
       const h = get(id);
-      if (!h) throw new Error(`no host "${id}"`);
-      try {
-        await readyInner(h, reason, o);
-      } catch (e) {
-        h.readyFailedAt = now();
-        throw e;
+      if (!h) return Promise.reject(new Error(`no host "${id}"`));
+      // Callers that arrive while one is in flight share it (one start, one set of probes); the
+      // patience is the first caller's.
+      let p = readying.get(id);
+      if (!p) {
+        p = readyInner(h, reason, o)
+          .catch((e) => {
+            h.readyFailedAt = now();
+            throw e;
+          })
+          .finally(() => {
+            if (readying.get(id) === p) readying.delete(id);
+          });
+        readying.set(id, p);
       }
+      return p;
+    },
+    readyForBox: async (box, reason) => {
+      const id = boxHost.get(box);
+      const h = (id && runtimes.get(id)) || primary();
+      if (dormant(h) || h.unreachableSince) await pool.ready(h.spec.id, reason ?? `box ${box}`);
+      return h.cfg;
     },
     refreshProvider,
     pause: async (id) => {
@@ -640,15 +762,19 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       // mid-pause, no start was issued, and the run waited 150 s for a VM nobody had started).
       const t0 = now();
       const read = async (prev?: ProviderState): Promise<ProviderState> =>
-        (h.provider = await p.state(h.spec).catch((e): ProviderState => prev ?? { state: "unknown", detail: String((e as Error).message ?? e), at: now() }));
+        setProvider(h, await p.state(h.spec).catch((e): ProviderState => prev ?? { state: "unknown", detail: String((e as Error).message ?? e), at: now() }));
       let state = await read();
       let startedAt = 0;
       // Polls to skip before a start that failed is tried again (three polls: 15 s live).
       let holdStart = 0;
+      // Reads in a row the provider could not answer after a start was issued.
+      let unknownReads = 0;
       while (state.state !== "running") {
         // The provider cannot be asked (API down, wrong key) and nothing has been started: the
-        // probe below decides, instead of a wait that ends in "unknown after 150s".
-        if (state.state === "unknown" && !startedAt) {
+        // probe below decides, instead of a wait that ends in "unknown after 150s". After a start
+        // the API gets three reads to come back before the probe takes over here too.
+        unknownReads = state.state === "unknown" ? unknownReads + 1 : 0;
+        if (state.state === "unknown" && (!startedAt || unknownReads >= 3)) {
           log(`[hosts] ${id}: provider state unknown${state.detail ? ` (${state.detail})` : ""}; probing instead`);
           cameUp = true;
           break;
@@ -661,7 +787,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
             // The start call failed (a pause still landing at the provider, an API hiccup): once more in a moment.
             holdStart = 3;
           } else {
-            h.provider = r;
+            setProvider(h, r);
             startedAt = now();
           }
         }
@@ -717,6 +843,11 @@ export function hostPool(): HostPool | null {
 /** The Config for a box, or the given one when no pool is configured. */
 export function cfgForBox(cfg: Config, box: string): Config {
   return shared ? shared.cfgForBox(box) : cfg;
+}
+
+/** The Config for a box with its host up (a paused VM is started and waited for), or the given one without a pool. */
+export function cfgForBoxReady(cfg: Config, box: string, reason?: string): Promise<Config> {
+  return shared ? shared.readyForBox(box, reason) : Promise.resolve(cfg);
 }
 
 /** The configs to refill warm boxes on, or just the given one when no pool is configured. */

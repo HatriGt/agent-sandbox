@@ -663,3 +663,191 @@ test("the shared pool answers cfgForBox and warmCfgs; without one the given conf
   assert.equal(poolCapacity(cfg), 10);
   registerSleepResolver(null);
 });
+
+test("readyForBox: a reply to a box on a paused VM waits for the start; callers in flight share it; an awake host answers at once", async () => {
+  let vm = "paused";
+  const calls: string[] = [];
+  setProviderForTest("freestyle", {
+    metered: true,
+    state: async (): Promise<ProviderState> => ({ state: vm, at: 0 }),
+    pause: async (): Promise<ProviderState> => ({ state: (vm = "paused"), at: 0 }),
+    start: async (): Promise<ProviderState> => {
+      calls.push("start");
+      vm = "running";
+      return { state: "running", at: 0 };
+    },
+  });
+  let probes = 0;
+  try {
+    const pool = makeHostPool(cfg, openMemoryDb(), {
+      readyPollMs: 1,
+      probe: async (c) => {
+        if (c.hostId === "fs-1") probes++;
+        return "ok";
+      },
+    });
+    pool.upsert(vmSpec);
+    await pool.refreshProvider("fs-1");
+    assert.equal(pool.dormant("fs-1"), true);
+    pool.rememberBox("box-q", "fs-1");
+    // Two replies land at once: one start, one probe, both get the VM's config.
+    const [a, b] = await Promise.all([pool.readyForBox("box-q", "message box-q"), pool.readyForBox("box-q", "message box-q")]);
+    assert.equal(a.hostId, "fs-1");
+    assert.equal(b.vpsSsh, vmSpec.ssh);
+    assert.deepEqual(calls, ["start"]);
+    assert.equal(probes, 1);
+    // Awake now: no provider call, no probe.
+    await pool.readyForBox("box-q");
+    assert.deepEqual(calls, ["start"]);
+    assert.equal(probes, 1);
+    // A box nobody mapped is the primary's, which never waits.
+    assert.equal((await pool.readyForBox("old-box")).hostId, "primary");
+    assert.equal(probes, 1);
+  } finally {
+    setProviderForTest("freestyle", null);
+    registerSleepResolver(null);
+  }
+});
+
+test("a disabled host with boxes on it is still swept until they are gone; a box two sweeps miss loses its mapping", async () => {
+  const { sweepHosts, setSweepForTest } = await import("../src/host-sweep.ts");
+  const db = openMemoryDb();
+  const pool = makeHostPool(cfg, db);
+  pool.upsert({ id: "d", name: "d", ssh: "root@d", priority: -1 });
+  pool.noteSweep("d", [box("b1")]);
+  let onD: BoxView[] = [box("b1")];
+  const reads: string[] = [];
+  setSweepForTest(async (_c, id) => {
+    reads.push(id);
+    return { boxes: id === "d" ? onD : [], kept: new Set<string>(), claims: new Map<string, number>(), titles: {} };
+  }, 1000);
+  try {
+    pool.upsert({ id: "d", name: "d", ssh: "root@d", priority: -1, enabled: false });
+    assert.equal(pool.draining("d"), true);
+    assert.equal(pool.state().find((h) => h.id === "d")?.draining, true);
+    assert.equal(pool.pick().host?.spec.id, "primary", "never picked");
+    assert.equal(pool.capacity(), 5, "its slots are not capacity");
+    let r = await sweepHosts(cfg, pool);
+    assert.deepEqual(r.swept.sort(), ["d", "primary"], "still read while b1 runs there");
+    assert.ok(r.boxes.some((b) => b.name === "b1" && b.host === "d"));
+    // b1 finishes and is reaped: one sweep without it keeps the mapping (a listing can skip a box once), the second drops it.
+    onD = [];
+    r = await sweepHosts(cfg, pool);
+    assert.equal(pool.hostOfBox("b1"), "d");
+    assert.equal(pool.draining("d"), true);
+    r = await sweepHosts(cfg, pool);
+    assert.equal(pool.hostOfBox("b1"), undefined);
+    assert.equal(pool.draining("d"), false);
+    reads.length = 0;
+    r = await sweepHosts(cfg, pool);
+    assert.deepEqual(reads, ["primary"], "nothing left on it: not read any more");
+    assert.deepEqual(r.swept, ["primary"]);
+  } finally {
+    setSweepForTest(null);
+    registerSleepResolver(null);
+  }
+});
+
+test("notePlaced: a sweep that began before the box existed does not drop it, and its exec still goes to its host", () => {
+  let t = 1_000_000;
+  const pool = makeHostPool(cfg, openMemoryDb(), { now: () => t });
+  pool.upsert({ id: "b", name: "b", ssh: "root@b", priority: -1, maxBoxes: 2 });
+  pool.notePlaced("b", "box-new");
+  pool.noteSweep("b", []);
+  assert.equal(pool.state().find((h) => h.id === "b")!.running, 1, "still counted");
+  assert.equal(pool.cfgForBox("box-new").hostId, "b");
+  t += 91_000;
+  pool.noteSweep("b", []);
+  assert.equal(pool.state().find((h) => h.id === "b")!.running, 0, "a box the sweep has not listed for 90 s is not counted");
+  assert.equal(pool.hostOfBox("box-new"), "b", "one miss keeps the mapping");
+  pool.noteSweep("b", []);
+  assert.equal(pool.hostOfBox("box-new"), undefined);
+  registerSleepResolver(null);
+});
+
+test("placeRun: a failure that is the task's own neither marks the host unreachable nor moves the run; the patience follows what the picker has standing by", async () => {
+  const { placeRun } = await import("../src/host-pool.ts");
+  const pool = makeHostPool(cfg, openMemoryDb(), { probe: async () => "ok" });
+  pool.upsert({ id: "b", name: "b", ssh: "root@b", priority: -1, maxBoxes: 2 });
+  const attempts: string[] = [];
+  await assert.rejects(
+    () =>
+      placeRun(pool, cfg, "run t", async (hostCfg) => {
+        attempts.push(hostCfg.hostId!);
+        throw new Error("Could not check out acme/app@main: not found. Nothing was started.");
+      }, () => {}),
+    /Could not check out/
+  );
+  assert.deepEqual(attempts, ["b"], "a bad ref is not retried on the next host");
+  assert.equal(pool.state().find((h) => h.id === "b")?.unreachable, false);
+  assert.equal(pool.get("b")!.reserved, 0);
+  registerSleepResolver(null);
+
+  // The patience: a VM stuck in "starting" gets 75 s when the picker has an awake host with room,
+  // 150 s when it has not (the primary is sitting out a failed ready here).
+  let t = 1_000_000;
+  const said: string[] = [];
+  setProviderForTest("freestyle", {
+    metered: true,
+    state: async (): Promise<ProviderState> => {
+      t += 60_000;
+      return { state: "starting", at: t };
+    },
+    pause: async (): Promise<ProviderState> => ({ state: "paused", at: t }),
+    start: async (): Promise<ProviderState> => ({ state: "starting", at: t }),
+  });
+  try {
+    const p2 = makeHostPool(cfg, openMemoryDb(), { now: () => t, readyPollMs: 1, probe: async () => "ok" });
+    p2.upsert({ ...vmSpec, priority: -1 });
+    const out = await placeRun(p2, cfg, "run u", async (hostCfg, onAcquired) => {
+      onAcquired("box-1");
+      return hostCfg.hostId;
+    }, (m) => said.push(m));
+    assert.equal(out, "primary", "the run went to the host standing by");
+    assert.ok(said.some((m) => /is starting after 120s/.test(m)), said.join("\n"));
+    // The primary gave up on a ready of its own: not standing by, so the VM gets the long wait.
+    p2.noteSweep("fs-1", []); // the VM is back in the ranking (its own cooldown is over)
+    p2.get("primary")!.readyFailedAt = t;
+    said.length = 0;
+    await assert.rejects(() => placeRun(p2, cfg, "run v", async () => "never", (m) => said.push(m)), /No other box host can take this run/);
+    assert.ok(said.some((m) => /is starting after 180s/.test(m)), said.join("\n"));
+  } finally {
+    setProviderForTest("freestyle", null);
+    registerSleepResolver(null);
+  }
+});
+
+test("pick: awakeOnly with every host asleep says so, and a paused VM is dormant from construction on", async () => {
+  let t = 1_000_000;
+  let vm = "paused";
+  setProviderForTest("freestyle", {
+    metered: true,
+    state: async (): Promise<ProviderState> => ({ state: vm, at: t }),
+    pause: async (): Promise<ProviderState> => ({ state: (vm = "paused"), at: t }),
+    start: async (): Promise<ProviderState> => ({ state: (vm = "running"), at: t }),
+  });
+  try {
+    const db = openMemoryDb();
+    makeHostPool(cfg, db, { now: () => t }).upsert({ ...vmSpec, priority: -1 });
+    registerSleepResolver(null);
+    // A restart: the stored VM host is asked for its state before any sweep could SSH it.
+    const pool = makeHostPool(cfg, db, { now: () => t });
+    await pool.init();
+    assert.equal(pool.dormant("fs-1"), true);
+    const since = pool.state().find((h) => h.id === "fs-1")!.sleepSince;
+    assert.equal(since, t);
+    // The minute refresh does not move "asleep since".
+    t += 60_000;
+    await pool.refreshProvider("fs-1");
+    assert.equal(pool.state().find((h) => h.id === "fs-1")!.sleepSince, since);
+    // Only the VM is enabled and the canary asks for an awake host: the refusal names the sleep.
+    pool.upsert({ id: "primary", enabled: false } as Parameters<typeof pool.upsert>[0]);
+    const r = pool.pick({ awakeOnly: true });
+    assert.equal(r.host, undefined);
+    assert.match(r.reason ?? "", /every box host is asleep/);
+    assert.equal(pool.pick().host?.spec.id, "fs-1", "a run that wakes gets it");
+  } finally {
+    setProviderForTest("freestyle", null);
+    registerSleepResolver(null);
+  }
+});

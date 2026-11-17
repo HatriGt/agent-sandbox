@@ -116,7 +116,19 @@ export function HostsPanel({ onChanged }: { onChanged?: () => void }) {
 }
 
 const stateDot = (h: HostView) => {
-  if (!h.enabled) return <StatusDot tone="muted">off</StatusDot>;
+  if (!h.enabled)
+    return h.draining ? (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            <StatusDot tone="muted">draining · {h.running}</StatusDot>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>Disabled; no new run lands here. The {h.running} machine(s) still on it are watched until they finish.</TooltipContent>
+      </Tooltip>
+    ) : (
+      <StatusDot tone="muted">off</StatusDot>
+    );
   if (h.unreachable)
     return (
       <Tooltip>

@@ -596,6 +596,9 @@ const resumeQuietly = (session: string, message: string, extraSecrets?: Record<s
   // Behind the checkpoint lock: a follow-up landing inside the ~1 s turn-end capture waits for it
   // instead of mutating the workspace mid-tar.
   return withBoxLock(session, async () => {
+    // The box's host first: a reply to a box whose VM was paused meanwhile (the host fell asleep
+    // behind the question) starts the VM and waits for it, instead of dying on the first SSH.
+    await hostPool.readyForBox(session, `message ${session}`);
     // Capture fallback: a run that finished before any fleet sweep observed it running produces no
     // done EDGE, so the sweep never checkpointed the turn. Capture here, right before the new
     // message changes anything — heavy dirs are excluded, so this is ~1 s on the send path at worst.
@@ -1286,7 +1289,7 @@ const readFleet = makeFleetReader(
       load: async () => {
         const out = new Map<string, Awaited<ReturnType<typeof loadRunMetas>> extends Map<string, infer V> ? V : never>();
         await Promise.all(
-          hostPool.enabled().map(async (h) => {
+          hostPool.active().map(async (h) => {
             for (const [k, v] of await loadRunMetas(h.cfg).catch(() => new Map())) out.set(k, v);
           })
         );
@@ -3688,7 +3691,7 @@ app.post("/wake.json", async (req: Request, res: Response) => {
     // Waking a stopped machine is starting a machine: the trial gate applies here exactly as it
     // does to delegation and resume.
     ownership.assertCanRun();
-    const outcome = await startBoxIfStopped(hcfg(session), session);
+    const outcome = await startBoxIfStopped(await hostPool.readyForBox(session, `wake ${session}`), session);
     // Report honestly. Answering `ok` for a box the runtime never started is indistinguishable
     // from a real wake, so the client sits on a progress card forever waiting for a boot that was
     // never asked for. 404 matches the shape a destroyed box already returns elsewhere.
@@ -4366,7 +4369,7 @@ registerTriggerRoutes(app, {
   // Chat names for the Scheduled table. Cosmetic: a slow fleet read just shows machine names.
   titles: () =>
     Promise.race([
-      Promise.all(hostPool.enabled().filter((h) => !hostPool.dormant(h.spec.id) && !h.unreachableSince).map((h) => loadTitles(h.cfg).catch(() => ({})))).then((all) => Object.assign({}, ...all) as Record<string, string>),
+      Promise.all(hostPool.active().filter((h) => !hostPool.dormant(h.spec.id) && !h.unreachableSince).map((h) => loadTitles(h.cfg).catch(() => ({})))).then((all) => Object.assign({}, ...all) as Record<string, string>),
       new Promise<Record<string, string>>((r) => setTimeout(() => r({}), 1500)),
     ]),
   rejects: (box) => scheduleRejects.get(box) ?? [],
@@ -5197,7 +5200,8 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
           res.status(400).json({ error: "the primary host comes from .env and cannot be removed; disable it to stop routing runs there" });
           return;
         }
-        const live = hostPool.get(id)?.lastBoxes.filter((b) => /^running$/i.test(b.boxStatus) && b.role !== "pool-free").length ?? 0;
+        const rt = hostPool.get(id);
+        const live = rt ? rt.lastBoxes.filter((b) => /^running$/i.test(b.boxStatus) && b.role !== "pool-free").length + rt.reserved : 0;
         if (live) {
           res.status(409).json({ error: `${live} machine(s) still run on this host; tear them down first, or disable the host and let them finish` });
           return;
@@ -5225,6 +5229,10 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
           res.status(409).json({ error: "an agent is working on this host; wait for it or stop the run first" });
           return;
         }
+        if (h?.reserved) {
+          res.status(409).json({ error: "a run is being started on this host; pause it once the run is up" });
+          return;
+        }
         const r = await hostPool.pause(id);
         res.locals.auditAction = `host.pause:${id}`;
         res.json({ ok: true, providerState: r, host: hostPool.state().find((h) => h.id === id) });
@@ -5248,10 +5256,17 @@ app.post("/health/canary.json", async (req: Request, res: Response) => {
 });
 
 app.listen(cfg.httpPort, cfg.httpHost, () => {
-  // Before any box is started or rewound: which addresses are the host's own (src/host-guard.ts).
-  for (const h of hostPool.enabled()) void learnHostGuard(h.cfg);
-  // A package build cut off by the last stop leaves its builder box behind; the store itself is fine.
-  for (const h of hostPool.enabled()) void reapStoreBuilders(h.cfg);
+  // Once the pool knows which VMs are paused (asked at construction): an SSH to one would hang on
+  // the proxy, and these two are not worth waking it for; `ready` runs them in effect on the next run.
+  void hostPool.init().then(() => {
+    for (const h of hostPool.enabled()) {
+      if (hostPool.dormant(h.spec.id)) continue;
+      // Before any box is started or rewound: which addresses are the host's own (src/host-guard.ts).
+      void learnHostGuard(h.cfg);
+      // A package build cut off by the last stop leaves its builder box behind; the store itself is fine.
+      void reapStoreBuilders(h.cfg);
+    }
+  });
   // Awake time per metered host, counted against its monthly allowance (src/host-pool.ts).
   setInterval(() => hostPool.tickUsage(), 60_000).unref();
   console.error(`[agent-sandbox] HTTP MCP on ${cfg.httpHost}:${cfg.httpPort} (bearer-guarded)`);

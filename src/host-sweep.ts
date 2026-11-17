@@ -83,8 +83,9 @@ export async function sweepHosts(cfg: Config, poolOverride?: HostPool): Promise<
     const r = await sweepOne(cfg, cfg.hostId ?? "primary");
     return { ...r, swept: [cfg.hostId ?? "primary"], stale: [] };
   }
-  const hosts = pool.enabled();
-  if (!hosts.length) throw new Error("no box host is enabled");
+  // Every enabled host, and a disabled one that still has boxes on it (its runs are watched to the end).
+  const hosts = pool.active();
+  if (!pool.enabled().length) throw new Error("no box host is enabled");
   const out: HostSweep = { boxes: [], kept: new Set(), claims: new Map(), titles: {}, swept: [], stale: [] };
   let firstError: Error | undefined;
   const merge = (id: string, boxes: BoxView[], l: Last | undefined): void => {

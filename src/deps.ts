@@ -16,7 +16,7 @@ import { acquireBox, refillPool, poolEligible, ompPoolEligible, poolStatus } fro
 import { noteOwnerActive, noteOwnerAgent } from "./warm-owners.js";
 import { ownerKey } from "./user-store.js";
 import { isCanaryTask } from "./canary.js";
-import { cfgForBox, hostPool, placeRun, sessionBoxes, warmCfgs } from "./host-pool.js";
+import { cfgForBox, cfgForBoxReady, hostPool, placeRun, sessionBoxes, warmCfgs } from "./host-pool.js";
 import { sweepBoxes } from "./host-sweep.js";
 import {
   runAgentTask,
@@ -440,6 +440,9 @@ async function prepareRepoSetup(
   return { layout, detected };
 }
 
+/** A sweep younger than this answers the capacity gate instead of another `msb ls` per host. */
+const SWEEP_FRESH_MS = 30_000;
+
 export const deps: HandlerDeps = {
   // Live boxes across every enabled host. An asleep or unreachable host answers from its last
   // sweep (it cannot take a run anyway); the error stays loud only when no host answered at all.
@@ -455,6 +458,13 @@ export const deps: HandlerDeps = {
         if (pool.dormant(h.spec.id) || h.unreachableSince) {
           total += sessionBoxes(h.lastBoxes);
           answered ||= pool.dormant(h.spec.id);
+          return;
+        }
+        // The sweep (every 15 s) already counted this host, and a box placed since is counted too
+        // (notePlaced): a fresh reading saves an SSH round trip per host on every delegate.
+        if (Date.now() - h.lastSweepAt < SWEEP_FRESH_MS) {
+          total += sessionBoxes(h.lastBoxes);
+          answered = true;
           return;
         }
         try {
@@ -498,7 +508,7 @@ export const deps: HandlerDeps = {
   },
 
   async status(cfg, session, interact) {
-    cfg = cfgForBox(cfg, session);
+    cfg = await cfgForBoxReady(cfg, session, `status ${session}`);
     // status reconnects and drives the SAME interactive loop: on a client that can elicit, calling
     // status resumes the ask→answer→continue conversation; otherwise it blocks to the next boundary
     // and returns it. A quick box-level line is prefixed for context (running/stopped/gone).
@@ -509,7 +519,8 @@ export const deps: HandlerDeps = {
   },
 
   async resume(cfg, session, message, secrets, interact, model) {
-    cfg = cfgForBox(cfg, session);
+    // The box's host first: a VM paused since the question was asked is started and waited for here.
+    cfg = await cfgForBoxReady(cfg, session, `resume ${session}`);
     if (!(await boxExists(cfg, session))) return GONE(session);
     // If a GitHub token is supplied here, probe + store it (login-keyed) so it's reusable later; it's
     // also injected ephemerally for this step via secrets. Best-effort capture (never breaks resume).
@@ -550,14 +561,14 @@ export const deps: HandlerDeps = {
   },
 
   async rewind(cfg, session) {
-    cfg = cfgForBox(cfg, session);
+    cfg = await cfgForBoxReady(cfg, session, `rewind ${session}`);
     if (!(await boxExists(cfg, session))) return GONE(session);
     await rewindToAskSnapshot(msbIo(cfg), session, rewindRunFlags(cfg));
     return `Rewound session=${session} to the state it asked its last captured question from. Resume it with the new answer.`;
   },
 
   async resumeDetached(cfg, session, message, secrets, model) {
-    cfg = cfgForBox(cfg, session);
+    cfg = await cfgForBoxReady(cfg, session, `message ${session}`);
     // Same as `resume` minus the blocking wait for the next boundary: the dashboard streams the
     // transcript live, so it only needs the run to be kicked off. Returns as soon as claude is
     // started in the box (a few seconds: wake if asleep, inject creds, exec).
@@ -566,7 +577,7 @@ export const deps: HandlerDeps = {
     await resumeAgentTask(cfg, session, message, undefined, secrets, creds, model);
   },
   async teardown(cfg, session) {
-    cfg = cfgForBox(cfg, session);
+    cfg = await cfgForBoxReady(cfg, session, `teardown ${session}`);
     await msbTeardown(cfg, session, stagingPathFor(cfg, session));
     hostPool()?.forgetBox(session);
   },
@@ -587,7 +598,7 @@ export const deps: HandlerDeps = {
   },
 
   async ask(cfg, session, question, newThread) {
-    cfg = cfgForBox(cfg, session);
+    cfg = await cfgForBoxReady(cfg, session, `ask ${session}`);
     if (!(await boxExists(cfg, session))) return GONE(session);
     // The co-pilot lane: a separate read-only Claude run in the same box. Deliberately does NOT go
     // through driveInteractive — that loop is the DRIVER's turn-taking, and touching it here would
