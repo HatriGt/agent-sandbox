@@ -114,6 +114,16 @@ pause and dialled again when the host answers; while it is down, calls go throug
 before. The log says `[ssh-direct] <host>: up on port N` and `forward ended`. Set
 `ASB_SSH_DIRECT=0` in the controller's env to stay on the proxy.
 
+A pause closes every SSH session first. Freestyle's proxy answers a session that is still open
+when the pause lands, or one that arrives while the VM is paused, by resuming the VM: four pauses
+in a row were undone within a second that way (the forward and a mux master were open; then a
+sweep's command reached the proxy as the pause landed), and the VM ran and billed until the
+minute tick paused it again, which was undone the same way. So the pause marks the host dormant
+at once, shuts an SSH gate for it (a command that slips through fails locally, without a
+connection), kills the forward, closes the master sockets, waits 1.5 s for the proxy, and only
+then asks the provider; the gate opens on the next start. The pause button therefore answers in
+about four seconds rather than two.
+
 Awake time is ticked every minute into `host_usage`; a host with an allowance shows "188 of 400
 vCPU-h left" and a bar on the Fleet page, is skipped once spent, and starts over on `resetDay`.
 
@@ -316,6 +326,7 @@ for), and the hourly canary had woken the VM for nothing.
 | "pause" is refused with "a run on this host just finished and is being wrapped up" | The finish edge (diff, changed files, repo setup, a verify clause, the turn checkpoint) is still SSHing the box; a pause now would make the next SSH the proxy's own slow resume. | Try again shortly; a verify clause can take minutes. |
 | The canary says "every box host is asleep, and this run does not wake one" | Every enabled host is dormant; the hourly check never wakes a VM. | Nothing; a real run wakes it. |
 | The log says "[ssh-direct] …: no identity to put on the VM" or "the VM refused the controller's key" | The controller's SSH options carry no `-i <key>`, or the VM's sshd does not take it (an `AuthorizedKeysFile` that leaves out `.ssh/authorized_keys`). | Calls go through the proxy, slower but correct. Give the container an identity (SSH_EXTRA_OPTS) or fix the VM's sshd; a restart dials again. |
+| A Freestyle host comes back "running" seconds after a pause, with no start in the log | A session was open at the proxy when the pause landed (the VM was resumed for it). The pause closes the controller's own sessions first; another client (a terminal of yours through the proxy, a tool holding a connection) would do the same. | Close it; the minute tick pauses the VM again once it has been quiet for 90 s. |
 | A host starts while you only looked at a thread | The pre-wake hint woke it when the composer got focus. | Nothing; it pauses again after its sleep-after. |
 
 ## What is not covered
