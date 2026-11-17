@@ -132,14 +132,14 @@ export interface HostPool {
   forgetBox(box: string): void;
   /** Hosts that keep warm boxes, as bound configs (for the pool refill loops). */
   warmCfgs(): Config[];
-  pick(opts?: { warmReady?: (h: HostRuntime) => boolean; minAllowanceHours?: number; exclude?: readonly string[] }): PickResult & { host?: HostRuntime; release: () => void };
+  pick(opts?: { warmReady?: (h: HostRuntime) => boolean; minAllowanceHours?: number; exclude?: readonly string[]; awakeOnly?: boolean }): PickResult & { host?: HostRuntime; release: () => void };
   /**
    * The host is awake and answering before a run is launched on it: wakes the clock, starts a paused
    * VM through its provider and waits for "running", then for one probe to get through (a resumed VM
    * crawls for about a minute while memory pages back in). Throws when it never answers, so the
    * caller can place the run elsewhere.
    */
-  ready(id: string, reason?: string): Promise<void>;
+  ready(id: string, reason?: string, opts?: { patienceMs?: number }): Promise<void>;
   capacity(): number;
   noteSweep(id: string, boxes: BoxView[]): void;
   noteSweepError(id: string, err: string): void;
@@ -172,18 +172,25 @@ export async function placeRun<T>(
   cfg: Config,
   label: string,
   attempt: (hostCfg: Config, onAcquired: () => void) => Promise<T>,
-  log: (m: string) => void = (m) => console.error(m)
+  log: (m: string) => void = (m) => console.error(m),
+  o: { awakeOnly?: boolean } = {}
 ): Promise<T> {
   const tried: string[] = [];
   for (;;) {
-    const picked = pool?.pick({ minAllowanceHours: 1, exclude: tried });
+    const picked = pool?.pick({ minAllowanceHours: 1, exclude: tried, awakeOnly: o.awakeOnly });
     if (picked && !picked.host) {
       throw new Error(tried.length ? `No other box host can take this run after ${tried.join(", ")} failed: ${picked.reason}.` : `No box host can take this run: ${picked.reason}.`);
     }
     const hostCfg: Config = picked?.host ? { ...cfg, ...picked.host.cfg } : cfg;
     let acquired = false;
     try {
-      if (picked?.host && pool) await pool.ready(picked.host.spec.id, label);
+      if (picked?.host && pool) {
+        // How long to wait for a paused VM: 2.5 minutes when it is the only host that can take the
+        // run, 75 s when an awake host with room is standing by (the run goes there, and the VM,
+        // started meanwhile, is up for the next one).
+        const standby = pool.enabled().some((h) => h.spec.id !== picked.host!.spec.id && !tried.includes(h.spec.id) && !pool.dormant(h.spec.id) && !h.unreachableSince && sessionBoxes(h.lastBoxes) + h.reserved < h.cfg.maxBoxes);
+        await pool.ready(picked.host.spec.id, label, { patienceMs: standby ? 75_000 : 150_000 });
+      }
       return await attempt(hostCfg, () => (acquired = true));
     } catch (e) {
       const id = picked?.host?.spec.id;
@@ -365,7 +372,8 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     warmCfgs: () => enabled().filter((h) => h.spec.warm && !h.unreachableSince && !dormant(h)).map((h) => h.cfg),
     pick: (o = {}) => {
       const skip = new Set(o.exclude ?? []);
-      const r = pickHost(candidates(o.warmReady, o.minAllowanceHours).filter((c) => !skip.has(c.id)));
+      // awakeOnly: the controller's own canary never wakes a paused VM; it checks what is up.
+      const r = pickHost(candidates(o.warmReady, o.minAllowanceHours).filter((c) => !skip.has(c.id) && !(o.awakeOnly && c.asleep)));
       const host = r.id ? get(r.id) : undefined;
       if (!host) return { ...r, release: () => {} };
       host.reserved++;
@@ -440,8 +448,13 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
           h.awakeMs = awakeMsOf(db, h.spec.id, month);
         }
         if (!h.spec.enabled) continue;
-        // A host that fell asleep since the last tick was awake up to that moment.
-        const until = h.sleep.asleep() ? h.sleep.state().since : t;
+        // A dormant metered host is asked how its VM is doing (one API read a minute), so a VM that came
+        // up late, or was paused or started behind the controller's back, is noticed without an SSH.
+        if (dormant(h) && providerFor(h.spec).metered && h.spec.freestyle?.apiKey) void refreshProvider(h.spec.id).catch(() => {});
+        // A host that fell asleep since the last tick was awake up to that moment; a VM paused at the
+        // provider bills nothing, however the clock reads.
+        const paused = h.provider?.state === "paused" || h.provider?.state === "stopped";
+        const until = h.sleep.asleep() ? h.sleep.state().since : paused ? Math.min(t, h.provider!.at) : t;
         const ms = Math.max(0, Math.min(until - since, 10 * 60_000));
         if (!ms) continue;
         h.awakeMs += ms;
@@ -543,29 +556,40 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       h.check = r;
       return r;
     },
-    ready: async (id, reason) => {
+    ready: async (id, reason, o = {}) => {
       const h = get(id);
       if (!h) throw new Error(`no host "${id}"`);
-      const wasAsleep = h.sleep.asleep();
+      const wasAsleep = dormant(h);
       // The clock directly, not wake(): the provider start is this function's, with the wait that follows.
       h.sleep.wake(reason);
       const p = providerFor(h.spec);
       const cap = opts.answerTimeoutMs ?? HOST_ANSWER_TIMEOUT_MS;
       const pollMs = opts.readyPollMs ?? 5_000;
+      const patience = o.patienceMs ?? 150_000;
       let cameUp = false;
       if (p.metered && h.spec.freestyle?.apiKey) {
-        // Up to 2.5 minutes for the provider to say running (a Freestyle resume answered in 18 s to 2 min live).
+        // Until the provider says running, within the patience given (a Freestyle resume answered in
+        // 18 s to 2 min live, and once not at all). A VM seen paused or stopped is started, including one
+        // that was still pausing at the first read: the pause issued when the host fell asleep can be in
+        // flight when a run picks the host a moment later (seen live 2026-11-17: the canary woke a host
+        // mid-pause, no start was issued, and the run waited 150 s for a VM nobody had started).
         const t0 = now();
-        let state = (h.provider = await p.state(h.spec).catch((e): ProviderState => ({ state: "unknown", detail: String((e as Error).message ?? e), at: now() })));
-        if (state.state !== "running") {
+        const read = async (prev?: ProviderState): Promise<ProviderState> =>
+          (h.provider = await p.state(h.spec).catch((e): ProviderState => prev ?? { state: "unknown", detail: String((e as Error).message ?? e), at: now() }));
+        let state = await read();
+        let startedAt = 0;
+        while (state.state !== "running") {
           cameUp = true;
-          if (state.state === "paused" || state.state === "stopped") await providerSync(h, "start").catch(() => {});
-          while (now() - t0 < 150_000) {
-            await new Promise((r) => setTimeout(r, pollMs));
-            state = h.provider = await p.state(h.spec).catch(() => state);
-            if (state.state === "running") break;
+          if ((state.state === "paused" || state.state === "stopped") && !startedAt) {
+            await providerSync(h, "start").catch((e) => log(`[hosts] start ${id} failed: ${String((e as Error).message ?? e).slice(0, 120)}`));
+            startedAt = now();
           }
-          if (state.state !== "running") throw new Error(`host ${id} is ${state.state} after ${Math.round((now() - t0) / 1000)}s${state.detail ? ` (${state.detail})` : ""}`);
+          if (now() - t0 >= patience) throw new Error(`host ${id} is ${state.state} after ${Math.round((now() - t0) / 1000)}s${state.detail ? ` (${state.detail})` : ""}`);
+          await new Promise((r) => setTimeout(r, pollMs));
+          const next = await read(state);
+          // Paused again after a start (the provider's own idle timer, or a pause that landed late): start once more.
+          if (startedAt && next.state === "paused" && state.state !== "paused") startedAt = 0;
+          state = next;
         }
       }
       // A host that was asleep, unreachable or just came up has to answer once before a box is launched on it.

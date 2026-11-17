@@ -485,8 +485,14 @@ export const deps: HandlerDeps = {
     // Which host takes this run (src/host-pick.ts; placeRun holds the slot until the box is in
     // `msb ls`, so a parallel fan-out cannot overshoot one host while the total gate still passes,
     // and moves the run to the next host when this one fails before the box exists).
-    return placeRun(hostPool(), cfg, `run ${plan.task.slice(0, 40)}`, (hostCfg, onAcquired) =>
-      runOnHost(prepareRunCfg(hostCfg, plan, allowDomains), hostCfg, plan, allowDomains, creds, interact, onAcquired)
+    return placeRun(
+      hostPool(),
+      cfg,
+      `run ${plan.task.slice(0, 40)}`,
+      (hostCfg, onAcquired) => runOnHost(prepareRunCfg(hostCfg, plan, allowDomains), hostCfg, plan, allowDomains, creds, interact, onAcquired),
+      undefined,
+      // The controller's own canary checks what is up; it never wakes a paused VM for that.
+      { awakeOnly: isCanaryTask(plan.task) }
     );
   },
 

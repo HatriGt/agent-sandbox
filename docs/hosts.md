@@ -90,6 +90,9 @@ Freestyle VM at order 10, the VPS takes everything until its five slots are full
 With the orders swapped the VM takes everything and the VPS is the fallback. Equal orders share:
 warm box first, awake first, most allowance first, then the emptier host.
 
+**The controller's own canary** (the hourly self-test run) only ever uses an awake host; it never
+wakes a paused VM to check it.
+
 **The chosen host is asleep.** The run is not refused and nothing is tried blind: the VM is
 started through the provider's API, the controller waits for "running", then for the first SSH
 to get through, then boots the box. Measured on 2026-11-16 and 17: the provider answers running
@@ -98,7 +101,9 @@ about 24 s more, so the first run after a pause starts its task roughly one to t
 after the request. A run on an awake host starts in a few seconds (a warm box) or ~25 s (a cold
 boot).
 
-**The host does not come up.** After 2.5 minutes without "running", or three probes without an
+**The host does not come up.** After 2.5 minutes without "running" (75 s when an awake host with
+room is standing by: the run goes there and the VM, started meanwhile, is up for the next one), or
+three probes without an
 answer, the run moves to the next host and the one that failed is marked unreachable with the
 reason shown on its row ("boot failed: ssh: Connection closed by remote host"). The next sweep
 that gets through clears the mark; nothing has to be clicked.

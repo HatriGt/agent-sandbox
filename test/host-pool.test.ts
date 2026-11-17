@@ -264,8 +264,35 @@ test("pick: exclude skips the hosts a boot already failed on", () => {
   registerSleepResolver(null);
 });
 
+test("pick: awakeOnly (the canary) never chooses a dormant host; usage is not counted while the VM is paused", async () => {
+  setProviderForTest("freestyle", {
+    metered: true,
+    state: async (): Promise<ProviderState> => ({ state: "paused", at: 1_000_000 }),
+    pause: async (): Promise<ProviderState> => ({ state: "paused", at: 1_000_000 }),
+    start: async (): Promise<ProviderState> => ({ state: "running", at: 1_000_000 }),
+  });
+  try {
+    let t = 1_000_000;
+    const pool = makeHostPool(cfg, openMemoryDb(), { now: () => t });
+    pool.upsert({ ...vmSpec, priority: -1, allowance: { vcpuHours: 100, vcpu: 4, resetDay: 1 } });
+    await pool.refreshProvider("fs-1");
+    assert.equal(pool.dormant("fs-1"), true);
+    assert.equal(pool.pick().host?.spec.id, "fs-1", "a run still goes there (and starts it)");
+    assert.equal(pool.pick({ awakeOnly: true }).host?.spec.id, "primary", "the canary takes what is awake");
+    // Ten minutes pass with the VM paused at the provider and the clock awake: nothing is billed.
+    pool.tickUsage();
+    t += 10 * 60_000;
+    pool.tickUsage();
+    assert.equal(pool.state().find((h) => h.id === "fs-1")?.allowance?.usedHours, 0);
+  } finally {
+    setProviderForTest("freestyle", null);
+    registerSleepResolver(null);
+  }
+});
+
 test("ready: a paused VM is started and waited for, then probed until it answers; a VM that never comes up throws", async () => {
-  const states: string[] = ["paused", "starting", "starting", "running"];
+  // The pause issued when the host fell asleep is still landing when the run arrives.
+  const states: string[] = ["pausing", "paused", "starting", "starting", "running"];
   const calls: string[] = [];
   let probes = 0;
   setProviderForTest("freestyle", {
