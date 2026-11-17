@@ -95,6 +95,25 @@ last snapshot flagged asleep. A Freestyle host is paused through the API the mom
 asleep (five fewer billed minutes per cycle than waiting for the VM's own idle timer) and started
 the moment a run picks it, so the resume overlaps the first SSH. A `static` host just goes quiet.
 
+The resume is as quick as the provider makes it: from a clean pause Freestyle answers "running"
+inside the start call and the VM takes SSH about three seconds later, so a reply on such a thread
+starts its turn in about five seconds; a VM that was stopped, not paused, boots in fifteen to
+twenty. The dashboard sends a pre-wake hint when a thread's composer or the new-task field gets
+focus (`POST /hosts/prewake.json`), so a paused host usually starts while you type and is up by
+the time you send. The hint starts nothing else and is a no-op on an awake host.
+
+### The direct route
+
+Every SSH through Freestyle's proxy costs about 0.7 s on top of the command, and commands sent in
+parallel are run one after the other, so a launch of ~20 commands spent most of its time in the
+proxy. Once a Freestyle host answers, the controller puts its own public key in the VM's
+`authorized_keys` (through the proxy, once) and keeps one forwarding connection open
+(`ssh -N -L`) to the VM's own sshd; every ssh/msb call then rides a multiplexed connection to
+that port (about 0.4 s a call, and parallel calls run in parallel). The route is dropped before a
+pause and dialled again when the host answers; while it is down, calls go through the proxy as
+before. The log says `[ssh-direct] <host>: up on port N` and `forward ended`. Set
+`ASB_SSH_DIRECT=0` in the controller's env to stay on the proxy.
+
 Awake time is ticked every minute into `host_usage`; a host with an allowance shows "188 of 400
 vCPU-h left" and a bar on the Fleet page, is skipped once spent, and starts over on `resetDay`.
 
@@ -296,6 +315,8 @@ for), and the hourly canary had woken the VM for nothing.
 | "pause" is refused with "a run is being started on this host" | A run picked this host and its box is booting. | Wait for the box to appear, then pause. |
 | "pause" is refused with "a run on this host just finished and is being wrapped up" | The finish edge (diff, changed files, repo setup, a verify clause, the turn checkpoint) is still SSHing the box; a pause now would make the next SSH the proxy's own slow resume. | Try again shortly; a verify clause can take minutes. |
 | The canary says "every box host is asleep, and this run does not wake one" | Every enabled host is dormant; the hourly check never wakes a VM. | Nothing; a real run wakes it. |
+| The log says "[ssh-direct] …: no identity to put on the VM" or "the VM refused the controller's key" | The controller's SSH options carry no `-i <key>`, or the VM's sshd does not take it (an `AuthorizedKeysFile` that leaves out `.ssh/authorized_keys`). | Calls go through the proxy, slower but correct. Give the container an identity (SSH_EXTRA_OPTS) or fix the VM's sshd; a restart dials again. |
+| A host starts while you only looked at a thread | The pre-wake hint woke it when the composer got focus. | Nothing; it pauses again after its sleep-after. |
 
 ## What is not covered
 

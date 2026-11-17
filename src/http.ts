@@ -5305,6 +5305,30 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
   }
 });
 
+// The dashboard says a run is probably on its way (a thread's composer or the new-task field got
+// focus): a host that is paused is started now, so its resume overlaps the typing instead of
+// following the send. Nothing is launched, nothing is touched over SSH beyond ready's own probe,
+// and a host that is awake answers at once.
+app.post("/hosts/prewake.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const box = boxParam(req.body);
+  let id: string | undefined;
+  if (box) id = hostPool.hostOfBox(box);
+  else {
+    // The host a new task would land on, without holding the slot.
+    const r = hostPool.pick({});
+    r.release();
+    id = r.id;
+  }
+  const h = id ? hostPool.get(id) : undefined;
+  if (!h || !hostPool.dormant(h.spec.id)) {
+    res.json({ ok: true, starting: false, ...(h ? { host: h.spec.id } : {}) });
+    return;
+  }
+  void hostPool.ready(h.spec.id, `prewake ${box ?? "new task"}`).catch((e) => console.error(`[hosts] prewake ${h.spec.id}: ${(e as Error).message}`));
+  res.status(202).json({ ok: true, starting: true, host: h.spec.id });
+});
+
 app.post("/health/canary.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   try {

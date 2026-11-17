@@ -1232,6 +1232,8 @@ export const api = {
   updateImage: () => post<NonNullable<HealthResponse["imageUpdate"]>>("/health/image-update.json", {}),
   /** The box hosts (admins only). */
   hosts: (signal?: AbortSignal) => fetch(url("/hosts.json"), { headers: authHeaders, signal }).then(parse<{ hosts: HostView[]; capacity: number }>),
+  /** A run is probably coming (the composer got focus): start the box's host, or the one a new task would take, if it is paused. */
+  prewake: (box?: string) => post<{ ok: true; starting: boolean; host?: string }>("/hosts/prewake.json", box ? { box } : {}),
   hostAction: (body: { action: "upsert"; id?: string; spec: HostSpecInput } | { action: "remove" | "check" | "wake" | "pause"; id: string }) =>
     post<{ ok: boolean; host?: HostView; hosts?: HostView[]; capacity?: number; check?: HostView["check"]; providerState?: HostView["providerState"] }>("/hosts.json", body),
   memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean; repo?: string }, org?: string) =>
@@ -1678,3 +1680,13 @@ export interface HistoryRunDetail extends HistoryRun {
 
 /** Low-level helpers for feature modules that keep their own endpoints (lib/intake-api.ts). */
 export const apiRaw = { url, parse, post, authHeaders };
+// One pre-wake hint per target every 90 s: a paused host starts on the first focus and the rest
+// would only repeat the answer; the server dedups starts anyway.
+const prewoke = new Map<string, number>();
+export function prewakeHint(box?: string): void {
+  const key = box ?? "new task";
+  const t = prewoke.get(key) ?? 0;
+  if (Date.now() - t < 90_000) return;
+  prewoke.set(key, Date.now());
+  void api.prewake(box).catch(() => {});
+}

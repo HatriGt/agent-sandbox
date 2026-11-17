@@ -149,20 +149,27 @@ const saidKeeping = new Map<string, string>();
 
 // ---- the package store (src/pkg-store.ts): MCP packages installed once on the host ----
 let pkgStoreRoot: string | undefined;
-let pkgStoreLearned: Promise<void> | undefined;
-/** Find (and make) the store's directory on the host, once. Never throws; off with MCP_PKG_STORE=0. */
+// Once per HOST: the store lives under the same path on every host, but the directory has to be
+// made on each (a box on a second host mounted a path that existed only on the primary).
+const pkgStoreLearned = new Map<string, Promise<void>>();
+/** Find (and make) the store's directory on the host, once per host. Never throws; off with MCP_PKG_STORE=0. */
 export function learnPkgStore(cfg: Config): Promise<void> {
   if (process.env.MCP_PKG_STORE === "0") return Promise.resolve();
-  return (pkgStoreLearned ??= (async () => {
-    try {
-      const r = await ssh(cfg, 'D="$HOME/.agent-sandbox/npm-store"; mkdir -p "$D/pkgs" "$D/stage" && echo "$D"', false);
-      const d = String(r.stdout ?? "").trim().split("\n").pop() ?? "";
-      if (r.code === 0 && /^\/[\w./-]+$/.test(d)) pkgStoreRoot = d;
-      else pkgStoreLearned = undefined;
-    } catch {
-      pkgStoreLearned = undefined;
-    }
-  })());
+  let p = pkgStoreLearned.get(cfg.vpsSsh);
+  if (!p) {
+    p = (async () => {
+      try {
+        const r = await ssh(cfg, 'D="$HOME/.agent-sandbox/npm-store"; mkdir -p "$D/pkgs" "$D/stage" && echo "$D"', false);
+        const d = String(r.stdout ?? "").trim().split("\n").pop() ?? "";
+        if (r.code === 0 && /^\/[\w./-]+$/.test(d)) pkgStoreRoot ??= d;
+        else pkgStoreLearned.delete(cfg.vpsSsh);
+      } catch {
+        pkgStoreLearned.delete(cfg.vpsSsh);
+      }
+    })();
+    pkgStoreLearned.set(cfg.vpsSsh, p);
+  }
+  return p;
 }
 /** The read-only mount every image-booted box gets. Empty until the store is known. */
 function pkgStoreFlags(): string[] {

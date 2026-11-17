@@ -7,7 +7,7 @@ import { useReducedMotion } from "@/lib/motion-pref";
 import { ATTACHMENTS_DIR } from "@/lib/session-context";
 import { Lightbox } from "@/components/ui/lightbox";
 import { toast } from "sonner";
-import { api, type RunState } from "@/lib/api";
+import { api, prewakeHint, type RunState } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -463,6 +463,8 @@ export function SendBar({
             id="send-input"
             className="px-2.5 pt-2 text-body"
             tokens={tags.tokens}
+            // Focus is the earliest sign of a reply: a paused host starts now and is up by the send.
+            onFocus={() => prewakeHint(boxName)}
             onClick={(e) => {
               updateMention(value);
               // A click inside a quote tag goes to the passage it stands for.

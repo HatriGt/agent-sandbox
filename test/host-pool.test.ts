@@ -427,12 +427,13 @@ test("ready: a start call that fails is tried again; an unanswerable provider ha
     assert.equal(pool.state().find((h) => h.id === "fs-1")?.unreachable, true);
     pool.noteSweep("fs-1", []);
 
-    // The VM never leaves "paused" within the patience: ready gives up. "Paused" is dormant, which would
-    // keep the host pickable, so the next run would pay the same wait; it sits out for a while instead.
+    // The VM never leaves "paused" within the patience (the start says "starting", the next read says
+    // "paused" again, so it is started once more, and so on): ready gives up. "Paused" is dormant, which
+    // would keep the host pickable, so the next run would pay the same wait; it sits out for a while instead.
     vm = "paused";
     stuck = true;
     startsLeftToFail = 0;
-    await assert.rejects(() => pool.ready("fs-1", "run", { patienceMs: 150_000 }), /is paused after/);
+    await assert.rejects(() => pool.ready("fs-1", "run", { patienceMs: 150_000 }), /is (paused|starting) after/);
     assert.equal(pool.dormant("fs-1"), true);
     assert.equal(pool.pick().host?.spec.id, "primary", "fs-1 sits out");
     t += READY_COOLDOWN_MS + 1;

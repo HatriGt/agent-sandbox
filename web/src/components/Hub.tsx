@@ -35,7 +35,7 @@ import { useReducedMotion } from "@/lib/motion-pref";
 import { Collapse } from "@/components/ui/collapse";
 import { StaggerItem, Swap } from "@/components/ui/swap";
 import { IconSwap } from "@/components/ui/icon-swap";
-import { api, type AuditEventRow, type BoxView, type FleetLifecycle, type LedgerRow } from "@/lib/api";
+import { api, prewakeHint, type AuditEventRow, type BoxView, type FleetLifecycle, type LedgerRow } from "@/lib/api";
 import { intakeApi, isUnfurlable } from "@/lib/intake-api";
 import { fmtAgo, friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
 import { readDraft, takePrefill, writeDraft } from "@/lib/draft";
@@ -709,6 +709,8 @@ export function Hub({
               placeholder="Describe a task. A fresh sandbox picks it up…  ( / skills )"
               className="min-h-[4.5rem] px-2.5 pt-2 text-lead"
               tokens={tags.tokens}
+              // Focus is the earliest sign of a task: the host it would land on starts now if it is paused.
+              onFocus={() => prewakeHint()}
               onKeyDown={(e) => {
                 if (tags.onKeyDown(e)) return setSlash(null);
                 if (!["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) return;

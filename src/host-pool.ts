@@ -25,6 +25,7 @@ import type { BoxView } from "./monitor.js";
 import { isWorkingBox, makeHostSleep, registerSleepResolver, type HostSleep } from "./host-sleep.js";
 import { pickHost, totalCapacity, type HostCandidate, type PickResult } from "./host-pick.js";
 import { providerFor, type ProviderState } from "./host-providers.js";
+import { dropTunnel, ensureTunnel } from "./ssh-tunnel.js";
 import {
   PRIMARY_HOST_ID,
   addAwakeMs,
@@ -119,8 +120,10 @@ export interface HostPoolOpts {
   probe?: (cfg: Config) => Promise<string>;
   /** Tests: a shorter cap on the probe than HOST_ANSWER_TIMEOUT_MS. */
   answerTimeoutMs?: number;
-  /** Tests: how often ready() asks the provider for the VM's state (5 s). */
+  /** Tests: how often ready() asks the provider for the VM's state (5 s; 1.5 s once a start is out). */
   readyPollMs?: number;
+  /** The direct SSH route to a proxied host (src/ssh-tunnel.ts); tests pass their own or none. */
+  tunnel?: { ensure: (cfg: Config, wanted: () => boolean) => Promise<boolean>; drop: (cfg: Config) => void } | null;
 }
 
 /** Boxes that hold a session on a host: the figure capacity is measured against. */
@@ -290,8 +293,20 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
 
   const monthOf = (spec: HostSpec): string => billingMonth(now(), spec.allowance?.resetDay ?? 1);
 
+  // The direct SSH route for a host behind its provider's proxy: dialled once the host answers
+  // (a sweep, a check, a ready), wanted only while it is enabled, awake and this runtime is current,
+  // dropped before a pause. A static host is reached directly already.
+  const tunnel = opts.tunnel === undefined ? { ensure: ensureTunnel, drop: dropTunnel } : opts.tunnel;
+  const tunnelWanted = (h: HostRuntime) => (): boolean => runtimes.get(h.spec.id) === h && h.spec.enabled && !dormant(h) && !h.unreachableSince;
+  const dialTunnel = (h: HostRuntime): void => {
+    if (!tunnel || h.spec.provider === "static") return;
+    void tunnel.ensure(h.cfg, tunnelWanted(h)).catch(() => {});
+  };
+
   const build = (spec: HostSpec, prev?: HostRuntime): HostRuntime => {
     const cfg = configForHost(base, spec);
+    // A target that changed: the old tunnel points at a machine this host no longer is.
+    if (prev && prev.cfg.vpsSsh !== cfg.vpsSsh) tunnel?.drop(prev.cfg);
     const month = monthOf(spec);
     const sleep =
       prev && prev.spec.sleepAfterMs === spec.sleepAfterMs
@@ -379,6 +394,9 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
   const providerSync = async (h: HostRuntime, what: "pause" | "start"): Promise<void> => {
     const p = providerFor(h.spec);
     if (!p.metered) return;
+    // Before the pause lands: a forward still open to a VM that pauses would be re-dialled through
+    // the proxy, and that SSH would resume it.
+    if (what === "pause") tunnel?.drop(h.cfg);
     const r = await p[what](h.spec);
     // A call that failed says nothing about the VM: the last good reading stays, with the error on it.
     setProvider(h, r.state === "unknown" && h.provider && h.provider.state !== "unknown" ? { ...h.provider, detail: r.detail } : r);
@@ -535,6 +553,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       h.lastError = undefined;
       h.unreachableSince = undefined;
       h.readyFailedAt = undefined;
+      dialTunnel(h);
       for (const b of boxes) {
         if (boxHost.get(b.name) !== id) {
           boxHost.set(b.name, id);
@@ -675,6 +694,8 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     remove: (id) => {
       removeHostSpec(db, id);
       for (const [box, h] of [...boxHost]) if (h === id) boxHost.delete(box);
+      const gone = runtimes.get(id);
+      if (gone) tunnel?.drop(gone.cfg);
       reload();
       log(`[hosts] removed ${id}`);
     },
@@ -699,6 +720,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
         h.lastError = undefined;
         h.unreachableSince = undefined;
         h.readyFailedAt = undefined;
+        dialTunnel(h);
       } catch (e) {
         r = { ok: false, ms: now() - t0, detail: (e as Error).message.slice(0, 300), at: now() };
         // A host that does not answer a check is not picked until a sweep or a check gets through.
@@ -758,7 +780,6 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     h.sleep.wake(reason);
     const p = providerFor(h.spec);
     const cap = opts.answerTimeoutMs ?? HOST_ANSWER_TIMEOUT_MS;
-    const pollMs = opts.readyPollMs ?? 5_000;
     const patience = o.patienceMs ?? 150_000;
     let cameUp = false;
     if (p.metered && h.spec.freestyle?.apiKey) {
@@ -770,7 +791,11 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       const t0 = now();
       const read = async (prev?: ProviderState): Promise<ProviderState> =>
         setProvider(h, await p.state(h.spec).catch((e): ProviderState => prev ?? { state: "unknown", detail: String((e as Error).message ?? e), at: now() }));
-      let state = await read();
+      // A fresh "paused" from the dormant host's minute-by-minute read (tickUsage) saves the read
+      // before the start: the start goes out half a second sooner, and starting a VM that woke
+      // meanwhile is answered "running" by the provider.
+      const fresh = h.provider && now() - h.provider.at < 45_000 && (h.provider.state === "paused" || h.provider.state === "stopped") ? h.provider : undefined;
+      let state = fresh ?? (await read());
       let startedAt = 0;
       // Polls to skip before a start that failed is tried again (three polls: 15 s live).
       let holdStart = 0;
@@ -796,10 +821,16 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
           } else {
             setProvider(h, r);
             startedAt = now();
+            // The start's own reply is the newest reading. A Freestyle VM resumed from a clean pause
+            // answers "running" inside the call (under a second, measured 2026-11-17); waiting a
+            // whole poll to read the same thing again was most of a 9 s reply.
+            state = r;
+            continue;
           }
         }
         if (now() - t0 >= patience) throw new Error(`host ${id} is ${state.state} after ${Math.round((now() - t0) / 1000)}s${state.detail ? ` (${state.detail})` : ""}`);
-        await new Promise((r) => setTimeout(r, pollMs));
+        // Quick polls once a start is out: a resume takes seconds and a state read ~150 ms.
+        await new Promise((r) => setTimeout(r, opts.readyPollMs ?? (startedAt ? 1_500 : 5_000)));
         if (holdStart) holdStart--;
         const next = await read(state);
         // Paused again after a start (the provider's own idle timer, or a pause that landed late): start once more.
@@ -808,23 +839,27 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       }
     }
     // A host that was asleep, unreachable or just came up has to answer once before a box is launched on it.
-    if (!opts.probe || (!wasAsleep && !cameUp && !h.unreachableSince)) return;
+    if (!opts.probe || (!wasAsleep && !cameUp && !h.unreachableSince)) {
+      if (cameUp || wasAsleep) dialTunnel(h);
+      return;
+    }
     let lastErr = "";
     // A resumed VM's first SSH or two can die at once on the proxy ("Connection closed"), so the
-    // tries are spaced out: three back-to-back refusals in three seconds would give up on a host
-    // that answers a minute later.
-    const spacing = opts.readyPollMs ?? 10_000;
-    for (let i = 0; i < 3; i++) {
+    // tries are spaced out, 2 s then 4 s then 8 s: back-to-back refusals would give up on a host
+    // that answers a moment later, and a fixed 10 s between tries made every refusal cost 10 s.
+    const spacing = (i: number): number => opts.readyPollMs ?? 2_000 * 2 ** i;
+    for (let i = 0; i < 4; i++) {
       try {
         await withTimeout(opts.probe(h.cfg), cap, `probe of ${id}`);
         h.lastError = undefined;
         h.unreachableSince = undefined;
         h.readyFailedAt = undefined;
+        dialTunnel(h);
         return;
       } catch (e) {
         lastErr = (e as Error).message;
-        log(`[hosts] ${id} not answering yet (${i + 1}/3): ${lastErr.slice(0, 120)}`);
-        if (i < 2) await new Promise((r) => setTimeout(r, spacing));
+        log(`[hosts] ${id} not answering yet (${i + 1}/4): ${lastErr.slice(0, 120)}`);
+        if (i < 3) await new Promise((r) => setTimeout(r, spacing(i)));
       }
     }
     h.lastError = lastErr.slice(0, 300);
