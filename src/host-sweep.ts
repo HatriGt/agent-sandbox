@@ -95,7 +95,7 @@ export async function sweepHosts(cfg: Config, poolOverride?: HostPool): Promise<
   await Promise.all(
     hosts.map(async (h) => {
       const id = h.spec.id;
-      if (h.sleep.asleep()) {
+      if (pool.dormant(id)) {
         out.stale.push(id);
         merge(id, h.lastBoxes, last.get(id));
         return;
@@ -114,7 +114,7 @@ export async function sweepHosts(cfg: Config, poolOverride?: HostPool): Promise<
       }
     })
   );
-  if (!out.swept.length && firstError && !hosts.some((h) => h.sleep.asleep())) throw firstError;
+  if (!out.swept.length && firstError && !hosts.some((h) => pool.dormant(h.spec.id))) throw firstError;
   return out;
 }
 

@@ -146,6 +146,8 @@ export interface HostPool {
   noteDisk(id: string, disk: HostRuntime["disk"]): void;
   wake(id: string, reason?: string): void;
   allAsleep(): boolean;
+  /** Asleep by its clock, or paused/stopped at its provider (see `dormant`). */
+  dormant(id: string): boolean;
   /** Count awake time against each metered host's month. */
   tickUsage(): void;
   state(): HostStateView[];
@@ -195,6 +197,17 @@ export async function placeRun<T>(
       picked?.release();
     }
   }
+}
+
+/**
+ * Dormant: the host's own clock is asleep, or its provider says the VM is paused or stopped (paused
+ * by the operator, by the provider's idle timer, or by a controller that has since restarted). A
+ * dormant host is served from its last sweep, never SSHed to by a loop, ranked behind awake hosts,
+ * and brought up by `ready` when a run picks it. It is not "unreachable": SSH failing to a paused
+ * VM is expected, and an unreachable host would never be picked, so never woken.
+ */
+export function dormant(h: HostRuntime): boolean {
+  return h.sleep.asleep() || h.provider?.state === "paused" || h.provider?.state === "stopped";
 }
 
 /** How long one host gets to answer a sweep or a check before it is treated as unreachable this round. */
@@ -272,12 +285,12 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       return {
         id: h.spec.id,
         enabled: h.spec.enabled,
-        unreachable: !!h.unreachableSince,
+        unreachable: !!h.unreachableSince && !dormant(h),
         running: sessionBoxes(h.lastBoxes),
         reserved: h.reserved,
         maxBoxes: h.cfg.maxBoxes,
         warmReady: warmReady ? warmReady(h) : h.lastBoxes.some((b) => b.role === "pool-free" && /^running$/i.test(b.boxStatus)),
-        asleep: h.sleep.asleep(),
+        asleep: dormant(h),
         priority: h.spec.priority,
         allowanceLeft: left?.leftHours,
         minAllowance: minAllowanceHours,
@@ -290,6 +303,15 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     const r = await p[what](h.spec);
     h.provider = r;
     log(`[hosts] ${what} ${h.spec.id}: ${r.state}${r.detail ? ` (${r.detail})` : ""}`);
+  };
+
+  const refreshProvider = async (id: string): Promise<ProviderState> => {
+    const h = get(id);
+    if (!h) throw new Error(`no host "${id}"`);
+    h.provider = await providerFor(h.spec).state(h.spec);
+    // SSH failing to a paused VM was expected; it is dormant, not unreachable.
+    if (h.provider.state === "paused" || h.provider.state === "stopped") h.unreachableSince = undefined;
+    return h.provider;
   };
 
   const wake = (id: string, reason?: string): void => {
@@ -308,8 +330,8 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     },
     wake: (reason) => wake(h.spec.id, reason),
     noteFleet: (boxes) => h.sleep.noteFleet(boxes),
-    asleep: () => h.sleep.asleep(),
-    state: () => h.sleep.state(),
+    asleep: () => dormant(h),
+    state: () => ({ ...h.sleep.state(), asleep: dormant(h) }),
   });
   registerSleepResolver((cfg) => sleepFacade((cfg.hostId && runtimes.get(cfg.hostId)) || primary()));
 
@@ -340,7 +362,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
         /* nothing to do */
       }
     },
-    warmCfgs: () => enabled().filter((h) => h.spec.warm && !h.unreachableSince).map((h) => h.cfg),
+    warmCfgs: () => enabled().filter((h) => h.spec.warm && !h.unreachableSince && !dormant(h)).map((h) => h.cfg),
     pick: (o = {}) => {
       const skip = new Set(o.exclude ?? []);
       const r = pickHost(candidates(o.warmReady, o.minAllowanceHours).filter((c) => !skip.has(c.id)));
@@ -390,6 +412,8 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
         h.unreachableSince = now();
         log(`[hosts] ${id} unreachable: ${h.lastError}`);
       }
+      // A VM that is paused at its provider is not dead; the next round serves it from memory.
+      if (providerFor(h.spec).metered && h.spec.freestyle?.apiKey) void refreshProvider(id).catch(() => {});
     },
     noteDisk: (id, disk) => {
       const h = get(id);
@@ -398,7 +422,11 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     wake,
     allAsleep: () => {
       const on = enabled();
-      return on.length > 0 && on.every((h) => h.sleep.asleep() || !!h.unreachableSince) && on.some((h) => h.sleep.asleep());
+      return on.length > 0 && on.every((h) => dormant(h) || !!h.unreachableSince) && on.some((h) => dormant(h));
+    },
+    dormant: (id) => {
+      const h = get(id);
+      return !!h && dormant(h);
     },
     tickUsage: () => {
       const t = now();
@@ -443,9 +471,9 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
             maxBoxes: h.cfg.maxBoxes,
             running: sessionBoxes(h.lastBoxes),
             reserved: h.reserved,
-            asleep: h.sleep.asleep(),
-            sleepSince: h.sleep.state().since,
-            unreachable: !!h.unreachableSince,
+            asleep: dormant(h),
+            sleepSince: h.sleep.state().since || (dormant(h) ? (h.provider?.at ?? 0) : 0),
+            unreachable: !!h.unreachableSince && !dormant(h),
             lastError: h.lastError,
             lastSweepAt: h.lastSweepAt,
             ...(h.spec.allowance && left ? { allowance: { ...h.spec.allowance, month: h.usageMonth, ...left } } : {}),
@@ -491,6 +519,16 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       if (!h) throw new Error(`no host "${id}"`);
       const t0 = now();
       let r: HostCheck;
+      if (providerFor(h.spec).metered && h.spec.freestyle?.apiKey) {
+        const st = await refreshProvider(id).catch((e): ProviderState => ({ state: "unknown", detail: String((e as Error).message ?? e), at: now() }));
+        if (st.state === "paused" || st.state === "stopped") {
+          // No SSH to a paused VM: it is dormant, and `ready` starts it for the next run that picks it.
+          h.lastError = undefined;
+          h.unreachableSince = undefined;
+          h.check = r = { ok: true, ms: now() - t0, detail: `${st.state} at the provider; it is started for the next run`, at: now() };
+          return r;
+        }
+      }
       try {
         const detail = opts.probe ? await withTimeout(opts.probe(h.cfg), opts.answerTimeoutMs ?? HOST_ANSWER_TIMEOUT_MS, `check of ${id}`) : "no probe configured";
         r = { ok: true, ms: now() - t0, detail, at: now() };
@@ -548,12 +586,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       h.unreachableSince ??= now();
       throw new Error(`host ${id} did not answer: ${lastErr}`);
     },
-    refreshProvider: async (id) => {
-      const h = get(id);
-      if (!h) throw new Error(`no host "${id}"`);
-      h.provider = await providerFor(h.spec).state(h.spec);
-      return h.provider;
-    },
+    refreshProvider,
     pause: async (id) => {
       const h = get(id);
       if (!h) throw new Error(`no host "${id}"`);

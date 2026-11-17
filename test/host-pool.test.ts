@@ -374,6 +374,66 @@ test("placeRun: a boot that fails before the box exists moves to the next host; 
   registerSleepResolver(null);
 });
 
+test("a VM paused at its provider is dormant, not dead: no SSH from sweeps or checks, ranked as asleep, still picked and started", async () => {
+  let vm = "paused";
+  const calls: string[] = [];
+  setProviderForTest("freestyle", {
+    metered: true,
+    state: async (): Promise<ProviderState> => ({ state: vm, at: 5 }),
+    pause: async (): Promise<ProviderState> => ({ state: (vm = "paused"), at: 5 }),
+    start: async (): Promise<ProviderState> => {
+      calls.push("start");
+      vm = "running";
+      return { state: "running", at: 5 };
+    },
+  });
+  const { sweepHosts, setSweepForTest } = await import("../src/host-sweep.ts");
+  let probes = 0;
+  let reads = 0;
+  try {
+    const pool = makeHostPool(cfg, openMemoryDb(), { readyPollMs: 1, answerTimeoutMs: 50, probe: async (c) => (c.hostId === "fs-1" ? (probes++, "0 live") : "ok") });
+    pool.upsert({ ...vmSpec, priority: -1 });
+    // The first sweep after a controller restart finds the VM paused: SSH fails, the provider is asked, and the host is dormant.
+    setSweepForTest(async (c, id) => {
+      reads++;
+      if (id === "fs-1") throw new Error("Connection closed by remote host");
+      return { boxes: [], kept: new Set<string>(), claims: new Map<string, number>(), titles: {} };
+    }, 50);
+    let r = await sweepHosts(cfg, pool);
+    assert.deepEqual(r.stale, ["fs-1"]);
+    await new Promise((res) => setTimeout(res, 5));
+    let v = pool.state().find((h) => h.id === "fs-1")!;
+    assert.equal(v.providerState?.state, "paused");
+    assert.equal(v.unreachable, false, "paused is not unreachable");
+    assert.equal(v.asleep, true, "paused is dormant");
+    assert.equal(pool.dormant("fs-1"), true);
+    assert.equal(sleepFor(pool.cfgFor("fs-1")).asleep(), true, "the launch paths see it asleep too");
+    // The next round does not SSH to it.
+    reads = 0;
+    r = await sweepHosts(cfg, pool);
+    assert.equal(reads, 1, "only the primary was read");
+    assert.deepEqual(r.stale, ["fs-1"]);
+    // A check does not SSH either and is a fine answer.
+    const c = await pool.check("fs-1");
+    assert.equal(c.ok, true);
+    assert.match(c.detail, /paused at the provider/);
+    assert.equal(probes, 0);
+    // Still picked (order -1 beats the awake primary) and started on the way in.
+    const p = pool.pick();
+    assert.equal(p.host?.spec.id, "fs-1");
+    p.release();
+    await pool.ready("fs-1", "run");
+    assert.deepEqual(calls, ["start"]);
+    assert.equal(probes, 1, "one probe once it came up");
+    assert.equal(pool.dormant("fs-1"), false);
+    assert.equal(pool.state().find((h) => h.id === "fs-1")?.providerState?.state, "running");
+  } finally {
+    setSweepForTest(null);
+    setProviderForTest("freestyle", null);
+    registerSleepResolver(null);
+  }
+});
+
 test("the shared pool answers cfgForBox and warmCfgs; without one the given config is used", async () => {
   const { cfgForBox, warmCfgs, poolCapacity, hostPool } = await import("../src/host-pool.ts");
   assert.equal(hostPool(), null);

@@ -4366,7 +4366,7 @@ registerTriggerRoutes(app, {
   // Chat names for the Scheduled table. Cosmetic: a slow fleet read just shows machine names.
   titles: () =>
     Promise.race([
-      Promise.all(hostPool.enabled().filter((h) => !h.sleep.asleep() && !h.unreachableSince).map((h) => loadTitles(h.cfg).catch(() => ({})))).then((all) => Object.assign({}, ...all) as Record<string, string>),
+      Promise.all(hostPool.enabled().filter((h) => !hostPool.dormant(h.spec.id) && !h.unreachableSince).map((h) => loadTitles(h.cfg).catch(() => ({})))).then((all) => Object.assign({}, ...all) as Record<string, string>),
       new Promise<Record<string, string>>((r) => setTimeout(() => r({}), 1500)),
     ]),
   rejects: (box) => scheduleRejects.get(box) ?? [],
@@ -5000,7 +5000,7 @@ const HOST_DISK_POLL_MS = 10 * 60_000;
 const hostDiskTick = async (): Promise<void> => {
   // Every awake host is read; the primary's reading is the one /health.json has always carried.
   for (const h of hostPool.enabled()) {
-    if (h.sleep.asleep() || h.unreachableSince) continue;
+    if (hostPool.dormant(h.spec.id) || h.unreachableSince) continue;
     let state: typeof hostDiskState;
     try {
       const reading = await hostDisk(h.cfg);
@@ -5022,7 +5022,7 @@ let lastOrphanSweep: { at: number; removed: string[]; freedMib?: number; error?:
 const orphanSweepTick = async (): Promise<void> => {
   if (hostSleep.asleep()) return;
   try {
-    const all = await Promise.all(hostPool.enabled().filter((h) => !h.sleep.asleep() && !h.unreachableSince).map((h) => sweepOrphanSandboxDirs(h.cfg)));
+    const all = await Promise.all(hostPool.enabled().filter((h) => !hostPool.dormant(h.spec.id) && !h.unreachableSince).map((h) => sweepOrphanSandboxDirs(h.cfg)));
     const r = { removed: all.flatMap((x) => x.removed), ...(all.some((x) => x.freedMib) ? { freedMib: all.reduce((n, x) => n + (x.freedMib ?? 0), 0) } : {}) };
     lastOrphanSweep = { at: Date.now(), ...r };
     if (r.removed.length) console.error(`[host-disk] removed ${r.removed.length} orphaned sandbox dir(s)${r.freedMib ? `, ${r.freedMib} MiB` : ""}: ${r.removed.join(" ")}`);

@@ -111,6 +111,12 @@ another five minutes of billed time). A box waiting on a question, or sitting fi
 keep the host up; a reply is a launch and wakes it. Pinned and sleeping runs are frozen inside the
 paused VM and thaw with it.
 
+**The VM is paused at the provider while the controller thinks it is awake** (paused by hand, by
+the provider's own idle timer, or before a controller restart). SSH to it fails, the provider is
+asked, and the answer "paused" makes the host dormant rather than unreachable: served from its last
+sweep, ranked as asleep, not SSHed to by any loop, and started by `ready` when a run picks it. A
+check on it says "paused at the provider; it is started for the next run" and passes.
+
 **A host stops answering.** A sweep gets 45 s per host per round; past that the host is served
 from its last sweep, marked unreachable (red "unreachable" on its row, with the error) and skipped
 by the picker. The other hosts, the Fleet page and the trigger dispatcher carry on. Boxes on the
