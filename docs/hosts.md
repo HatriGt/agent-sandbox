@@ -223,6 +223,16 @@ blank key on an edit keeps the stored one, and put at order -1 it took a real ru
 answered in 24 s from a cold boot, done at 80 s, the teardown routed to the right host). All test
 hosts were removed and the VM paused through the API afterwards.
 
+The pool in production, same day, 01:30 to 01:56 UTC: the Freestyle VM as a real host at order 0
+with the VPS at order 10. Five quiet minutes after the controller restarted the host fell asleep
+and the VM was paused through the API in the same second. A real run then arrived while it was
+paused: the controller started the VM through the API, waited for "running", got one probe
+through, booted the box and answered the delegate call 23 s after the request; the task was done
+at 53 s and the box torn down on the right host. The first cycle, before the fixes in this file,
+had shown the two gaps the live run was for: a wake that landed while the pause was still in
+flight issued no start (the run failed over to the VPS after 150 s, which is what failover is
+for), and the hourly canary had woken the VM for nothing.
+
 ## Troubleshooting
 
 | What you see | What it means | What to do |
