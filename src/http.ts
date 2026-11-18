@@ -558,8 +558,9 @@ const retriesOf = (box: string) => verifyRetrier?.retriesOf(box) ?? 0;
 // watch cache and any queued inbox message for the gone box) grow for the life of the process.
 {
   const rawTeardown = deps.teardown.bind(deps);
-  deps.teardown = async (c, session) => {
-    await rawTeardown(c, session);
+  deps.teardown = async (c, session, opts) => {
+    // `force` (a deliberate Destroy of a kept box) travels through this lane too.
+    await rawTeardown(c, session, opts);
     watchHub.drop(session);
     inbox.clear(session);
     boxModels.delete(session);
