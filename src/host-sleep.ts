@@ -48,6 +48,12 @@ export interface HostSleep {
   noteFleet(boxes: readonly SleepyBox[]): void;
   asleep(): boolean;
   state(): HostSleepState;
+  /**
+   * When the host last came back from sleep (ms), 0 if it never slept. The pool reaper reads it: a
+   * VM that resumed moments ago answers slowly or not at all for a while, and a box that misses one
+   * probe in that window is not wedged, it is waking up.
+   */
+  wokeAt(): number;
 }
 
 export function makeHostSleep(afterMs: number, opts: { now?: () => number; log?: (m: string) => void } = {}): HostSleep {
@@ -57,6 +63,7 @@ export function makeHostSleep(afterMs: number, opts: { now?: () => number; log?:
   let lastWorkAt = now();
   let asleep = false;
   let since = 0;
+  let wokeAt = 0;
   return {
     enabled,
     wake(reason) {
@@ -64,6 +71,7 @@ export function makeHostSleep(afterMs: number, opts: { now?: () => number; log?:
       if (!asleep) return;
       asleep = false;
       since = 0;
+      wokeAt = now();
       log(`[host-sleep] awake${reason ? `: ${reason}` : ""}`);
     },
     noteFleet(boxes) {
@@ -79,6 +87,7 @@ export function makeHostSleep(afterMs: number, opts: { now?: () => number; log?:
     },
     asleep: () => asleep,
     state: () => ({ enabled, asleep, since, lastWorkAt, afterMs }),
+    wokeAt: () => wokeAt,
   };
 }
 

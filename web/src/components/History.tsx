@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Check, RotateCw, Trash2, X } from "lucide-react";
+import { ArchiveRestore, ArrowLeft, Check, RotateCw, Trash2, X } from "lucide-react";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -323,7 +323,7 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
                 minWidth="min-w-[40rem]"
                 toolbar={filters}
                 search={{ placeholder: "Search runs", text: (x) => (x.kind === "live" ? `${threadTitle(x.box)} ${x.box.name} ${friendlyName(x.box.name)} running` : `#${x.run.id} ${titleOf(x.run)} ${x.run.headline ?? ""} ${x.run.box} ${friendlyName(x.run.box)} ${x.run.agent ?? ""} ${x.run.outcome?.header.label ?? ""}`) }}
-                actions={(x) => (x.kind === "archived" ? <HistoryActions run={x.run} onAgain={onAgain} onDeleted={() => removeRow(x.run.id)} /> : null)}
+                actions={(x) => (x.kind === "archived" ? <HistoryActions run={x.run} onAgain={onAgain} onDeleted={() => removeRow(x.run.id)} onBringBack={x.run.rescue && !boxes.some((b) => b.name === x.run.box) ? () => onOpen(x.run.box) : undefined} /> : null)}
               />
               {more && (
                 <div className="mt-3 flex justify-center">
@@ -339,7 +339,7 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
           {openRun && (
             <SheetContent title={titleOf(openRun)} description={`${openRun.state === "failed" ? "Failed" : "Done"} · ${friendlyName(openRun.box)}`} className="w-[min(44rem,calc(100vw-2rem))]">
               <div className="mb-3 flex justify-end">
-                <HistoryActions run={openRun} onAgain={onAgain} onDeleted={() => removeRow(openRun.id)} />
+                <HistoryActions run={openRun} onAgain={onAgain} onDeleted={() => removeRow(openRun.id)} onBringBack={openRun.rescue && !boxes.some((b) => b.name === openRun.box) ? () => onOpen(openRun.box) : undefined} />
               </div>
               <RunDetail id={openRun.id} outcome={openRun.outcome ?? null} />
             </SheetContent>
@@ -471,8 +471,12 @@ const HISTORY_COLUMNS: Column<Row>[] = [
   },
 ];
 
-/** Run again (prefill the Hub composer, then go there — same as the thread header) and delete. */
-function HistoryActions({ run, onAgain, onDeleted }: { run: HistoryRun; onAgain: () => void; onDeleted: () => void }) {
+/**
+ * Run again (prefill the Hub composer, then go there — same as the thread header), delete, and —
+ * for a run whose machine is gone but whose copy is kept — open the thread, which offers to bring
+ * the machine back with its files, transcript and session.
+ */
+function HistoryActions({ run, onAgain, onDeleted, onBringBack }: { run: HistoryRun; onAgain: () => void; onDeleted: () => void; onBringBack?: () => void }) {
   const remove = async () => {
     try {
       await api.deleteHistoryRun(run.id);
@@ -484,6 +488,16 @@ function HistoryActions({ run, onAgain, onDeleted }: { run: HistoryRun; onAgain:
   };
   return (
     <span className="inline-flex items-center gap-0.5">
+      {onBringBack && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="icon-sm" variant="ghost" aria-label="Bring the machine back — files, transcript and session from the kept copy" className="text-live" onClick={onBringBack}>
+              <ArchiveRestore />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Bring it back — the machine is gone, but a copy of the thread is kept (after turn {run.rescue?.turn})</TooltipContent>
+        </Tooltip>
+      )}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button

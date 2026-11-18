@@ -769,27 +769,98 @@ export function parseWarmProbe(stdout: string): { state: string; owner: string }
   return m ? { state: m[1], owner: m[2] || "legacy" } : { state: "", owner: "legacy" };
 }
 
+/**
+ * After a host wakes, no Running pool box is reaped for not answering: a resumed VM crawls while
+ * its memory pages back in, and the first probes into it time out or fail outright.
+ */
+export const REAP_GRACE_AFTER_WAKE_MS = 3 * 60_000;
+/** Between the first and the second probe of a box that did not answer. */
+const PROBE_RETRY_DELAY_MS = 3_000;
+
+/**
+ * What to do with a Running pool box that did not answer a probe. Pure, so the rule is testable:
+ *   - a box that carries a run (claimed, pinned or parked on the host) is NEVER reaped here — it is
+ *     somebody's thread; whether it is wedged is for its owner (and the sleep TTL) to decide;
+ *   - with the host's markers unreadable, nothing is reaped: "not claimed" is not known;
+ *   - inside the post-wake grace window, nothing is reaped: the box is waking, not wedged;
+ *   - otherwise an unclaimed box that missed TWO probes is wedged capacity and goes.
+ *
+ * Why so careful: on 2026-11-18 the previous rule ("Running but one probe failed → remove") ran
+ * right after a Freestyle VM resumed and destroyed a user's day-long thread, three PRs in, with its
+ * whole context. A warm box is replaceable in a minute; a run is not replaceable at all.
+ */
+export function unansweringBoxVerdict(o: { carriesRun: boolean; markersKnown: boolean; sinceWakeMs: number; secondProbeOk: boolean }): "keep-run" | "keep-unknown" | "keep-waking" | "keep-answered" | "reap" {
+  if (o.carriesRun) return "keep-run";
+  if (!o.markersKnown) return "keep-unknown";
+  if (o.sinceWakeMs < REAP_GRACE_AFTER_WAKE_MS) return "keep-waking";
+  if (o.secondProbeOk) return "keep-answered";
+  return "reap";
+}
+
+const WARM_PROBE_SH = 'if [ -f /.claimed ]; then echo claimed; elif [ ! -f /.ready ]; then echo "warming"; else echo "free $(cat /.owner 2>/dev/null || echo legacy)"; fi';
+
 /** The free warm boxes with their owners. One exec per box, the same one that proves it free. */
 export async function listWarmBoxes(cfg: Config): Promise<WarmBox[]> {
   const live = await reapDeadPoolBoxes(cfg);
+  if (!live.length) return [];
+  // The host's own record of which boxes carry a run. Read BEFORE any probe: a claimed box is not
+  // the pool's to probe or to reap, and a box the probe cannot reach is still a run if the host says
+  // so. Unreadable markers (null) mean nothing is reaped this sweep.
+  const [claims, kept, parked] = await Promise.all([
+    listClaims(cfg).catch(() => null),
+    listKept(cfg).catch(() => null),
+    listParked(cfg).catch(() => null),
+  ]);
+  const markersKnown = !!(claims && kept && parked);
+  const carriesRun = (box: string) => !!(claims?.has(box) || kept?.has(box) || parked?.has(box));
+  const sinceWakeMs = Date.now() - sleepFor(cfg).wokeAt();
   const available: WarmBox[] = [];
   for (const box of live) {
+    // A run's box is skipped outright: no probe (one SSH round trip saved per run per sweep) and no
+    // chance of being mistaken for wedged capacity.
+    if (carriesRun(box)) continue;
+    // Free = unclaimed AND finished its boot-time warm-up (/.ready is bootWarmBox's LAST step).
+    // Without the readiness gate a box was claimable seconds after boot, mid-warm-up, and the
+    // user's first task paid the whole cold start the pool exists to hide.
+    // A box with no /.owner was warmed before boxes had owners; it reads as "legacy" and is
+    // never handed out, because it may carry another owner's packages.
+    let probe: { state: string; owner: string } | undefined;
     try {
-      // Free = unclaimed AND finished its boot-time warm-up (/.ready is bootWarmBox's LAST step).
-      // Without the readiness gate a box was claimable seconds after boot, mid-warm-up, and the
-      // user's first task paid the whole cold start the pool exists to hide.
-      // A box with no /.owner was warmed before boxes had owners; it reads as "legacy" and is
-      // never handed out, because it may carry another owner's packages.
-      const r = await exec(cfg, box, 'if [ -f /.claimed ]; then echo claimed; elif [ ! -f /.ready ]; then echo warming; else echo "free $(cat /.owner 2>/dev/null || echo legacy)"; fi');
-      const { state, owner } = parseWarmProbe(r.stdout);
-      if (state === "free") available.push({ name: box, owner });
-      else if (isOrphanWarmBox(box, state, warming)) {
-        console.error(`[pool] reaping orphaned warm-up ${box} (never became ready; its warm-up was cut off)`);
-        await forceRemoveBox(cfg, box);
-      }
+      probe = parseWarmProbe((await exec(cfg, box, WARM_PROBE_SH)).stdout);
     } catch {
-      // Not execable despite a Running status => wedged; reap it so refill can recreate.
-      console.error(`[pool] reaping unexecable box ${box}`);
+      probe = undefined;
+    }
+    if (!probe) {
+      // Not execable despite a Running status. One more try after a moment, then the rule above.
+      let secondProbeOk = false;
+      if (markersKnown && sinceWakeMs >= REAP_GRACE_AFTER_WAKE_MS) {
+        await new Promise((r) => setTimeout(r, PROBE_RETRY_DELAY_MS));
+        try {
+          probe = parseWarmProbe((await exec(cfg, box, WARM_PROBE_SH, { timeoutMs: PROBE_TIMEOUT_MS })).stdout);
+          secondProbeOk = true;
+        } catch {
+          secondProbeOk = false;
+        }
+      }
+      const verdict = unansweringBoxVerdict({ carriesRun: false, markersKnown, sinceWakeMs, secondProbeOk });
+      if (verdict === "reap") {
+        console.error(`[pool] reaping unexecable box ${box} (unclaimed; missed two probes)`);
+        await forceRemoveBox(cfg, box);
+        continue;
+      }
+      if (verdict !== "keep-answered") {
+        console.error(`[pool] ${box} did not answer a probe; leaving it (${verdict === "keep-unknown" ? "the host's claim markers could not be read" : "the host woke " + Math.round(sinceWakeMs / 1000) + "s ago"})`);
+        continue;
+      }
+    }
+    const { state, owner } = probe!;
+    if (state === "free") available.push({ name: box, owner });
+    else if (state === "claimed") {
+      // Claimed in-box but no host marker (a claim whose host write failed): record it now, so the
+      // stopped-box reaper and this one both know it is a run.
+      if (markersKnown) await markClaimed(cfg, box).catch(() => {});
+    } else if (isOrphanWarmBox(box, state, warming)) {
+      console.error(`[pool] reaping orphaned warm-up ${box} (never became ready; its warm-up was cut off)`);
       await forceRemoveBox(cfg, box);
     }
   }
@@ -2412,19 +2483,53 @@ export async function takeDeliveredInbox(cfg: Config, box: string): Promise<stri
   }
 }
 
-export async function interruptAgentRun(cfg: Config, box: string, why = "to deliver a message immediately"): Promise<boolean> {
+export async function interruptAgentRun(
+  cfg: Config,
+  box: string,
+  why = "to deliver a message immediately",
+  opts: {
+    /** The log line that records the stop, in place of "run interrupted by the operator …". */
+    line?: string;
+    /** Exit code to publish once the wrapper has ended, in place of whatever the signal gave it. */
+    exit?: number;
+  } = {}
+): Promise<boolean> {
   const reason = why.replace(/[^\w .,-]/g, "");
+  const line = opts.line ?? `run interrupted by the operator ${reason}.`;
+  // The wrapper writes DONE_MARK before it removes RUN_MARK, so once the marker is gone the code
+  // it published can be replaced with the one the caller means ("paused", not "killed by TERM").
+  const settle = opts.exit !== undefined ? `echo ${opts.exit} > ${DONE_MARK}; ` : ``;
   const sh =
     `p=$(cat ${PID_MARK} 2>/dev/null); ` +
     `if [ -z "$p" ] || [ ! -d "/proc/$p" ]; then echo no-run; exit 0; fi; ` +
-    `echo "run interrupted by the operator ${reason}." >> ${AGENT_LOG}; ` +
+    `printf '%s\\n' ${shellQuote(line)} >> ${AGENT_LOG}; ` +
     `pkill -TERM -P "$p" 2>/dev/null; ` +
-    `for i in 1 2 3 4 5 6 7 8 9 10; do [ ! -f ${RUN_MARK} ] && { echo interrupted; exit 0; }; sleep 1; done; ` +
+    `for i in 1 2 3 4 5 6 7 8 9 10; do [ ! -f ${RUN_MARK} ] && { ${settle}echo interrupted; exit 0; }; sleep 1; done; ` +
     `pkill -KILL -P "$p" 2>/dev/null; ` +
-    `for i in 1 2 3 4 5; do [ ! -f ${RUN_MARK} ] && { echo interrupted; exit 0; }; sleep 1; done; ` +
-    `kill -KILL "$p" 2>/dev/null; echo 253 > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK} ${START_MARK} ${BOOT_MARK}; echo forced`;
+    `for i in 1 2 3 4 5; do [ ! -f ${RUN_MARK} ] && { ${settle}echo interrupted; exit 0; }; sleep 1; done; ` +
+    `kill -KILL "$p" 2>/dev/null; echo ${opts.exit ?? 253} > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK} ${START_MARK} ${BOOT_MARK}; echo forced`;
   const r = await msb(cfg, ["exec", box, "--", "bash", "-lc", sh], false);
   return !/(^|\n)no-run/.test(r.stdout);
+}
+
+/**
+ * Exit code of a turn the controller stopped ON PURPOSE to reboot the machine for a memory or disk
+ * resize. Not a failure: the resume that follows the reboot carries the same session on, and the
+ * thread labels the turn "paused" rather than "interrupted". 253 (an operator interrupt) and 254
+ * (a stale marker healed after an unplanned restart) keep their meanings.
+ */
+export const RESIZE_PAUSE_EXIT = 252;
+
+/**
+ * Stop a live turn cleanly before a resize reboots the box. A hard `msb modify --restart` under a
+ * running agent lost whatever the formatter had not flushed, and the next status probe healed the
+ * stale marker into "the sandbox restarted mid-run" (seen live 2026-11-17, right after the user
+ * had pressed "Add memory"). SIGTERM lets the driver and the formatter finish their last lines,
+ * and the log gets a lifecycle row that says what actually happened. Resolves false when nothing
+ * was running (the OOM-killed case: the run is already dead).
+ */
+export async function pauseRunForResize(cfg: Config, box: string, what: "memory" | "storage", tier: string): Promise<boolean> {
+  return interruptAgentRun(cfg, box, `to add ${what}`, { line: `● paused to add ${what} (${tier})`, exit: RESIZE_PAUSE_EXIT });
 }
 
 /** Raw `msb status` for a box (non-fatal if the box is gone). */
@@ -2875,10 +2980,39 @@ export function isMemoryTier(v: unknown): v is MemoryTier {
  * Resize a box's memory and reboot it so the change takes effect. Both --memory and --max-memory are
  * set: the latter is the boot-time hotplug ceiling, and raising the former alone is clamped to it.
  * The reboot destroys any in-flight run (it trips the stale-marker heal in RUN_STATE_SH), so callers
- * must gate on runState.
+ * pause a live turn first (pauseRunForResize) and resume it after.
  */
 export async function setBoxMemory(cfg: Config, box: string, tier: MemoryTier): Promise<void> {
-  await msb(cfg, ["modify", box, "--memory", tier, "--max-memory", tier, "--restart"]);
+  await rebootKeepingTmp(cfg, box, ["--memory", tier, "--max-memory", tier]);
+}
+
+/**
+ * The box's /tmp is a RAM tmpfs (BOX_TMPDIR): a reboot empties it. The resize promises "the
+ * workspace and session are kept", and an agent that parked a checkout under /tmp (seen live
+ * 2026-11-17: `/tmp/repos/<repo>` was gone after a memory bump, so the agent re-cloned and redid
+ * its edits) found that promise broken. So a resize stashes /tmp on the root disk before the
+ * reboot and puts it back once the box is up. The tmpfs is at most 256M; the stash is skipped when
+ * the disk cannot hold that plus a margin. Best-effort both ways: a failed stash costs the agent
+ * its scratch files, never the resize.
+ */
+export const TMP_STASH_DIR = "/root/.tmp-stash";
+export const STASH_TMP_SH =
+  `rm -rf ${TMP_STASH_DIR}; u=$(du -sk /tmp 2>/dev/null | cut -f1); f=$(df -Pk /root 2>/dev/null | awk 'NR==2{print $4}'); ` +
+  `if [ "\${u:-0}" -gt 0 ] && [ "\${f:-0}" -gt $(( \${u:-0} + 65536 )) ] && mkdir -p ${TMP_STASH_DIR} && cp -a /tmp/. ${TMP_STASH_DIR}/ 2>/dev/null; ` +
+  `then echo "tmp:stashed $u"; else rm -rf ${TMP_STASH_DIR}; echo "tmp:skipped \${u:-0} \${f:-0}"; fi`;
+export const RESTORE_TMP_SH =
+  `if [ -d ${TMP_STASH_DIR} ]; then cp -a ${TMP_STASH_DIR}/. /tmp/ 2>/dev/null; rm -rf ${TMP_STASH_DIR}; echo tmp:restored; else echo tmp:none; fi`;
+
+async function rebootKeepingTmp(cfg: Config, box: string, modify: string[]): Promise<void> {
+  const stash = await exec(cfg, box, STASH_TMP_SH, { timeoutMs: 60_000 }).catch((e) => {
+    console.error(`[resize] ${box}: could not stash /tmp: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
+    return undefined;
+  });
+  await msb(cfg, ["modify", box, ...modify, "--restart"]);
+  if (!/tmp:stashed/.test(stash?.stdout ?? "")) return;
+  await exec(cfg, box, RESTORE_TMP_SH, { timeoutMs: 60_000 }).catch((e) => {
+    console.error(`[resize] ${box}: could not restore /tmp: ${String((e as Error)?.message ?? e).slice(0, 200)}`);
+  });
 }
 
 /**
@@ -2895,7 +3029,7 @@ export function isDiskTier(v: unknown): v is DiskTier {
 
 /** Grow the root disk and reboot so it takes effect. Same run-state gating as setBoxMemory. */
 export async function setBoxDisk(cfg: Config, box: string, tier: DiskTier): Promise<void> {
-  await msb(cfg, ["modify", box, "--root-disk", tier, "--restart"]);
+  await rebootKeepingTmp(cfg, box, ["--root-disk", tier]);
 }
 
 /** Stop a box (no remove) so it can be snapshotted. */

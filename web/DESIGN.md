@@ -531,6 +531,19 @@ it as `data-file-kind`, so a file resolves to one family wherever it appears.
 of a blank page. `api.parse` treats a non-JSON 200 (index.html during a deploy) as an error, and the
 fleet response is shape-checked, so a transient bad response cannot crash a `useMemo`.
 
+### A lost thread
+
+A box that is not in the fleet used to bounce the reader to the Hub. Now App asks `/rescue.json`
+first; if a copy of the thread is kept (`src/rescue.ts`), the URL stays and `LostThread` renders in
+the thread's place: the same shell as `BootingThread` (header geometry, task bubble where it always
+is), a grey "Machine gone" pill (not red: nothing is on fire, the thread is recoverable), one tonal
+`.surface` card that says what is kept (turn, age, size) and what is not (installed dependencies),
+and ONE primary action, *Bring it back*. The restore reuses the launch vocabulary: the same
+progress pill as a waking box (three live dots, the stage in a mono chip, elapsed seconds), a drawn
+check when the fleet lists the box again, and App swaps the pane for the live Thread. History rows
+whose box is gone but whose copy is kept show the same action. Fixture:
+`node .shots/thread-fixture.mjs lost .shots/thread-lost [--dark] [--interact=bringback]`.
+
 ## Composer context
 
 Picking a file from the `@` menu turns it into a removable **chip** above the text (Cursor's context

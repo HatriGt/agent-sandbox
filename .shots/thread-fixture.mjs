@@ -9,8 +9,13 @@ import { execSync as execSyncX } from "node:child_process";
 //   node .shots/thread-fixture.mjs [scenario] [out-prefix] [--dark] [--w=1440 --h=900] [--full]
 //                                  [--stream] [--interact=<name>] [--wait=ms]
 //
-// scenarios : running (default) · question · done · booting · sleeping · idle
+// scenarios : running (default) · question · done · booting · sleeping · idle · pressure (memory
+//             nearly full mid-run: the rescue card) · resized (a turn paused for a memory bump, the
+//             continuation row, the agent carrying on) · lost (the machine is gone, a rescue copy
+//             is kept: LostThread; --interact=bringback presses the button, /rescue/restore.json
+//             answers after --restore-ms, default 4000)
 // interact  : file · review · scrolled · slash · mention · model · multiline · workspace · ws-tour (--slow-files for the skeleton) · minimap · question-kbd · sidechat
+//             bump (press "Add memory & continue" on the pressure scenario; /memory.json answers after --resize-ms, default 2500)
 // --stream  : serve /watch.sse from a local server that drips the final answer in over ~6s
 //             (screenshot mid-stream) instead of one full snapshot.
 //
@@ -219,6 +224,16 @@ function log(kind) {
     "  Set it in the environment and re-run.");
   L.push(`⟦plan⟧ ${T0 + 85_000}`, "[x] Read the current limiter and its tests", "[x] Implement a sliding-window limiter on Redis", "[x] Add burst and steady-traffic tests", kind === "done" ? "[x] Open a pull request" : "[>] Open a pull request", "⟦/plan⟧");
   L.push(at(1, 30));
+  if (kind === "resized") {
+    L.push("Diff is now down to the rate-limit entries. Next I'll confirm the lockfile is consistent and the tests still pass.");
+    L.push(at(1, 32), "● paused to add memory (8G)");
+    L.push(at(2, 0), "⟦you⟧", "The machine was paused to add memory and now has 8G. Continue the task from exactly where you left off; the workspace, /tmp and your session are as you left them.", "⟦/you⟧");
+    L.push(at(2, 4), "● session started (model ak-claude-opus-4.8)");
+    L.push(at(2, 6), "Picking up where I paused: the lockfile check, then the test run.");
+    L.push(at(2, 7), "→ Bash: npm ls --package-lock-only 2>&1 | tail -3 ⟦#b7⟧", at(2, 9), "  ⟦#b7⟧ orders-api@1.4.0 /workspace/orders-api", "  └── ioredis@5.4.1");
+    L.push(at(2, 10), ...ANSWER.slice(0, 20));
+    return L.join("\n");
+  }
   if (kind === "running") {
     // Mid-answer: the client sees a `say` as the last event of a running box → streaming render.
     L.push(...ANSWER.slice(0, 20));
@@ -229,7 +244,9 @@ function log(kind) {
   return L.join("\n");
 }
 
-const RUNNING = ["running", "question", "done", "idle"].includes(scenario);
+const RUNNING = ["running", "question", "done", "idle", "pressure", "resized"].includes(scenario);
+// The lost scenario: the fleet is empty until the restore lands, then the box is back as "done".
+let restored = false;
 const boxFor = (s) => {
   const common = {
     name: NAME,
@@ -258,6 +275,11 @@ const boxFor = (s) => {
       return { ...common, role: "pool-claimed", runState: "idle", uptime: "8s", lastOutputAt: undefined };
     case "idle":
       return { ...common, runState: "idle" };
+    case "pressure":
+      // 94% of a 4G box mid-run: the memory meter is critical and the rescue card offers 8G.
+      return { ...common, runState: "running", mem: "3.8G/4G", memUsage: { usedMib: 3860, totalMib: 4096 } };
+    case "resized":
+      return { ...common, runState: "running", mem: "1.2G/8G", memUsage: { usedMib: 1240, totalMib: 8192 } };
     default:
       return { ...common, runState: "running" };
   }
@@ -337,7 +359,7 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAE0lEQVR
 
 /* ───────────────────────────── SSE ───────────────────────────── */
 const box = boxFor(scenario);
-let fullLog = scenario === "booting" || scenario === "idle" ? "" : log(scenario === "sleeping" ? "done" : scenario);
+let fullLog = scenario === "booting" || scenario === "idle" ? "" : log(scenario === "sleeping" ? "done" : scenario === "pressure" ? "running" : scenario);
 // --cut=<text>: stop the log just before the first line containing <text> (a run caught mid-work:
 // mid-thought with --cut=⟦/think⟧, mid-command with --cut=⟦#b1⟧).
 const cut = flag("cut", null);
@@ -469,9 +491,16 @@ await page.route("**/*", async (route) => {
     case "/triggers/for-box.json":
       return json(route, { items: [] });
     case "/fleet.json":
-      return json(route, { boxes: [box], lifecycle: LIFECYCLE, at: Date.now() });
+      return json(route, { boxes: scenario === "lost" && !restored ? [] : [box], lifecycle: LIFECYCLE, at: Date.now() });
     case "/monitor.json":
-      return json(route, { boxes: [box] });
+      return json(route, { boxes: scenario === "lost" && !restored ? [] : [box] });
+    case "/rescue.json":
+      return json(route, { rescue: { box: NAME, turn: 4, at: Date.now() - 23 * 60_000, bytes: 18.4 * 1048576, agent: "claude", task: TASK, title: "Sliding-window rate limiter" }, present: scenario !== "lost" || restored, maxMb: 512 });
+    case "/rescue/restore.json": {
+      await new Promise((r) => setTimeout(r, Number(flag("restore-ms", 4000))));
+      restored = true;
+      return json(route, { ok: true, box: NAME, turn: 4, at: Date.now(), host: "freestyle-a" });
+    }
     case "/watch.json":
       return json(route, { ...meta, log: fullLog });
     case "/watch.sse": {
@@ -536,8 +565,12 @@ await page.route("**/*", async (route) => {
     }
     case "/file.json":
       return json(route, { path: u.searchParams.get("path"), content: "const BUCKETS = 6;\n\ninterface Options {\n  limit: number;\n  window?: number;\n}\n\nexport function rateLimit({ limit, window = 60_000 }: Options) {\n  const slice = window / BUCKETS;\n  return async (req, res, next) => {\n    next();\n  };\n}\n", bytes: 240, mtime: Date.now() });
-    case "/memory.json":
-      return json(route, { ok: true });
+    case "/memory.json": {
+      // The one-request rescue: pause, reboot, resume. Slow enough to catch the busy card.
+      await new Promise((r) => setTimeout(r, Number(flag("resize-ms", 2500))));
+      const memory = JSON.parse(route.request().postData() || "{}").memory;
+      return json(route, { ok: true, memory, paused: true, continued: true });
+    }
     case "/ask.json": {
       await new Promise((r) => setTimeout(r, 600));
       return json(route, { answer: SIDE_ANSWER, timedOut: false, continued: true, driverState: "running" });
@@ -659,6 +692,13 @@ if (stream) {
   await input().type("/rev");
   await page.waitForTimeout(500);
   await shot("-slash");
+} else if (interact === "bringback") {
+  // Press "Bring it back": the progress pill mid-restore, then the live thread once the fleet lists the box.
+  await page.getByRole("button", { name: "Bring it back" }).click();
+  await page.waitForTimeout(1500);
+  await shot("-restoring");
+  await page.waitForTimeout(Number(flag("restore-ms", 4000)) + 3500);
+  await shot("-back");
 } else if (interact === "tags") {
   // Tags in the line: two skills and a file, each where it was typed; Backspace takes a whole tag.
   await input().click();
@@ -799,6 +839,16 @@ if (stream) {
     if (await chip.count()) { await chip.click(); await page.waitForTimeout(1200); await shot("-browser-errors"); }
     console.log("composer:", JSON.stringify(await input().inputValue()));
   }
+} else if (interact === "bump") {
+  const card = page.getByRole("alert").filter({ hasText: /memory/i }).first();
+  await card.scrollIntoViewIfNeeded().catch((e) => errors.push("card: " + e.message));
+  await shot("-card");
+  await card.getByRole("button", { name: /add memory/i }).click();
+  await page.waitForTimeout(1300);
+  console.log("busy button:", await card.getByRole("button").textContent());
+  await shot("-busy");
+  await page.waitForTimeout(Number(flag("resize-ms", 2500)));
+  await shot("-after");
 } else if (interact === "workspace") {
   await page.getByRole("button", { name: /files|workspace/i }).first().click();
   await page.waitForTimeout(1500);

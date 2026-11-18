@@ -6,7 +6,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/lib/motion-pref";
 import { THEMES, setTheme, toggleScheme, useTheme } from "@/lib/theme";
 import { ThemePicker } from "@/components/ThemePicker";
-import { api, type Automation, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
+import { api, type Automation, type FleetLifecycle, type FleetSnapshot, type RescueSummary } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort, threadTitle } from "@/lib/format";
 import { questionHeadline } from "@/lib/question";
 import { legacyHashTarget, useConsoleRoute, useGo } from "@/lib/route";
@@ -46,6 +46,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Thread } from "@/components/thread/Thread";
 import { forgetSideChat } from "@/lib/sidechat";
 import { BootingThread } from "@/components/thread/BootingThread";
+import { LostThread } from "@/components/thread/LostThread";
 import { Bar } from "@/components/thread/Skeletons";
 import { Collapse } from "@/components/ui/collapse";
 import { IconSwap } from "@/components/ui/icon-swap";
@@ -441,10 +442,32 @@ export default function App() {
     [threadActions, playbookActions, showFleet, showAutomations, showHistory, showActivity, showSkills, showMemory, showHarnesses, showPlaybooks, showIntegrations, showAccount, showAdmin, showOrg, showConnect, dark, theme.id, collapsed, setCollapsed, motionPref]
   );
 
+  // A thread whose machine is not in the fleet: lost, or never ours. Before bouncing home, ask
+  // whether a copy of it is kept (src/rescue.ts) — if so the URL stays and the page offers to
+  // bring the machine back; a thread must never just vanish on the person reading it.
+  const [lost, setLost] = React.useState<{ name: string; rescue: RescueSummary } | null>(null);
+  React.useEffect(() => {
+    if (lost && lost.name !== selected) setLost(null);
+  }, [lost, selected]);
   React.useEffect(() => {
     if (booting || !data) return;
-    if (selected && !boxes.some((b) => b.name === selected) && !selectedRaw) go({ view: "hub" }, { replace: true });
-  }, [selected, selectedRaw, data, boxes, booting, go]);
+    if (!selected || boxes.some((b) => b.name === selected) || selectedRaw) return;
+    if (lost?.name === selected) return;
+    let cancelled = false;
+    api
+      .rescue(selected)
+      .then((r) => {
+        if (cancelled) return;
+        if (r.rescue && !r.present) setLost({ name: selected, rescue: r.rescue });
+        else go({ view: "hub" }, { replace: true });
+      })
+      .catch(() => {
+        if (!cancelled) go({ view: "hub" }, { replace: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected, selectedRaw, data, boxes, booting, go, lost]);
 
   // Attach to the delegated box the instant it surfaces: a cold boot is a brand-new session box; a
   // warm claim is an existing pool-free box whose role flips to pool-claimed (same name).
@@ -1077,6 +1100,8 @@ export default function App() {
                   // not yet in the fleet: the same launch shell, never a blank pane or a bounce home.
                   // The Thread takes over once it is up.
                   <BootingThread task={selectedRaw?.task || (selected === launched ? launchTask.current : "")} warm={false} machine={selected ?? undefined} inferred={selected ? inferredNotes[selected] : undefined} launchId={selected ? launchIds[selected] : undefined} onBack={backToRail} />
+                ) : view === "box" && !selectedBox && lost && lost.name === selected ? (
+                  <LostThread name={lost.name} rescue={lost.rescue} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && !data ? (
                   <ThreadPageSkeleton />
                 ) : selectedBox ? (

@@ -18,6 +18,22 @@
  * Dependency-free and pure so the server's `node:test` suite can cover it directly.
  */
 
+/**
+ * The follow-up the controller sends on the agent's behalf after a memory or disk resize that
+ * paused a turn (src/http.ts /memory.json `continue`). It is a real `you` line in the log — the
+ * agent reads it as its instruction to carry on — but the thread draws it as a lifecycle row, not
+ * as words the operator typed, so the two sides share the shape here.
+ */
+export function resizeContinueMessage(what: "memory" | "storage", tier: string): string {
+  return `The machine was paused to add ${what} and now has ${tier}. Continue the task from exactly where you left off; the workspace, /tmp and your session are as you left them.`;
+}
+const RESIZE_CONTINUE_RE = /^The machine was paused to add (memory|storage) and now has (\S+)\. Continue the task/;
+/** The resize a `you` line is the continuation of, or null for an ordinary message. */
+export function parseResizeContinue(text: string): { what: "memory" | "storage"; tier: string } | null {
+  const m = text.trim().match(RESIZE_CONTINUE_RE);
+  return m ? { what: m[1] as "memory" | "storage", tier: m[2] } : null;
+}
+
 export type TraceEvent =
   | { kind: "lifecycle"; label: string; detail?: string }
   /** `at` (epoch ms) comes from the formatter's ⟦at⟧ stamps; absent on logs written before them. */

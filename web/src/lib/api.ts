@@ -1067,11 +1067,22 @@ export const api = {
   title: (session: string) => post<{ title?: string }>("/title.json", { box: session }),
   /** Start a sleeping sandbox now (opening its thread does this automatically). */
   wake: (session: string) => post<{ ok: true }>("/wake.json", { box: session }),
+  /** Is a copy of this thread kept off its machine (src/rescue.ts), and is the machine still here? */
+  rescue: (session: string, signal?: AbortSignal) =>
+    fetch(url("/rescue.json", { box: session }), { headers: authHeaders, signal }).then(parse<{ rescue: RescueSummary | null; present: boolean; maxMb: number }>),
+  /** Bring a lost thread back: a fresh machine under the same name, the kept copy put into it. */
+  restoreThread: (session: string) => post<{ ok: true; box: string; turn: number; at: number; host: string | null }>("/rescue/restore.json", { box: session }),
   sleep: (session: string) => post<{ ok: true }>("/sleep.json", { box: session }),
-  /** Resize a box's memory. Always reboots the machine — this runtime has no live resize. */
-  setMemory: (session: string, memory: string) => post<{ ok: true; memory: string }>("/memory.json", { box: session, memory }),
-  /** Grow a box's root disk. Grow-only and always reboots; the server rejects a smaller tier. */
-  setDisk: (session: string, disk: string) => post<{ ok: true; disk: string }>("/disk.json", { box: session, disk }),
+  /**
+   * Resize a box's memory. Always reboots the machine — this runtime has no live resize — but the
+   * server pauses a live turn first and, with `continue`, resumes the same session once the box is
+   * back (the reply says whether a turn was paused and whether it was continued).
+   */
+  setMemory: (session: string, memory: string, opts: { continue?: boolean } = {}) =>
+    post<{ ok: true; memory: string; paused: boolean; continued: boolean }>("/memory.json", { box: session, memory, continue: !!opts.continue }),
+  /** Grow a box's root disk. Grow-only; the server rejects a smaller tier. Same pause/continue as setMemory. */
+  setDisk: (session: string, disk: string, opts: { continue?: boolean } = {}) =>
+    post<{ ok: true; disk: string; paused: boolean; continued: boolean }>("/disk.json", { box: session, disk, continue: !!opts.continue }),
   rename: (session: string, title: string) => post<{ title: string }>("/rename.json", { box: session, title }),
   /** Every workspace file (flat paths) for the explorer tree. */
   tree: (session: string, signal?: AbortSignal) =>
@@ -1680,10 +1691,28 @@ export interface LedgerRow extends HistoryRun {
   workflowId?: string | null;
 }
 
+/** A copy of a thread kept off its machine: what a restore brings back. Mirrors src/rescue.ts. */
+export interface RescueSummary {
+  box: string;
+  /** The turn the copy was taken after. */
+  turn: number;
+  /** Epoch ms when the copy landed. */
+  at: number;
+  /** Compressed size on the controller. */
+  bytes: number;
+  agent?: string;
+  task?: string;
+  title?: string;
+  /** The last checkpoint was over the copy limit (bytes); the copy, if any, is of an earlier turn. */
+  tooBig?: number;
+}
+
 /** One archived run — a record kept after its machine is gone. Mirrors GET /history.json rows. */
 export interface HistoryRun {
   id: number;
   box: string;
+  /** A copy of the thread is kept: its machine can be brought back (see RescueSummary). */
+  rescue?: RescueSummary | null;
   owner?: string | null;
   task?: string | null;
   state: "done" | "failed";

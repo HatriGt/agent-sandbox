@@ -43,7 +43,7 @@ import { QuoteJumpContext } from "./QuoteJumpContext";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { SchedulePill } from "./SchedulePill";
 import { ScheduledCard } from "./ScheduledCard";
-import { parseTrace, producedFiles } from "@/lib/trace";
+import { parseResizeContinue, parseTrace, producedFiles } from "@/lib/trace";
 import { reuseEvents, reuseGroups } from "@/lib/stable-trace";
 import { deriveTaskBoard, type TaskBoard } from "@/lib/planTasks";
 import { usePoll } from "@/hooks/usePoll";
@@ -244,7 +244,7 @@ export function Thread({
     () =>
       buildLiveRegistry(
         groups.flatMap((g, i): SayInput[] =>
-          g.kind === "say" ? [{ key: keys[i], text: g.text, at: g.at }] : g.kind === "you" || g.kind === "asked" ? [{ key: keys[i], text: "", boundary: true }] : []
+          g.kind === "say" ? [{ key: keys[i], text: g.text, at: g.at }] : g.kind === "you" || g.kind === "asked" || (g.kind === "lifecycle" && g.message) ? [{ key: keys[i], text: "", boundary: true }] : []
         )
       ),
     [groups, keys]
@@ -586,15 +586,23 @@ export function Thread({
   }, [box.name]);
 
   // Resize memory. Same shape as sleepNow — including marking wokeRef first, since `msb modify
-  // --restart` takes the box down and the auto-wake effect must not race the reboot.
+  // --restart` takes the box down and the auto-wake effect must not race the reboot. Mid-turn the
+  // server pauses the agent first and continues the task once the box is back (`continue`), so the
+  // menu no longer has to wait for the turn to finish.
   const [memoryBusy, setMemoryBusy] = React.useState(false);
   const memoryTier = React.useMemo(() => currentMemoryTier(box.mem, lifecycle.memoryDefault), [box.mem, lifecycle.memoryDefault]);
+  const resizedToast = (what: string, r: { continued: boolean }) =>
+    toast.success(`${friendlyName(box.name)} now has ${what}`, {
+      description: r.continued ? "The agent paused for the restart and is continuing the task." : "The machine restarted — the workspace, /tmp and the session are kept. Send a message to continue.",
+    });
   const setMemory = async (tier: string) => {
     setMemoryBusy(true);
     wokeRef.current = box.name;
+    const wasRunning = runState === "running";
     try {
-      await api.setMemory(box.name, tier);
-      toast.success(`${friendlyName(box.name)} now has ${tier}`, { description: "The machine is restarting — the workspace and session are kept. Send a message once it is back." });
+      const r = await api.setMemory(box.name, tier, { continue: wasRunning });
+      if (wasRunning) setGeneration((g) => g + 1);
+      resizedToast(tier, r);
     } catch (e) {
       toast.error("Could not change the memory", { description: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -603,8 +611,9 @@ export function Thread({
   };
 
   // Out-of-memory rescue: when the agent is OOM-killed (exit 137) or memory is critically full
-  // mid-run, offer one action that raises the tier AND continues the task. The resize call returns
-  // once `msb modify --restart` has the box back up, so the forced resume can follow immediately.
+  // mid-run, offer one action that raises the tier AND continues the task. One request: the server
+  // pauses a live turn, reboots with the new tier and resumes the same session (src/http.ts
+  // resizeBox), so a closed tab halfway through cannot leave the box resized but never resumed.
   const nextMemoryTier = React.useMemo(() => {
     const cur = tierGib(memoryTier);
     if (cur == null) return null;
@@ -614,25 +623,23 @@ export function Thread({
       .sort((a, b) => a.g - b.g);
     return bigger[0]?.t ?? null;
   }, [memoryTier, lifecycle.memoryTiers]);
-  const [bumpPhase, setBumpPhase] = React.useState<"resizing" | "resuming" | null>(null);
+  const [bumpSince, setBumpSince] = React.useState<number | null>(null);
   // Remember which box+tier was already rescued so the card does not re-offer while the fleet poll
   // still carries the pre-resize metrics.
   const bumpedRef = React.useRef<string | null>(null);
   const bumpAndContinue = async () => {
-    if (!nextMemoryTier || bumpPhase) return;
-    setBumpPhase("resizing");
+    if (!nextMemoryTier || bumpSince !== null) return;
+    setBumpSince(Date.now());
     wokeRef.current = box.name;
     try {
-      await api.setMemory(box.name, nextMemoryTier);
-      setBumpPhase("resuming");
-      await api.resume(box.name, "The machine ran low on memory and was given more. Continue the task from where you left off.", { force: true });
+      const r = await api.setMemory(box.name, nextMemoryTier, { continue: true });
       bumpedRef.current = `${box.name}:${nextMemoryTier}`;
       setGeneration((g) => g + 1);
-      toast.success(`${friendlyName(box.name)} now has ${nextMemoryTier}`, { description: "The agent is continuing the task." });
+      resizedToast(nextMemoryTier, r);
     } catch (e) {
       toast.error("Could not add memory", { description: e instanceof Error ? e.message : String(e) });
     } finally {
-      setBumpPhase(null);
+      setBumpSince(null);
     }
   };
   // Context-window health from the trace's ⟦usage⟧ events: shown on the run summary, and as a
@@ -653,9 +660,11 @@ export function Thread({
   const setDisk = async (tier: string) => {
     setDiskBusy(true);
     wokeRef.current = box.name;
+    const wasRunning = runState === "running";
     try {
-      await api.setDisk(box.name, tier);
-      toast.success(`${friendlyName(box.name)} now has ${tier} of storage`, { description: "The machine is restarting — the workspace and session are kept. Send a message once it is back." });
+      const r = await api.setDisk(box.name, tier, { continue: wasRunning });
+      if (wasRunning) setGeneration((g) => g + 1);
+      resizedToast(`${tier} of storage`, r);
     } catch (e) {
       toast.error("Could not change the storage", { description: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -1124,7 +1133,7 @@ export function Thread({
   // Operator-message index per group: the task is 1, each you/asked group after it increments.
   const messageIndex = React.useMemo(() => {
     let n = 1;
-    return groups.map((g) => (g.kind === "you" || g.kind === "asked" || (g.kind === "compact" && g.fromYou) ? ++n : n));
+    return groups.map((g) => (g.kind === "you" || g.kind === "asked" || (g.kind === "compact" && g.fromYou) || (g.kind === "lifecycle" && g.message) ? ++n : n));
   }, [groups]);
   const messageCount = messageIndex[messageIndex.length - 1] ?? 1;
   const editMessage = React.useCallback((text: string) => setSeed({ text, n: Date.now() }), []);
@@ -1272,7 +1281,7 @@ export function Thread({
               )}
               {showMemoryCard && (
                 <Rise key="memory" still={still}>
-                  <MemoryBumpCard kind={oomKilled ? "oom" : "pressure"} nextTier={nextMemoryTier!} memUsage={box.memUsage} phase={bumpPhase} onBump={() => void bumpAndContinue()} />
+                  <MemoryBumpCard kind={oomKilled ? "oom" : "pressure"} nextTier={nextMemoryTier!} memUsage={box.memUsage} busySince={bumpSince} onBump={() => void bumpAndContinue()} />
                 </Rise>
               )}
             </AnimatePresence>
@@ -1350,11 +1359,13 @@ export function Thread({
                         ? "Disk full"
                         : exitCode === 254 || exitCode === 253
                           ? "Run interrupted"
-                          : digest?.startFailure
-                            ? "Failed to start"
-                            : "Exited with an error"
+                          : exitCode === 252
+                            ? "Paused"
+                            : digest?.startFailure
+                              ? "Failed to start"
+                              : "Exited with an error"
                 }
-                failed={exitCode != null && exitCode !== 0}
+                failed={exitCode != null && exitCode !== 0 && exitCode !== 252}
                 detail={
                   exitCode == null || exitCode === 0
                     ? deadlineText ?? undefined
@@ -1366,6 +1377,8 @@ export function Thread({
                           ? "the sandbox restarted mid-run — send a message to continue"
                           : exitCode === 253
                             ? "stopped by you to deliver a message immediately"
+                            : exitCode === 252
+                              ? "stopped on purpose to restart the machine with more memory or storage; the agent continued below"
                             : digest?.startFailure
                               ? `the sandbox never ran the agent (code ${exitCode})${digest.startFailure.tail ? ` — ${lastLine(digest.startFailure.tail)}` : ""}`
                               : `code ${exitCode}`
@@ -1675,7 +1688,7 @@ type TraceGroup =
   | { kind: "say"; text: string; at?: number }
   | { kind: "you"; text: string; at?: number }
   | { kind: "asked"; question: string; answer: string }
-  | { kind: "lifecycle"; label: string; detail?: string }
+  | { kind: "lifecycle"; label: string; detail?: string; message?: true }
   | { kind: "tools"; events: ToolEvent[] }
   | { kind: "mcp-connect"; server: string }
   | { kind: "think"; text: string; ms?: number }
@@ -1718,6 +1731,12 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
         if (prior && prior.kind === "lifecycle" && modelOf(prior.label) === modelOf(e.label)) continue;
       }
       out.push({ kind: "lifecycle", label: sentence(e.label), detail: e.detail });
+    } else if (e.kind === "you" && parseResizeContinue(e.text)) {
+      // The controller's own follow-up after a resize (src/trace.ts resizeContinueMessage): a real
+      // turn for the agent and for message numbering, but drawn as what happened, not as words the
+      // operator typed — a "You" bubble asking the agent to continue read as if the user had.
+      const c = parseResizeContinue(e.text)!;
+      out.push({ kind: "lifecycle", label: sentence(`${c.what} raised to ${c.tier}`), detail: "the agent continues the task", message: true });
     } else if (e.kind === "you" && isCompactCommand(e.text)) {
       // `/compact` is a seam, not a bubble: it opens the divider its ⟦compact⟧ lines then fill in.
       const instructions = compactInstructions(e.text);

@@ -180,7 +180,12 @@ export const AGENT_SYS_PROMPT =
   // Dashboard-configured skills are synced into ~/.claude/skills before every turn (installSkills).
   "The caller may have installed skills (reusable playbooks). When a message starts with " +
   "/<skill-name> matching an available skill, invoke that skill with the Skill tool and follow it " +
-  "for the rest of the message; otherwise use skills whenever their description matches the task.";
+  "for the rest of the message; otherwise use skills whenever their description matches the task. " +
+  // /tmp is a RAM tmpfs (msb.ts BOX_TMPDIR): a memory or disk resize reboots the machine and the
+  // controller stashes /tmp across it, but a checkout parked there is still the wrong place — it
+  // is capped at 256M and is lost the moment anything but a resize restarts the box.
+  "/tmp lives in memory and is emptied whenever the machine restarts; keep checkouts, builds and " +
+  "anything you would miss under /workspace.";
 
 /**
  * The standing policy for oh-my-pi runs. Same intent as AGENT_SYS_PROMPT, minus the Claude Code

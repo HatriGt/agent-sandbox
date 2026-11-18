@@ -17,6 +17,7 @@ import { noteOwnerActive, noteOwnerAgent } from "./warm-owners.js";
 import { ownerKey } from "./user-store.js";
 import { isCanaryTask } from "./canary.js";
 import { cfgForBox, cfgForBoxReady, hostPool, placeRun, sessionBoxes, warmCfgs } from "./host-pool.js";
+import { dropRescue } from "./rescue.js";
 import { sweepBoxes } from "./host-sweep.js";
 import {
   runAgentTask,
@@ -581,6 +582,8 @@ export const deps: HandlerDeps = {
     cfg = await cfgForBoxReady(cfg, session, `teardown ${session}`);
     await msbTeardown(cfg, session, stagingPathFor(cfg, session));
     hostPool()?.forgetBox(session);
+    // Destroyed on purpose: the copy kept against an accident goes with it.
+    void dropRescue(cfg, session);
   },
 
   async poolStatus(cfg, opts) {

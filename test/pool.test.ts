@@ -86,3 +86,18 @@ test("releasing a failed claim puts the box back in play", () => {
   inFlight.delete("pool-a");
   assert.equal(pickFreeBox(["pool-a", "pool-b"], inFlight), "pool-a");
 });
+
+// --- a box that did not answer a probe ------------------------------------------------------------
+// 2026-11-18: the pool maintainer swept a Freestyle VM seconds after it resumed, one probe into a
+// claimed box failed, and the "Running but unexecable → remove" rule destroyed a user's day-long
+// thread. The verdict is now a pure rule: a run is never reaped here, nothing is reaped while the
+// host's markers are unreadable or right after a wake, and an unclaimed box needs two misses.
+
+test("unansweringBoxVerdict: a claimed, pinned or parked box is never reaped for a missed probe", async () => {
+  const { unansweringBoxVerdict, REAP_GRACE_AFTER_WAKE_MS } = await import("../src/msb.ts");
+  assert.equal(unansweringBoxVerdict({ carriesRun: true, markersKnown: true, sinceWakeMs: Infinity, secondProbeOk: false }), "keep-run");
+  assert.equal(unansweringBoxVerdict({ carriesRun: false, markersKnown: false, sinceWakeMs: Infinity, secondProbeOk: false }), "keep-unknown");
+  assert.equal(unansweringBoxVerdict({ carriesRun: false, markersKnown: true, sinceWakeMs: REAP_GRACE_AFTER_WAKE_MS - 1, secondProbeOk: false }), "keep-waking");
+  assert.equal(unansweringBoxVerdict({ carriesRun: false, markersKnown: true, sinceWakeMs: REAP_GRACE_AFTER_WAKE_MS, secondProbeOk: true }), "keep-answered");
+  assert.equal(unansweringBoxVerdict({ carriesRun: false, markersKnown: true, sinceWakeMs: Infinity, secondProbeOk: false }), "reap");
+});

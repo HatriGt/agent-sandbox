@@ -683,10 +683,10 @@ export function ThreadHeader({
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>Memory</DropdownMenuLabel>
                 {memoryTiers.map((t) => (
-                  <DropdownMenuItem key={t} onSelect={() => setResizeTo({ kind: "memory", tier: t })} disabled={t === memoryTier || memoryBusy || state === "running"}>
+                  <DropdownMenuItem key={t} onSelect={() => setResizeTo({ kind: "memory", tier: t })} disabled={t === memoryTier || memoryBusy}>
                     <MemoryStick />
                     {t}
-                    <MenuHint>{t === memoryTier ? "current" : state === "running" ? "busy — finish first" : "reboots the machine"}</MenuHint>
+                    <MenuHint>{t === memoryTier ? "current" : state === "running" ? "pauses, reboots, continues" : "reboots the machine"}</MenuHint>
                   </DropdownMenuItem>
                 ))}
               </>
@@ -696,10 +696,10 @@ export function ThreadHeader({
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel>Storage</DropdownMenuLabel>
                 {diskTiers.map((t) => (
-                  <DropdownMenuItem key={t} onSelect={() => setResizeTo({ kind: "disk", tier: t })} disabled={t === diskTier || diskBusy || state === "running"}>
+                  <DropdownMenuItem key={t} onSelect={() => setResizeTo({ kind: "disk", tier: t })} disabled={t === diskTier || diskBusy}>
                     <HardDrive />
                     {t}
-                    <MenuHint>{t === diskTier ? "current" : state === "running" ? "busy — finish first" : "reboots the machine"}</MenuHint>
+                    <MenuHint>{t === diskTier ? "current" : state === "running" ? "pauses, reboots, continues" : "reboots the machine"}</MenuHint>
                   </DropdownMenuItem>
                 ))}
               </>
@@ -725,8 +725,8 @@ export function ThreadHeader({
           title={`Restart ${friendlyName(box.name)} with ${resizeTo?.tier} of ${resizeTo?.kind === "disk" ? "storage" : "memory"}?`}
           description={
             resizeTo?.kind === "disk"
-              ? "The disk grows on the next boot, so the machine reboots. The workspace, checkouts and the agent's session are kept — and a disk can only ever grow, never shrink back."
-              : "This runtime cannot resize memory live, so the machine reboots. The workspace, checkouts and the agent's session are kept — expect it back in about half a minute."
+              ? `The disk grows on the next boot, so the machine reboots. The workspace, checkouts, /tmp and the agent's session are kept${running ? ", and the agent pauses first and continues the task once it is back" : ""} — and a disk can only ever grow, never shrink back.`
+              : `This runtime cannot resize memory live, so the machine reboots. The workspace, checkouts, /tmp and the agent's session are kept${running ? "; the agent pauses first and continues the task once it is back" : ""} — expect it back in about half a minute.`
           }
         >
           <div className="flex justify-end gap-2">

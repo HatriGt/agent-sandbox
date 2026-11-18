@@ -67,3 +67,17 @@ test("makeHostSleep: 0 means never", () => {
   assert.equal(s.asleep(), false);
   assert.equal(s.state().enabled, false);
 });
+
+test("wokeAt: the moment the host last came back from sleep, 0 until it ever slept", () => {
+  let t = 5_000_000;
+  const s = makeHostSleep(60_000, { now: () => t });
+  assert.equal(s.wokeAt(), 0);
+  s.wake("delegate"); // awake already: not a wake-up
+  assert.equal(s.wokeAt(), 0);
+  t += 120_000;
+  s.noteFleet([]);
+  assert.equal(s.asleep(), true);
+  t += 30_000;
+  s.wake("message");
+  assert.equal(s.wokeAt(), t);
+});

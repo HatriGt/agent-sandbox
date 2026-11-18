@@ -117,3 +117,72 @@ export async function run(
     });
   });
 }
+
+export interface StreamOptions {
+  /** The child's stdout is written here, byte for byte (tmp + rename is the caller's business). */
+  stdoutFile?: string;
+  /** The child's stdin is fed from this file. */
+  stdinFile?: string;
+  timeoutMs?: number;
+}
+
+export interface StreamResult {
+  code: number;
+  stderr: string;
+  /** The child's stdout when no `stdoutFile` was given (capped at 64 KB), else "". */
+  stdout: string;
+  /** Bytes written to `stdoutFile` (0 when none was given). */
+  bytes: number;
+}
+
+/**
+ * Like `run`, for payloads that must not pass through a JS string: a tarball coming out of a box
+ * or going into one. stdout streams to a file and stdin streams from a file, so a 300 MB copy costs
+ * no heap. Never throws on a non-zero exit (the caller reads the code and the stderr tail); a
+ * timeout rejects, as in `run`.
+ */
+export async function runStream(cmd: string, args: string[], opts: StreamOptions = {}): Promise<StreamResult> {
+  const { createReadStream, createWriteStream } = await import("node:fs");
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: [opts.stdinFile ? "pipe" : "ignore", "pipe", "pipe"] });
+    let stderr = "";
+    let stdout = "";
+    let bytes = 0;
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (d) => (stderr += d));
+    let outDone: Promise<void> = Promise.resolve();
+    if (opts.stdoutFile && child.stdout) {
+      const out = createWriteStream(opts.stdoutFile);
+      child.stdout.on("data", (d: Buffer) => (bytes += d.length));
+      child.stdout.pipe(out);
+      outDone = new Promise((r) => out.on("close", () => r()));
+      out.on("error", (e) => reject(e));
+    } else if (child.stdout) {
+      child.stdout.setEncoding("utf8");
+      child.stdout.on("data", (d: string) => {
+        if (stdout.length < 65_536) stdout += d;
+      });
+    }
+    if (opts.stdinFile && child.stdin) {
+      child.stdin.on("error", () => {});
+      createReadStream(opts.stdinFile).on("error", (e) => reject(e)).pipe(child.stdin);
+    }
+    let settled = false;
+    const timer = timeoutMs > 0 ? setTimeout(() => {
+      settled = true;
+      child.kill("SIGKILL");
+      reject(new Error(redactShapes(`Command timed out after ${timeoutMs}ms: ${cmd} ${args.join(" ")}`)));
+    }, timeoutMs) : null;
+    child.on("error", (err) => {
+      if (timer) clearTimeout(timer);
+      if (!settled) (settled = true), reject(err);
+    });
+    child.on("close", (code) => {
+      if (timer) clearTimeout(timer);
+      if (settled) return;
+      settled = true;
+      void outDone.then(() => resolve({ code: code ?? -1, stderr, stdout, bytes }));
+    });
+  });
+}

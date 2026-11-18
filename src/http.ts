@@ -42,7 +42,10 @@ import { detectTransitions, formatNotification, makeNotifier, shouldNotify, togg
 import { StartFailureStreak, isStartFailure, logTail, startFailureAlertText } from "./run-health.js";
 import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, type CanaryResult } from "./canary.js";
 import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-disk.js";
-import { configureHostPool, makeHostPool } from "./host-pool.js";
+import { configureHostPool, makeHostPool, placeRun } from "./host-pool.js";
+import { createBox, claudeRootSource } from "./msb.js";
+import { markClaimed } from "./claims.js";
+import { RESCUE_MAX_MB, capturedTurn, listRescues, pullRescue, pushRescue, readRescue, summarize, sweepRescues } from "./rescue.js";
 import { closeSshMasters } from "./ssh.js";
 import { PRIMARY_HOST_ID } from "./hosts.js";
 import { sweepHosts } from "./host-sweep.js";
@@ -58,7 +61,7 @@ import { buildDigest, type RunDigest } from "./digest.js";
 import { buildOutcome, outcomeOf, resolveFollowedBy, type RunOutcome } from "./outcome.js";
 import { archiveRun, deleteRun, getDigest, getRun, listActivity, listRuns, pruneArchive, ledgerTotals, listLedger, type LedgerFilter } from "./run-archive.js";
 import { autoRetryOf, makeVerifyRetrier, verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
-import { parseTrace } from "./trace.js";
+import { parseTrace, resizeContinueMessage } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
 import { AGENT_KINDS, AGENT_LABELS, isAgentKind, loadAgentPrefs, normalizeAgentPrefs, saveAgentPrefs } from "./agent-kind.js";
 import { assertSelectable, driverFor, listDrivers } from "./drivers/index.js";
@@ -82,7 +85,7 @@ import { seedStarterSkills } from "./starter-skills.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { currentPrincipal, guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { allowShellScripts, securityHeaders } from "./security-headers.js";
-import { gatherMonitor, gatherWatch, readAgentLogFull, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, mirrorInboxMessage, takeDeliveredInbox, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo } from "./msb.js";
+import { gatherMonitor, gatherWatch, readAgentLogFull, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, mirrorInboxMessage, takeDeliveredInbox, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo, pauseRunForResize, type MemoryTier, type DiskTier } from "./msb.js";
 import { isBoxName } from "./sync.js";
 import { shellQuote } from "./exec.js";
 import { touchClaimed, markParked } from "./claims.js";
@@ -642,6 +645,28 @@ const captureBeforeMessage = async (box: string): Promise<void> => {
   // can no longer mislabel the tar; idempotent when the turn is already captured.
   const r = await execInBox(hcfg(box), box, captureCmd());
   if (!/CKPT_(OK|HAVE)/.test(r.stdout)) console.error(`[ckpt] pre-message capture on ${box}: ${r.stdout.trim().slice(-200)}`);
+  noteCaptured(box, r.stdout);
+};
+
+/**
+ * A checkpoint was just written (or confirmed) in the box: keep a copy of it OFF the box
+ * (src/rescue.ts), so the thread survives the box. Fire-and-forget, off every user-facing path;
+ * a copy of the same turn already here costs one file read and no SSH.
+ */
+const noteCaptured = (box: string, stdout: string): void => {
+  const c = capturedTurn(stdout);
+  if (!c) return;
+  void (async () => {
+    const snap = await watchHub.read(box).catch(() => null);
+    const titles = await loadTitles(hcfg(box)).catch(() => ({}) as Record<string, string>);
+    await pullRescue(hcfg(box), box, c.turn, {
+      owner: ownerOf(db, box) ?? null,
+      hostId: hostPool.hostOfBox(box),
+      agent: snap?.agent,
+      task: snap?.task,
+      title: titles[box],
+    });
+  })().catch(() => {});
 };
 verifyRetrier = makeVerifyRetrier({ resume: resumeQuietly, log: (m) => console.error(m) });
 // Workflows ride the same quiet resume lane and the verify command lane (src/workflow-engine.ts).
@@ -1121,6 +1146,7 @@ const captureTurnCheckpoint = (box: string): Promise<void> =>
     try {
       const r = await execInBox(hcfg(box), box, captureCmd());
       if (!/CKPT_(OK|HAVE)/.test(r.stdout)) console.error(`[ckpt] capture on ${box}: ${r.stdout.trim().slice(-200)}`);
+      noteCaptured(box, r.stdout);
     } catch (e) {
       console.error(`[ckpt] capture on ${box} errored: ${(e as Error).message.slice(0, 200)}`);
     }
@@ -3412,7 +3438,7 @@ app.get("/digest.json", async (req: Request, res: Response) => {
  * Redaction: archived text came from the watchHub snapshot, whose reader redacts log/task/question
  * before anything derives from it — rows were redacted at archive time and are served verbatim.
  */
-app.get("/history.json", (req: Request, res: Response) => {
+app.get("/history.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const p = principalOf(res);
   const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
@@ -3433,11 +3459,13 @@ app.get("/history.json", (req: Request, res: Response) => {
     }
     const limit = typeof req.query.limit === "string" ? Number(req.query.limit) : undefined;
     const before = typeof req.query.before === "string" ? Number(req.query.before) : undefined;
+    // A run whose box is gone but whose copy is kept (src/rescue.ts) can be brought back from here.
+    const rescues = new Map((await listRescues(cfg)).map((r) => [r.box, r]));
     res.json({
       runs: listRuns(db, owner, {
         ...(Number.isFinite(limit) ? { limit } : {}),
         ...(Number.isInteger(before) ? { before } : {}),
-      }).map((r) => ({ ...r, outcome: outcomeWithFollow(owner, r.box, r.outcome) })),
+      }).map((r) => ({ ...r, outcome: outcomeWithFollow(owner, r.box, r.outcome), rescue: rescues.get(r.box) ?? null })),
     });
   } catch (e) {
     failWith(res, e);
@@ -3842,6 +3870,92 @@ app.post("/rename.json", async (req: Request, res: Response) => {
 });
 
 // Wake a sleeping sandbox the moment its thread is opened — no need to type first. Idempotent.
+// --- Rescue copies (src/rescue.ts): a thread survives its box -------------------------------------
+// GET: is a copy of this thread kept, and what does it hold? POST restore: a fresh box under the
+// SAME name on whichever host can take it, the copy put back, the claim marked — the thread's URL,
+// transcript, files and agent session are back, and the next message continues the same session.
+app.get("/rescue.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = boxParam(req.query);
+  if (!isBoxName(session)) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  try {
+    ownership.check(session);
+    const m = await readRescue(cfg, session);
+    const present = (await readFleet()).boxes.some((b) => b.name === session);
+    res.json({ rescue: m ? summarize(m) : null, present, maxMb: RESCUE_MAX_MB });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
+const restoring = new Set<string>();
+app.post("/rescue/restore.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = boxParam(req.body);
+  if (!isBoxName(session)) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  try {
+    ownership.check(session);
+    ownership.assertCanRun();
+    const m = await readRescue(cfg, session);
+    if (!m) {
+      res.status(404).json({ error: "no copy of this thread is kept" });
+      return;
+    }
+    if (m.tooBig && !m.bytes) {
+      res.status(409).json({ error: `the last checkpoint was ${Math.round(m.tooBig / 1048576)} MB, over the ${RESCUE_MAX_MB} MB copy limit, so nothing was kept` });
+      return;
+    }
+    if ((m.agent ?? "claude") !== "claude") {
+      res.status(409).json({ error: "only Claude Code threads can be brought back for now" });
+      return;
+    }
+    if ((await readFleet()).boxes.some((b) => b.name === session)) {
+      res.status(409).json({ error: "this machine still exists; open it instead" });
+      return;
+    }
+    if (restoring.has(session)) {
+      res.status(409).json({ error: "this thread is already being brought back" });
+      return;
+    }
+    restoring.add(session);
+    try {
+      const lostAt = Date.now();
+      const t0 = Date.now();
+      const hostId = await placeRun(hostPool, cfg, `restore ${session}`, async (hostCfg, onAcquired) => {
+        // The same rootfs a cold claude run boots from (prepareRunCfg in deps.ts), under the old name.
+        const runCfg: Config = { ...hostCfg, ...claudeRootSource(hostCfg) };
+        await createBox(runCfg, { name: session });
+        onAcquired(session);
+        if (hostCfg.hostId) hostPool.rememberBox(session, hostCfg.hostId);
+        // Claimed BEFORE the copy goes in, in the box and on the host: a Running pool-named box
+        // with neither /.claimed nor /.ready reads as an orphaned warm-up to the pool maintainer
+        // (its name's timestamp is hours old), and the copy takes seconds to arrive.
+        await execInBox(runCfg, session, "touch /.claimed");
+        await markClaimed(runCfg, session);
+        await pushRescue(runCfg, session, m, lostAt);
+        if (m.title) await saveTitle(runCfg, session, m.title).catch(() => {});
+        return hostCfg.hostId;
+      });
+      // The fleet must not serve a stale "gone"/"stopped" memory of this name.
+      readFleet.forget(session);
+      watchHub.drop(session);
+      noteRunning(session);
+      console.error(`[rescue] ${session}: brought back from turn ${m.turn} on ${hostId ?? "the primary host"} in ${Date.now() - t0} ms`);
+      res.json({ ok: true, box: session, turn: m.turn, at: m.at, host: hostId ?? null });
+    } finally {
+      restoring.delete(session);
+    }
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
 app.post("/wake.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = boxParam(req.body);
@@ -3893,15 +4007,37 @@ app.post("/sleep.json", async (req: Request, res: Response) => {
 });
 
 /**
- * Resize a box's memory. Always a reboot — this runtime has no live resize — so the client gates the
- * action on the run being finished, and we drop the watch snapshot for the same reason /wake.json
- * does: the pre-reboot cache must not be served as live. `noteRunning` because `msb modify --restart`
- * brings the box back up.
+ * Resize a box (memory or root disk). Always a reboot — this runtime has no live resize — done as
+ * ONE sequence here rather than three calls from the browser, so a closed tab halfway through can
+ * no longer leave a box resized but never resumed:
+ *   1. a live turn is PAUSED cleanly (pauseRunForResize: SIGTERM, a "paused to add memory" row in
+ *      the log, exit 252) — the old hard restart under a running agent lost its unflushed output
+ *      and the next probe wrote "the sandbox restarted mid-run" over it;
+ *   2. the box is rebooted with the new size, /tmp stashed across it (setBoxMemory);
+ *   3. with `continue`, the same session is resumed with the controller's continuation line
+ *      (resizeContinueMessage), which the thread draws as a lifecycle row, not as the user's words.
+ * The watch snapshot is dropped for the same reason /wake.json does: the pre-reboot cache must not
+ * be served as live. `noteRunning` because `msb modify --restart` brings the box back up.
  */
+async function resizeBox(session: string, what: "memory" | "storage", tier: MemoryTier | DiskTier, cont: boolean): Promise<{ paused: boolean; continued: boolean }> {
+  ownership.assertCanRun(); // resize reboots the box back up — same gate as wake
+  const c = hcfg(session);
+  await hostPool.readyForBox(session, `resize ${session}`);
+  const paused = await withOwner(ownerOf(db, session) ?? null, () => pauseRunForResize(c, session, what, tier));
+  watchHub.drop(session);
+  if (what === "memory") await setBoxMemory(c, session, tier as MemoryTier);
+  else await setBoxDisk(c, session, tier as DiskTier);
+  noteRunning(session);
+  watchHub.drop(session);
+  if (!cont) return { paused, continued: false };
+  await resumeQuietly(session, resizeContinueMessage(what, tier));
+  return { paused, continued: true };
+}
+
 app.post("/memory.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = boxParam(req.body);
-  const { memory } = (req.body ?? {}) as { memory?: string };
+  const { memory, continue: cont } = (req.body ?? {}) as { memory?: string; continue?: boolean };
   if (!session || !/^[\w.-]+$/.test(session)) {
     res.status(400).json({ error: "session is required" });
     return;
@@ -3911,25 +4047,22 @@ app.post("/memory.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    ownership.assertCanRun(); // resize reboots the box back up — same gate as wake
-    await setBoxMemory(hcfg(session), session, memory);
-    noteRunning(session);
-    watchHub.drop(session);
-    res.json({ ok: true, memory });
+    const r = await resizeBox(session, "memory", memory, cont === true);
+    res.json({ ok: true, memory, ...r });
   } catch (e) {
     failWith(res, e);
   }
 });
 
 /**
- * Grow a box's root disk. Same reboot-and-gate story as /memory.json, with one extra constraint:
- * the runtime cannot SHRINK a managed disk, so a tier below the current size is refused here rather
- * than left to fail confusingly inside msb.
+ * Grow a box's root disk. Same pause-reboot-resume sequence as /memory.json, with one extra
+ * constraint: the runtime cannot SHRINK a managed disk, so a tier below the current size is refused
+ * here rather than left to fail confusingly inside msb.
  */
 app.post("/disk.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = boxParam(req.body);
-  const { disk } = (req.body ?? {}) as { disk?: string };
+  const { disk, continue: cont } = (req.body ?? {}) as { disk?: string; continue?: boolean };
   if (!session || !/^[\w.-]+$/.test(session)) {
     res.status(400).json({ error: "session is required" });
     return;
@@ -3939,11 +4072,8 @@ app.post("/disk.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    ownership.assertCanRun(); // resize reboots the box back up — same gate as wake
-    await setBoxDisk(hcfg(session), session, disk);
-    noteRunning(session);
-    watchHub.drop(session);
-    res.json({ ok: true, disk });
+    const r = await resizeBox(session, "storage", disk, cont === true);
+    res.json({ ok: true, disk, ...r });
   } catch (e) {
     failWith(res, e);
   }
@@ -5490,6 +5620,10 @@ app.listen(cfg.httpPort, cfg.httpHost, () => {
   // Keep it topped up so a warm box is ALWAYS ready, even through a long lull with no delegations
   // (an unclaimed box idle/max-duration reaped can't trigger its own claim-based reseed).
   startPoolMaintainer(cfg, () => hostPool.warmCfgs());
+  // Rescue copies older than their TTL go (src/rescue.ts); once now, then every six hours.
+  const sweepRescueCopies = () => void sweepRescues(cfg).then((n) => n && console.error(`[rescue] swept ${n} old ${n === 1 ? "copy" : "copies"}`)).catch(() => {});
+  sweepRescueCopies();
+  setInterval(sweepRescueCopies, 6 * 3600_000).unref();
   // Triggers: fire due schedules (the webhook and finish-edge sources call the dispatcher directly).
   dispatcher.start();
   repoWatcher.start();

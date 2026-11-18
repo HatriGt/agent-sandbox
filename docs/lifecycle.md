@@ -48,6 +48,40 @@ Think about the machine from the operator's side. After a task is delegated ther
 Warm pool: `MSB_POOL_IDLE_TIMEOUT` should be long (`6h`+) because an unclaimed warm box is the whole
 point of the pool; the refill interval keeps one ready even after a max-duration reap.
 
+## A thread survives its machine: reaper rules and rescue copies
+
+A live thread was lost once (2026-11-18, `pool-1794970115293-5wwb90`): the Freestyle host resumed
+badly, the pool sweep's ONE probe into the claimed box failed, and the maintainer force-removed it
+mid-conversation. Three layers now stand between a box and that outcome.
+
+**1. The reaper never acts on one missed probe.** `listWarmBoxes` (`src/msb.ts`) reads the host-side
+markers (`claims/`, `keep/`, `parked/`) first; a box that carries a run is not probed at all. When a
+marker read fails the markers are *unknown* and nothing is reaped. An unclaimed box that misses a
+probe is probed again after a short pause, and only reaped when it misses twice, the markers are
+known, and the host has been awake for more than `REAP_GRACE_AFTER_WAKE_MS` (3 min, from
+`HostSleep.wokeAt()`). The verdict is a pure function, `unansweringBoxVerdict`, so the rule is
+tested.
+
+**2. A copy of every turn leaves the box.** At the end of each turn (and before each message) the
+in-box checkpoint (`src/checkpoint.ts`: `/workspace` + `/root/.claude`, heavy dirs excluded) is
+gzipped out over `msb exec` to `<dataDir>/rescue/<box>/t<n>.tar.gz` with a `meta.json` (owner,
+host, agent, task, title). One copy per box, newest turn wins, same turn never pulled twice. A
+checkpoint over `RESCUE_MAX_MB` (default 512) is skipped and the older copy kept, with `tooBig`
+recorded so the UI can say so. Copies die with a deliberate teardown and are swept after
+`RESCUE_TTL_DAYS` (default 14), at boot and every six hours. (`src/rescue.ts`)
+
+**3. A lost thread can be brought back.** `GET /rescue.json?box=` says whether a copy is kept and
+whether the machine is still in the fleet; `POST /rescue/restore.json {box}` boots a fresh box
+under the SAME name on whichever host can take it (`placeRun`), claims it (`/.claimed` in-box and
+the host marker, so the orphan reaper does not eat it while the copy lands), streams the tar back
+in, seams `.agent.log`, and the next `/resume.json` continues the same Claude session. The
+dashboard no longer bounces to the hub when a box is missing: it asks `/rescue.json` first and, if
+a copy exists, keeps the URL and shows the lost-thread page with one action, *Bring it back*.
+History rows carry the same summary and offer the action too.
+
+What a restore does not bring back: installed dependencies (excluded from the checkpoint; the agent
+reinstalls), and anything written after the last turn ended.
+
 ## A trap worth knowing: `msb exec` wakes a stopped box
 
 Measured: `msb exec <stopped-box> -- cmd` boots the VM, runs the command, and stops it again (metrics

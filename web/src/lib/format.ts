@@ -93,10 +93,13 @@ export function stateNoun(s: RunState): string {
  * host restart) and the status probe healed the stale run marker — the session is intact and resumable.
  * 137 is 128+SIGKILL: the guest kernel OOM-killed the agent, which is a different problem with a
  * different remedy (raise the machine's memory), so it gets its own word rather than "interrupted".
+ * 252 is a turn the controller paused on purpose to resize the machine and then resumed: not a
+ * failure at all.
  */
 export function doneLabel(exitCode?: number): string {
   if (exitCode === 137) return "out of memory";
   if (exitCode === 254) return "interrupted";
+  if (exitCode === 252) return "paused";
   return exitCode === 0 ? "done" : `exit ${exitCode ?? "?"}`;
 }
 

@@ -21,7 +21,7 @@ export function nextSteps(o: RunOutcome | null, exitCode: number | null): NextSt
   const checksFailed = (t.tests?.failed ?? 0) > 0 || t.verified?.pass === false;
   const checked = !!t.tests || !!t.verified;
   // The sandbox died or was stopped: the pill already says what to do about it.
-  const infra = exitCode === 137 || exitCode === 250 || exitCode === 253 || exitCode === 254;
+  const infra = exitCode === 137 || exitCode === 250 || exitCode === 252 || exitCode === 253 || exitCode === 254;
   if (infra) return [];
   if (checksFailed) {
     const n = t.tests?.failed ?? 0;

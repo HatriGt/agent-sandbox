@@ -68,6 +68,8 @@ export interface HostRuntime {
   dormantSince?: number;
   /** A pause is being asked for: dormant already, so no loop opens a session that would undo it. */
   pausing?: boolean;
+  /** When the provider last reported the VM running after a start (ms): the reaper's grace clock. */
+  lastStartAt?: number;
   /** Boots in flight (picked, not yet in `msb ls`). */
   reserved: number;
   /** Awake milliseconds this billing month (metered hosts), mirrored from the table. */
@@ -427,6 +429,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     // A pause that did not land leaves a running VM: the gate opens again, or the host would read
     // awake and answer nothing.
     if (what === "pause" && !dormant(h)) gateSsh(h.cfg.vpsSsh, false);
+    if (what === "start" && r.state === "running") h.lastStartAt = now();
     log(`[hosts] ${what} ${h.spec.id}: ${r.state}${r.detail ? ` (${r.detail})` : ""}`);
   };
 
@@ -462,6 +465,9 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     noteFleet: (boxes) => h.sleep.noteFleet(boxes),
     asleep: () => dormant(h),
     state: () => ({ ...h.sleep.state(), asleep: dormant(h) }),
+    // The later of the clock's wake and the provider's "running": a VM started through the API
+    // is up only when the provider says so, minutes after the clock woke.
+    wokeAt: () => Math.max(h.sleep.wokeAt(), h.lastStartAt ?? 0),
   });
   registerSleepResolver((cfg) => sleepFacade((cfg.hostId && runtimes.get(cfg.hostId)) || primary()));
 
