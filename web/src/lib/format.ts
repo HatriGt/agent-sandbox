@@ -12,9 +12,13 @@ export function isUp(v: BoxView): boolean {
   return /^running$/i.test(v.boxStatus ?? "");
 }
 
-/** Idle-stopped but intact: rootfs and Claude session survive; `resume` restarts it. */
+/**
+ * Idle-stopped but intact: rootfs and Claude session survive; `resume` restarts it. An AWAY thread
+ * (its box gone, a copy kept) behaves the same way to the reader: nothing to stream, a wake or a
+ * reply brings a machine back, the transcript is served from the controller meanwhile.
+ */
 export function isSleeping(v: BoxView): boolean {
-  return /^stopped$/i.test(v.boxStatus ?? "");
+  return /^(stopped|absent)$/i.test(v.boxStatus ?? "");
 }
 
 /**

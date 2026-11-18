@@ -14,7 +14,10 @@ import { execSync as execSyncX } from "node:child_process";
 //             continuation row, the agent carrying on) · lost (the machine is gone, a rescue copy
 //             is kept: LostThread; --interact=bringback presses the button, /rescue/restore.json
 //             answers after --restore-ms, default 4000; --uncertain: the box's host is asleep, the
-//             page says "out of sight" and the restore answers "found")
+//             page says "out of sight" and the restore answers "found") · away (the box is gone
+//             but the THREAD is kept, src/threads.ts: listed as Away, the transcript is served
+//             from the controller's copy, opening it brings a machine back via /wake.json, which
+//             answers after --restore-ms)
 // interact  : file · review · scrolled · slash · mention · model · multiline · workspace · ws-tour (--slow-files for the skeleton) · minimap · question-kbd · sidechat
 //             bump (press "Add memory & continue" on the pressure scenario; /memory.json answers after --resize-ms, default 2500)
 // --stream  : serve /watch.sse from a local server that drips the final answer in over ~6s
@@ -252,7 +255,7 @@ const boxFor = (s) => {
   const common = {
     name: NAME,
     role: "session",
-    boxStatus: s === "sleeping" ? "stopped" : "running",
+    boxStatus: s === "sleeping" ? "stopped" : s === "away" && !restored ? "absent" : "running",
     task: s === "idle" ? undefined : TASK,
     uptime: "14m",
     cpu: "12%",
@@ -271,6 +274,8 @@ const boxFor = (s) => {
       return { ...common, runState: "done", exitCode: 0 };
     case "sleeping":
       return { ...common, runState: "done", exitCode: 0, asleepSec: 3600 * 5 };
+    case "away":
+      return restored ? { ...common, runState: "done", exitCode: 0, kept: true } : { ...common, runState: "done", exitCode: 0, kept: true, absent: true, uptime: undefined, cpu: undefined, mem: undefined, memUsage: undefined, disk: undefined };
     case "booting":
       // A just-claimed box: up, but the run sentinel is not written yet → Thread's "starting" state.
       return { ...common, role: "pool-claimed", runState: "idle", uptime: "8s", lastOutputAt: undefined };
@@ -360,7 +365,7 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAE0lEQVR
 
 /* ───────────────────────────── SSE ───────────────────────────── */
 const box = boxFor(scenario);
-let fullLog = scenario === "booting" || scenario === "idle" ? "" : log(scenario === "sleeping" ? "done" : scenario === "pressure" ? "running" : scenario);
+let fullLog = scenario === "booting" || scenario === "idle" ? "" : log(scenario === "sleeping" || scenario === "away" ? "done" : scenario === "pressure" ? "running" : scenario);
 // --cut=<text>: stop the log just before the first line containing <text> (a run caught mid-work:
 // mid-thought with --cut=⟦/think⟧, mid-command with --cut=⟦#b1⟧).
 const cut = flag("cut", null);
@@ -492,9 +497,9 @@ await page.route("**/*", async (route) => {
     case "/triggers/for-box.json":
       return json(route, { items: [] });
     case "/fleet.json":
-      return json(route, { boxes: scenario === "lost" && !restored ? [] : [box], lifecycle: LIFECYCLE, at: Date.now() });
+      return json(route, { boxes: scenario === "lost" && !restored ? [] : [scenario === "away" ? boxFor(scenario) : box], lifecycle: LIFECYCLE, at: Date.now() });
     case "/monitor.json":
-      return json(route, { boxes: scenario === "lost" && !restored ? [] : [box] });
+      return json(route, { boxes: scenario === "lost" && !restored ? [] : [scenario === "away" ? boxFor(scenario) : box] });
     case "/rescue.json":
       return json(route, {
         rescue: { box: NAME, turn: 4, at: Date.now() - 23 * 60_000, bytes: 18.4 * 1048576, agent: "claude", task: TASK, title: "Sliding-window rate limiter" },
@@ -509,8 +514,11 @@ await page.route("**/*", async (route) => {
       if (flags.includes("--uncertain")) return json(route, { ok: true, box: NAME, found: true, host: "freestyle-a" });
       return json(route, { ok: true, box: NAME, turn: 4, at: Date.now(), host: "freestyle-a" });
     }
-    case "/watch.json":
-      return json(route, { ...meta, log: fullLog });
+    case "/watch.json": {
+      // The away thread: the controller serves the stored transcript with boxStatus "absent" until a machine is back.
+      const { role: _r, ...m } = scenario === "away" ? boxFor(scenario) : box;
+      return json(route, { ...m, log: fullLog });
+    }
     case "/watch.sse": {
       if (streamer) return route.continue({ url: `http://127.0.0.1:${streamPort}/watch.sse` });
       const body = "retry: 3000\n\n" + frame("snapshot", { meta, log: fullLog, from: 0 }, fullLog.length) + (RUNNING && box.runState !== "running" && box.runState !== "waiting" ? frame("done", { meta }) : "");
@@ -592,7 +600,14 @@ await page.route("**/*", async (route) => {
       }
       return json(route, { ok: true });
     case "/title.json":
+      return json(route, { ok: true });
     case "/wake.json":
+      if (scenario === "away" && !restored) {
+        // The controller brings a machine back from the kept copy, then answers.
+        await new Promise((r) => setTimeout(r, Number((flags.find((f) => f.startsWith("--restore-ms=")) ?? "--restore-ms=4000").split("=")[1])));
+        restored = true;
+        return json(route, { ok: true, broughtBack: true, found: false, host: "freestyle-a" });
+      }
       return json(route, { ok: true });
     case "/me.json":
       return json(route, { kind: "user", mode: "saas", id: "u_1", login: "ak", name: "Arun K", role: "admin", via: "session", email: "ak@example.com", avatarUrl: null, github: true, hasPassword: true, maxBoxes: 8, plan: "trial", trialEndsAt: new Date(Date.now() + 9 * 86400e3).toISOString(), daysLeft: 9, expired: false, billingUrl: null });

@@ -100,6 +100,13 @@ export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>,
   const seen = new Set<string>();
   for (const b of latest) {
     seen.add(b.name);
+    // An away thread (src/threads.ts): the box is gone and the thread table speaks for it. Nothing
+    // to remember about a box that does not exist.
+    if (b.absent) {
+      memory.delete(b.name);
+      out.push(b);
+      continue;
+    }
     if (isRunning(b.boxStatus)) {
       memory.set(b.name, b);
       out.push(b);

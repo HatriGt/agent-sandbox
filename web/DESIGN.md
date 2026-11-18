@@ -1759,3 +1759,21 @@ attachment model (`lib/attachments.ts`) and one set of chips (`composer/Attachme
 Verified in both schemes with `node .shots/thread-fixture.mjs done <out> --interact=attach
 [--dark]` (veil, chips, the pasted preview, the echo and the landed line with cards) and
 `node .shots/hub-attach-shot.mjs [--dark] [--w=390]` (Hub chips, the + menu, the PDF preview).
+
+## Round: a thread outlives its machine, the "Away" state (2026-11-18)
+
+- **One more word in the state vocabulary: Away.** `stateWord` (MachineList) gains an `absent`
+  argument: a thread whose machine is gone but whose copy is kept reads **Away** in the sleep
+  tone (violet dot, same as Asleep) in the sidebar, the Hub and the header pill. It is not a
+  warning colour: nothing is wrong with the thread, only its holder is missing. Tooltip:
+  "Machine gone, thread kept: opening brings it back".
+- **Away behaves like Asleep to the reader.** `isSleeping`/`displayState` treat `absent` as
+  sleeping: the transcript renders from the controller's copy at once (no empty page, no
+  LostThread), the composer says type ahead, and opening the thread starts the bring-back the way
+  a wake would. The WakingCard takes `fromCopy`: label "Bringing the machine back", stages
+  finding a host → starting a machine → putting the copy back → reconnecting the transcript, with
+  the slow-host patience (150 s) since a fresh machine plus a copy takes longer than a `msb start`.
+- **LostThread stays** for the case with no row (a copy exists but the thread was never listed,
+  e.g. from before the table) and for the explicit "Check and bring it back" on an uncertain host.
+- Fixture: `node .shots/thread-fixture.mjs away <out> [--dark] [--restore-ms=N]`; references
+  `.shots/thread-away-1440.png`, `-dark-dark-1440.png`, `-back-1440.png`.

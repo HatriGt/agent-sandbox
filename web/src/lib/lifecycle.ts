@@ -64,7 +64,7 @@ export function fmtDuration(sec: number): string {
 export type DisplayState = RunState | "sleeping";
 
 export function displayState(b: Pick<BoxView, "boxStatus" | "runState">): DisplayState {
-  return /^stopped$/i.test(b.boxStatus) ? "sleeping" : b.runState;
+  return /^(stopped|absent)$/i.test(b.boxStatus) ? "sleeping" : b.runState;
 }
 
 export interface Deadline {

@@ -45,7 +45,8 @@ import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-dis
 import { configureHostPool, makeHostPool, placeRun } from "./host-pool.js";
 import { createBox, claudeRootSource } from "./msb.js";
 import { markClaimed } from "./claims.js";
-import { RESCUE_MAX_MB, capturedTurn, listRescues, pullRescue, pushRescue, readRescue, summarize, sweepRescues } from "./rescue.js";
+import { RESCUE_MAX_MB, capturedTurn, listRescues, pullRescue, pushRescue, readRescue, rescueBoxes, summarize, sweepRescues } from "./rescue.js";
+import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadViews, upsertThread } from "./threads.js";
 import { closeSshMasters } from "./ssh.js";
 import { PRIMARY_HOST_ID, boxHostOf } from "./hosts.js";
 import { sweepHosts } from "./host-sweep.js";
@@ -473,13 +474,33 @@ const withMemoryNew = (snap: WatchSnapshot, box: string): WatchSnapshot => {
 // What each dashboard launch is doing, from the POST to the agent's first words (src/launch-progress.ts).
 const launches = new LaunchRegistry();
 
+/**
+ * A box that is asleep or gone cannot be asked for its transcript: the controller's copy
+ * (src/threads.ts) answers instead, with the thread row's state, so the page reads the same.
+ */
+const withStoredTranscript = async (s: string, snap: WatchSnapshot): Promise<WatchSnapshot> => {
+  if (snap.boxStatus === "running") return snap;
+  const text = await readTranscript(cfg, s).catch(() => null);
+  if (text === null || text.length <= snap.log.length) return snap;
+  const row = getThread(db, s);
+  return {
+    ...snap,
+    log: redactor.redact(text),
+    logTruncated: false,
+    ...(row ? { runState: row.run_state, exitCode: row.exit_code ?? undefined, question: row.question ?? undefined, task: snap.task ?? row.task ?? undefined, agent: snap.agent ?? row.agent ?? undefined } : {}),
+    ...(snap.boxStatus === "missing" && row ? { boxStatus: "absent" } : {}),
+  };
+};
 const watchHub = new WatchHub({
-  read: async (s) => withMemoryNew(redactSnap(await gatherWatch(hcfg(s), s, undefined, { metrics: false })), s),
+  read: async (s) => withMemoryNew(await withStoredTranscript(s, redactSnap(await gatherWatch(hcfg(s), s, undefined, { metrics: false }))), s),
   // A thread open on a box whose host is asleep or paused is served its last snapshot: an SSH would
   // hang on the proxy, and on a Freestyle VM it would start a resume nobody asked for.
   skip: (s) => hostPool.dormant(hostPool.hostOfBox(s) ?? PRIMARY_HOST_ID),
   // The live thread's first frame of a long run: the whole log, not the tail window (readFull).
-  readLog: async (s) => redactor.redact(await readAgentLogFull(hcfg(s), s)),
+  readLog: async (s) => {
+    const live = await readAgentLogFull(hcfg(s), s).catch(() => "");
+    return redactor.redact(live || ((await readTranscript(cfg, s).catch(() => null)) ?? ""));
+  },
 });
 // The dashboard's fleet read: gatherMonitor behind a short shared cache, plus lifecycle config and
 // sleeping (Stopped-but-resumable) boxes merged from memory.
@@ -611,6 +632,13 @@ const resumeQuietly = (session: string, message: string, extraSecrets?: Record<s
     // The box's host first: a reply to a box whose VM was paused meanwhile (the host fell asleep
     // behind the question) starts the VM and waits for it, instead of dying on the first SSH.
     await hostPool.readyForBox(session, `message ${session}`);
+    // The box is a holder; the thread is the thing. A reply to a thread whose box is gone (reaped,
+    // crashed, removed by hand) brings the machine back from the kept copy first, then continues
+    // the same agent session: nobody has to know a box died.
+    if ((await startBoxIfStopped(hcfg(session), session)) === "absent") {
+      if (!(await readRescue(cfg, session))) throw new Error("this machine is gone and no copy of the thread is kept");
+      await bringBack(session);
+    }
     // Capture fallback: a run that finished before any fleet sweep observed it running produces no
     // done EDGE, so the sweep never checkpointed the turn. Capture here, right before the new
     // message changes anything — heavy dirs are excluded, so this is ~1 s on the send path at worst.
@@ -1220,6 +1248,50 @@ const harnessLineOf = (box: string): { harness: { id: string; name: string; line
 };
 /** Hosts whose durable run memory has been read since this controller started (see the store below). */
 const runMemoryRead = new Set<string>();
+// Thread rows (src/threads.ts) are written only when a box's description changed since the last sweep.
+const threadSeen = new Map<string, { fp: string; runState: string }>();
+const recordThreads = (boxes: BoxView[], kept: Set<string>, titles: Record<string, string>, now: number): void => {
+  const listed = new Set<string>();
+  for (const b of boxes) {
+    if (b.role === "pool-free") continue;
+    listed.add(b.name);
+    const running = /^running$/i.test(b.boxStatus);
+    const fp = JSON.stringify([b.role, b.runState, b.exitCode, b.task, titles[b.name] ?? b.title, b.agent, b.host, b.question, b.repos, kept.has(b.name), running]);
+    const prev = threadSeen.get(b.name);
+    if (prev?.fp === fp) continue;
+    threadSeen.set(b.name, { fp, runState: b.runState });
+    try {
+      const u = threadFromBox(b, ownerOf(db, b.name) ?? null, { title: titles[b.name], kept: kept.has(b.name) }, now);
+      // A turn just ended (done, failed, or paused on a question): stamp it.
+      if (prev && prev.runState !== b.runState && (b.runState === "done" || b.runState === "waiting")) u.lastTurnAt = now;
+      upsertThread(db, u, now, { revive: true });
+    } catch (e) {
+      console.error(`[threads] ${b.name}: ${String((e as Error).message ?? e).slice(0, 160)}`);
+    }
+  }
+  for (const k of [...threadSeen.keys()]) if (!listed.has(k)) threadSeen.delete(k);
+};
+// The transcript's copy on the controller: one sync per box at a time, errors logged sparingly.
+const transcriptSyncs = new Map<string, Promise<void>>();
+const transcriptSyncErrors = new Map<string, number>();
+const syncThreadTranscript = (box: string): Promise<void> => {
+  const running = transcriptSyncs.get(box);
+  if (running) return running;
+  const p = syncTranscript(cfg, box, async (sh) => (await execInBox(hcfg(box), box, sh, { timeoutMs: 60_000 })).stdout)
+    .then(() => {
+      transcriptSyncErrors.delete(box);
+    })
+    .catch((e) => {
+      const n = (transcriptSyncErrors.get(box) ?? 0) + 1;
+      transcriptSyncErrors.set(box, n);
+      if (n === 1 || n % 20 === 0) console.error(`[transcript] ${box}: sync failed (${n}): ${String((e as Error).message ?? e).slice(0, 160)}`);
+    })
+    .finally(() => {
+      if (transcriptSyncs.get(box) === p) transcriptSyncs.delete(box);
+    });
+  transcriptSyncs.set(box, p);
+  return p;
+};
 const readFleet = makeFleetReader(
   cfg,
   async () => {
@@ -1329,6 +1401,8 @@ const readFleet = makeFleetReader(
         // restore point for whatever the operator sends next. Online in-box tar (~1 s, no VM stop)
         // behind the per-box lock so a fast follow-up queues instead of racing the capture.
         if (ev.kind === "done" || ev.kind === "waiting") void withFinishing(ev.box, () => captureTurnCheckpoint(ev.box));
+        // The transcript's copy on the controller catches up the moment a turn ends (src/threads.ts).
+        if (ev.kind === "done" || ev.kind === "waiting" || ev.kind === "failed") void syncThreadTranscript(ev.box);
       }
       prevRunViews = nextRunViews;
     }
@@ -1339,9 +1413,19 @@ const readFleet = makeFleetReader(
     sweepAttempts();
     // Memory v2: harvest live runs so a mid-run lesson reaches the thread now, not at the finish.
     void memoryTick(boxes);
+    // Threads (src/threads.ts): every session box the hosts listed is written to the thread table,
+    // its transcript is pulled up to date while it runs, and the threads whose box the hosts did
+    // NOT list are added from the table: asleep when their host did not answer, away when the box
+    // is really gone and a copy is kept. A box can vanish; a thread cannot.
+    recordThreads(boxes, kept, titles, sweepAt);
+    for (const b of boxes) if (/^running$/i.test(b.boxStatus) && b.role !== "pool-free") void syncThreadTranscript(b.name);
+    const copies = await rescueBoxes(cfg).catch(() => new Set<string>());
+    const present = new Set(boxes.map((b) => b.name));
+    const away = threadViews(listThreads(db), present, new Set(stale), (id) => copies.has(id));
     // A Stopped box nobody remembers is dead capacity only when nobody holds it (fleet.ts mergeWithMemory).
-    const held = (name: string): boolean => kept.has(name) || claims.has(name) || ownerOf(db, name) != null;
-    const views = boxes.map((b) => ({
+    // A thread row holds its box too: a box can vanish, a thread cannot.
+    const held = (name: string): boolean => kept.has(name) || claims.has(name) || ownerOf(db, name) != null || getThread(db, name) != null;
+    const views = [...boxes, ...away].map((b) => ({
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),
       ...harnessLineOf(b.name),
@@ -1411,6 +1495,23 @@ const readFleet = makeFleetReader(
 // Background sweep: finish edges, notifications and the memory harvest ride on fleet reads, so a
 // run nobody is watching still gets its history, push and memory.
 setInterval(() => void readFleet().catch(() => {}), 15_000).unref();
+// Threads from before the table existed: every kept copy and every remembered run gets a row, so
+// the list is complete from the first sweep after this deploy.
+void (async () => {
+  try {
+    for (const name of await rescueBoxes(cfg)) {
+      const m = await readRescue(cfg, name);
+      if (!m || getThread(db, name)) continue;
+      upsertThread(db, { id: name, owner: m.owner, task: m.task ?? null, title: m.title ?? null, agent: m.agent ?? null, host: m.hostId ?? null, boxStatus: "unknown" }, m.at);
+    }
+    for (const [name, r] of await loadRunMetasLocal(cfg)) {
+      if (getThread(db, name) || r.role === "pool-free") continue;
+      upsertThread(db, { id: name, owner: ownerOf(db, name) ?? null, task: r.task ?? null, host: r.host ?? null, role: r.role === "pool-claimed" ? "pool-claimed" : "session", runState: r.runState, exitCode: r.exitCode ?? null, question: r.question ?? null, repos: r.repos ?? null, boxStatus: "unknown" });
+    }
+  } catch (e) {
+    console.error(`[threads] backfill: ${String((e as Error).message ?? e).slice(0, 200)}`);
+  }
+})();
 
 // Repositories reachable through the connected accounts (picker, inference, attach).
 const listRepos = makeRepoLister(cfg, fetchGithubRepos);
@@ -3912,7 +4013,7 @@ app.get("/rescue.json", async (req: Request, res: Response) => {
   try {
     ownership.check(session);
     const m = await readRescue(cfg, session);
-    const present = (await readFleet()).boxes.some((b) => b.name === session);
+    const present = (await readFleet()).boxes.some((b) => b.name === session && !b.absent);
     // Not listed is not gone: the box's host may be asleep or unreachable, in which case the fleet
     // is going by memory. The client words the page accordingly and the restore checks the host first.
     const lastHost = hostPool.hostOfBox(session) ?? boxHostOf(db, session) ?? null;
@@ -3925,7 +4026,90 @@ app.get("/rescue.json", async (req: Request, res: Response) => {
   }
 });
 
-const restoring = new Set<string>();
+// --- Bring a thread's machine back (src/threads.ts + src/rescue.ts) --------------------------------
+// The one choke point behind the restore route, /wake.json and every resume lane: the host the box
+// was last seen on is asked first (woken if need be), nothing is created or wiped on a guess, and
+// concurrent callers for the same thread share one attempt.
+type BringBack = { ok: true; box: string; host: string | null; found?: boolean; inBox?: boolean; turn?: number; at?: number };
+const bringingBack = new Map<string, Promise<BringBack>>();
+const bringBack = (session: string): Promise<BringBack> => {
+  const running = bringingBack.get(session);
+  if (running) return running;
+  const p = bringBackInner(session).finally(() => {
+    if (bringingBack.get(session) === p) bringingBack.delete(session);
+  });
+  bringingBack.set(session, p);
+  return p;
+};
+const bringBackInner = async (session: string): Promise<BringBack> => {
+  const m = await readRescue(cfg, session);
+  if (!m) throw new Error("no copy of this thread is kept, so its machine cannot be brought back");
+  if (m.tooBig && !m.bytes) throw new Error(`the last checkpoint was ${Math.round(m.tooBig / 1048576)} MB, over the ${RESCUE_MAX_MB} MB copy limit, so nothing was kept`);
+  if ((m.agent ?? "claude") !== "claude") throw new Error("only Claude Code threads can be brought back for now");
+  const lostAt = Date.now();
+  const t0 = Date.now();
+  // The fleet must not serve a stale "gone"/"stopped" memory of this name once it is back.
+  const back = () => {
+    readFleet.forget(session);
+    watchHub.drop(session);
+    noteRunning(session);
+  };
+  // The fleet not listing a box is not proof it is gone: its host may have been asleep or
+  // unreachable when the fleet last looked. (2026-11-18: a deploy restarted the controller while
+  // the Freestyle tunnel was down; a pinned thread read as lost for hours while its machine sat
+  // untouched, and the restore of that day wiped it before the copy could land.) So the host the
+  // box was last seen on is asked directly, woken if need be, before anything is created or wiped.
+  const lastHost = hostPool.hostOfBox(session) ?? boxHostOf(db, session);
+  if (lastHost) {
+    hostPool.rememberBox(session, lastHost);
+    const hostCfg = await hostPool.readyForBox(session, `restore ${session}`).catch((e) => {
+      console.error(`[rescue] ${session}: host ${lastHost} not ready: ${String((e as Error).message ?? e).slice(0, 200)}`);
+      return null;
+    });
+    const outcome = hostCfg ? await startBoxIfStopped(hostCfg, session) : "absent";
+    if (hostCfg && outcome === "running") {
+      // A probe that fails is NOT an empty transcript: nothing may be wiped on a guess.
+      const probe = await execInBox(hostCfg, session, "wc -c < /workspace/.agent.log 2>/dev/null || echo 0").catch((e) => {
+        throw new Error(`the machine is on ${lastHost} but did not answer (${String((e as Error).message ?? e).slice(0, 160)}); nothing was changed, try again`);
+      });
+      const logBytes = Number(probe.stdout.trim().split("\n").pop()) || 0;
+      await markClaimed(hostCfg, session).catch(() => {});
+      if (logBytes > 0) {
+        // Out of sight, not gone: nothing is restored. The next sweep lists it.
+        back();
+        console.error(`[rescue] ${session}: found intact on ${lastHost} (${logBytes} bytes of transcript), nothing restored`);
+        return { ok: true, box: session, found: true, host: lastHost };
+      }
+      // The machine is there but empty (a restore that failed half-way): the copy goes into it.
+      await execInBox(hostCfg, session, "touch /.claimed");
+      await pushRescue(hostCfg, session, m, lostAt);
+      if (m.title) await saveTitle(hostCfg, session, m.title).catch(() => {});
+      back();
+      console.error(`[rescue] ${session}: machine found empty on ${lastHost}, copy of turn ${m.turn} put back in ${Date.now() - t0} ms`);
+      return { ok: true, box: session, turn: m.turn, at: m.at, host: lastHost, inBox: true };
+    }
+    if (outcome === "failed") throw new Error(`the machine is still on ${lastHost} but will not start; try again in a minute`);
+  }
+  const hostId = await placeRun(hostPool, cfg, `restore ${session}`, async (hostCfg, onAcquired) => {
+    // The same rootfs a cold claude run boots from (prepareRunCfg in deps.ts), under the old name.
+    const runCfg: Config = { ...hostCfg, ...claudeRootSource(hostCfg) };
+    await createBox(runCfg, { name: session });
+    onAcquired(session);
+    if (hostCfg.hostId) hostPool.rememberBox(session, hostCfg.hostId);
+    // Claimed BEFORE the copy goes in, in the box and on the host: a Running pool-named box
+    // with neither /.claimed nor /.ready reads as an orphaned warm-up to the pool maintainer
+    // (its name's timestamp is hours old), and the copy takes seconds to arrive.
+    await execInBox(runCfg, session, "touch /.claimed");
+    await markClaimed(runCfg, session);
+    await pushRescue(runCfg, session, m, lostAt);
+    if (m.title) await saveTitle(runCfg, session, m.title).catch(() => {});
+    return hostCfg.hostId;
+  });
+  back();
+  console.error(`[rescue] ${session}: brought back from turn ${m.turn} on ${hostId ?? "the primary host"} in ${Date.now() - t0} ms`);
+  return { ok: true, box: session, turn: m.turn, at: m.at, host: hostId ?? null };
+};
+
 app.post("/rescue/restore.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = boxParam(req.body);
@@ -3936,98 +4120,15 @@ app.post("/rescue/restore.json", async (req: Request, res: Response) => {
   try {
     ownership.check(session);
     ownership.assertCanRun();
-    const m = await readRescue(cfg, session);
-    if (!m) {
+    if (!(await readRescue(cfg, session))) {
       res.status(404).json({ error: "no copy of this thread is kept" });
       return;
     }
-    if (m.tooBig && !m.bytes) {
-      res.status(409).json({ error: `the last checkpoint was ${Math.round(m.tooBig / 1048576)} MB, over the ${RESCUE_MAX_MB} MB copy limit, so nothing was kept` });
-      return;
-    }
-    if ((m.agent ?? "claude") !== "claude") {
-      res.status(409).json({ error: "only Claude Code threads can be brought back for now" });
-      return;
-    }
-    if ((await readFleet()).boxes.some((b) => b.name === session)) {
+    if ((await readFleet()).boxes.some((b) => b.name === session && !b.absent)) {
       res.status(409).json({ error: "this machine still exists; open it instead" });
       return;
     }
-    if (restoring.has(session)) {
-      res.status(409).json({ error: "this thread is already being brought back" });
-      return;
-    }
-    restoring.add(session);
-    try {
-      const lostAt = Date.now();
-      const t0 = Date.now();
-      // The fleet not listing a box is not proof it is gone: its host may have been asleep or
-      // unreachable when the fleet last looked. (2026-11-18: a deploy restarted the controller while
-      // the Freestyle tunnel was down; a pinned thread read as lost for hours while its machine sat
-      // untouched, and the restore of that day wiped it before the copy could land.) So the host the
-      // box was last seen on is asked directly, woken if need be, before anything is created or wiped.
-      const lastHost = hostPool.hostOfBox(session) ?? boxHostOf(db, session);
-      if (lastHost) {
-        hostPool.rememberBox(session, lastHost);
-        const hostCfg = await hostPool.readyForBox(session, `restore ${session}`).catch((e) => {
-          console.error(`[rescue] ${session}: host ${lastHost} not ready: ${String((e as Error).message ?? e).slice(0, 200)}`);
-          return null;
-        });
-        const outcome = hostCfg ? await startBoxIfStopped(hostCfg, session) : "absent";
-        if (hostCfg && outcome === "running") {
-          // A probe that fails is NOT an empty transcript: nothing may be wiped on a guess.
-          const probe = await execInBox(hostCfg, session, "wc -c < /workspace/.agent.log 2>/dev/null || echo 0").catch((e) => {
-            throw new Error(`the machine is on ${lastHost} but did not answer (${String((e as Error).message ?? e).slice(0, 160)}); nothing was changed, try again`);
-          });
-          const logBytes = Number(probe.stdout.trim().split("\n").pop()) || 0;
-          await markClaimed(hostCfg, session).catch(() => {});
-          const back = () => {
-            readFleet.forget(session);
-            watchHub.drop(session);
-            noteRunning(session);
-          };
-          if (logBytes > 0) {
-            // Out of sight, not gone: nothing is restored. The next sweep lists it.
-            back();
-            console.error(`[rescue] ${session}: found intact on ${lastHost} (${logBytes} bytes of transcript), nothing restored`);
-            res.json({ ok: true, box: session, found: true, host: lastHost });
-            return;
-          }
-          // The machine is there but empty (a restore that failed half-way): the copy goes into it.
-          await execInBox(hostCfg, session, "touch /.claimed");
-          await pushRescue(hostCfg, session, m, lostAt);
-          if (m.title) await saveTitle(hostCfg, session, m.title).catch(() => {});
-          back();
-          console.error(`[rescue] ${session}: machine found empty on ${lastHost}, copy of turn ${m.turn} put back in ${Date.now() - t0} ms`);
-          res.json({ ok: true, box: session, turn: m.turn, at: m.at, host: lastHost, inBox: true });
-          return;
-        }
-        if (outcome === "failed") throw new Error(`the machine is still on ${lastHost} but will not start; try again in a minute`);
-      }
-      const hostId = await placeRun(hostPool, cfg, `restore ${session}`, async (hostCfg, onAcquired) => {
-        // The same rootfs a cold claude run boots from (prepareRunCfg in deps.ts), under the old name.
-        const runCfg: Config = { ...hostCfg, ...claudeRootSource(hostCfg) };
-        await createBox(runCfg, { name: session });
-        onAcquired(session);
-        if (hostCfg.hostId) hostPool.rememberBox(session, hostCfg.hostId);
-        // Claimed BEFORE the copy goes in, in the box and on the host: a Running pool-named box
-        // with neither /.claimed nor /.ready reads as an orphaned warm-up to the pool maintainer
-        // (its name's timestamp is hours old), and the copy takes seconds to arrive.
-        await execInBox(runCfg, session, "touch /.claimed");
-        await markClaimed(runCfg, session);
-        await pushRescue(runCfg, session, m, lostAt);
-        if (m.title) await saveTitle(runCfg, session, m.title).catch(() => {});
-        return hostCfg.hostId;
-      });
-      // The fleet must not serve a stale "gone"/"stopped" memory of this name.
-      readFleet.forget(session);
-      watchHub.drop(session);
-      noteRunning(session);
-      console.error(`[rescue] ${session}: brought back from turn ${m.turn} on ${hostId ?? "the primary host"} in ${Date.now() - t0} ms`);
-      res.json({ ok: true, box: session, turn: m.turn, at: m.at, host: hostId ?? null });
-    } finally {
-      restoring.delete(session);
-    }
+    res.json(await bringBack(session));
   } catch (e) {
     failWith(res, e);
   }
@@ -4049,6 +4150,13 @@ app.post("/wake.json", async (req: Request, res: Response) => {
     // from a real wake, so the client sits on a progress card forever waiting for a boot that was
     // never asked for. 404 matches the shape a destroyed box already returns elsewhere.
     if (outcome === "absent") {
+      // The box is gone; the thread is not. With a copy kept, opening the thread brings the machine
+      // back (src/threads.ts), the same way a reply would.
+      if (await readRescue(cfg, session)) {
+        const r = await bringBack(session);
+        res.json({ ok: true, broughtBack: true, found: r.found ?? false, host: r.host });
+        return;
+      }
       res.status(404).json({ error: "no such machine" });
       return;
     }
@@ -4421,6 +4529,8 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
     readFleet.forget(session);
     watchHub.drop(session);
     inbox.clear(session);
+    markThreadDeleted(db, session);
+    void removeTranscript(cfg, session);
     boxModels.delete(session);
     boxVerify.delete(session);
     boxVerified.delete(session);

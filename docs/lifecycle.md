@@ -113,6 +113,14 @@ saved the thread that time. Four rules now hold:
 What a restore does not bring back: installed dependencies (excluded from the checkpoint; the agent
 reinstalls), and anything written after the last turn ended.
 
+### The thread is the durable unit (2026-11-18, third pass)
+
+Both incidents had one root: the fleet list *was* the box list. Now the controller keeps a
+`threads` table and a copy of every transcript, the list is built from boxes **plus** the threads
+whose box is out of sight (Asleep when its host did not answer, **Away** when the box is gone and a
+copy is kept), and opening or replying to an Away thread brings a machine back through one shared
+path. Design and the full table of what lives where: `docs/threads.md`.
+
 ## A trap worth knowing: `msb exec` wakes a stopped box
 
 Measured: `msb exec <stopped-box> -- cmd` boots the VM, runs the command, and stops it again (metrics

@@ -502,6 +502,34 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (host_id, month)
   );
   `,
+  `
+  -- Threads (src/threads.ts): the durable unit. One row per thread, keyed by the box name (the
+  -- URL), written from every fleet sweep and marked deleted only by a deliberate teardown. The
+  -- fleet lists a thread whose box the hosts do not show from this row (asleep when its host did
+  -- not answer, away when a copy of the thread is kept), so a dead or unseen box never makes a
+  -- thread vanish. The transcript itself lives beside it on disk (<dataDir>/threads/<id>/).
+  CREATE TABLE IF NOT EXISTS threads (
+    id TEXT PRIMARY KEY,
+    owner TEXT,
+    title TEXT,
+    task TEXT,
+    agent TEXT,
+    host TEXT,
+    role TEXT NOT NULL DEFAULT 'session',
+    run_state TEXT NOT NULL DEFAULT 'idle',
+    exit_code INTEGER,
+    question TEXT,
+    repos_json TEXT,
+    kept INTEGER NOT NULL DEFAULT 0,
+    box_status TEXT NOT NULL DEFAULT 'unknown',
+    box_seen_at INTEGER,
+    last_turn_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    deleted_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS threads_owner ON threads(owner, deleted_at);
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

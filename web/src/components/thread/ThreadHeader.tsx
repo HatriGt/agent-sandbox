@@ -402,7 +402,7 @@ export function ThreadHeader({
       <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to machines" className="-ml-1 md:hidden">
         <ArrowLeft />
       </Button>
-      <LiveStatePill state={state} exitCode={exitCode} stalled={box.stalled} activity={activity} />
+      <LiveStatePill state={state} exitCode={exitCode} stalled={box.stalled} activity={activity} absent={box.absent} />
       {editing ? (
         <input
           ref={inputRef}
@@ -798,7 +798,7 @@ function useElapsed(start: number | undefined, end: number | undefined, live: bo
  * Action needed · Asleep · Done · Failed · Idle. Colours are the existing state tokens. While working,
  * the activity ("Editing retry.ts") joins the label at lg+, full text in the tooltip.
  */
-function LiveStatePill({ state, exitCode, stalled, activity }: { state: DisplayState; exitCode?: number; stalled?: boolean; activity?: string | null }) {
+function LiveStatePill({ state, exitCode, stalled, activity, absent }: { state: DisplayState; exitCode?: number; stalled?: boolean; activity?: string | null; absent?: boolean }) {
   const failed = state === "done" && isFailedExit(exitCode);
   const working = state === "running" && !stalled;
   const [word, tone] =
@@ -809,7 +809,7 @@ function LiveStatePill({ state, exitCode, stalled, activity }: { state: DisplayS
       : state === "waiting"
         ? ["Action needed", "text-attention-text bg-attention/15"]
         : state === "sleeping"
-          ? ["Asleep", "text-sleep bg-sleep/10"]
+          ? [absent ? "Away" : "Asleep", "text-sleep bg-sleep/10"]
           : state === "done"
             ? failed
               ? ["Failed", "text-destructive bg-destructive/10"]

@@ -267,6 +267,19 @@ export async function sweepRescues(cfg: Pick<Config, "dataDir">, now = Date.now(
   return gone;
 }
 
+/** The boxes a copy is kept for (a directory with a meta.json), for the fleet's away rows. */
+export async function rescueBoxes(cfg: Pick<Config, "dataDir">): Promise<Set<string>> {
+  const root = rescueRoot(cfg);
+  const names = await fs.readdir(root).catch(() => [] as string[]);
+  const out = new Set<string>();
+  await Promise.all(
+    names.map(async (name) => {
+      if (await fs.stat(path.join(root, name, "meta.json")).catch(() => null)) out.add(name);
+    })
+  );
+  return out;
+}
+
 /** The copies on disk, newest first (for the History decoration and the health view). */
 export async function listRescues(cfg: Pick<Config, "dataDir">): Promise<RescueSummary[]> {
   const root = rescueRoot(cfg);

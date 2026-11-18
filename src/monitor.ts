@@ -68,6 +68,12 @@ export interface BoxView {
   /** Seconds this stopped box has been asleep (claim age), when known. */
   asleepSec?: number;
   /**
+   * The box is gone (reaped, crashed, removed) but the thread is kept (src/threads.ts): listed from
+   * the thread table with boxStatus "Absent"; opening or replying brings the machine back from the
+   * rescue copy.
+   */
+  absent?: boolean;
+  /**
    * The saved harness this thread started on (src/harness.ts), for the thread header: its name and
    * the one-line summary ("Bug fixer · asks before guessing · verify on done"). From run_harness.
    */

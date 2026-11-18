@@ -28,17 +28,54 @@ const HOST_STAGES = [
   { at: 60, text: "restoring workspace + session" },
   { at: 75, text: "reconnecting the transcript" },
 ];
+/** An away thread (its box gone, a copy kept): a fresh machine is started and the copy put back. */
+const COPY_STAGES = [
+  { at: 0, text: "finding a host" },
+  { at: 6, text: "starting a machine" },
+  { at: 14, text: "putting the copy back" },
+  { at: 30, text: "reconnecting the transcript" },
+];
 const STUCK_AT = 45;
 const HOST_STUCK_AT = 150;
+const COPY_STUCK_AT = 150;
 
-export function WakingCard({ awake, startedAt, error, onRetry, slowHost = false }: { awake: boolean; startedAt: number; error?: string | null; onRetry?: () => void; slowHost?: boolean }) {
+export function WakingCard({
+  awake,
+  startedAt,
+  error,
+  onRetry,
+  slowHost = false,
+  fromCopy = false,
+}: {
+  awake: boolean;
+  startedAt: number;
+  error?: string | null;
+  onRetry?: () => void;
+  slowHost?: boolean;
+  /** The machine is gone: it is being brought back from the kept copy (different stages and patience). */
+  fromCopy?: boolean;
+}) {
   const now = useNow(!awake && !error, 500);
   const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
-  const stages = slowHost ? HOST_STAGES : STAGES;
+  const stages = fromCopy ? COPY_STAGES : slowHost ? HOST_STAGES : STAGES;
   const stage = awake ? stages.length - 1 : Math.min(stages.length - 1, stages.filter((s) => elapsed >= s.at).length - 1);
-  const stuck = !awake && !error && elapsed >= (slowHost ? HOST_STUCK_AT : STUCK_AT);
-  const label = error ? "Could not wake the sandbox" : awake ? "Awake" : stuck ? "Taking longer than usual" : slowHost ? "Waking the host" : "Waking the sandbox";
-  const detail = error ? null : awake ? "back — the transcript follows" : stuck ? null : stages[stage].text;
+  const stuck = !awake && !error && elapsed >= (fromCopy ? COPY_STUCK_AT : slowHost ? HOST_STUCK_AT : STUCK_AT);
+  const label = error
+    ? fromCopy
+      ? "Could not bring the machine back"
+      : "Could not wake the sandbox"
+    : awake
+      ? fromCopy
+        ? "Back"
+        : "Awake"
+      : stuck
+        ? "Taking longer than usual"
+        : fromCopy
+          ? "Bringing the machine back"
+          : slowHost
+            ? "Waking the host"
+            : "Waking the sandbox";
+  const detail = error ? null : awake ? (fromCopy ? "from the kept copy — the transcript follows" : "back — the transcript follows") : stuck ? null : stages[stage].text;
 
   return (
     <motion.div
@@ -105,7 +142,7 @@ export function WakingCard({ awake, startedAt, error, onRetry, slowHost = false 
  * no timer — a moon, one line, and a Wake action. Rendering the "Waking…" pill here would either
  * lie (nothing is waking) or force the auto-wake to bounce the box straight back up.
  */
-export function SleepingCard({ onWake }: { onWake: () => void }) {
+export function SleepingCard({ onWake, absent = false }: { onWake: () => void; absent?: boolean }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 4 }}
@@ -117,7 +154,7 @@ export function SleepingCard({ onWake }: { onWake: () => void }) {
     >
       <div className="bg-card inline-flex max-w-full items-center gap-2.5 rounded-full border py-1.5 pr-2 pl-3 text-meta shadow-e1">
         <Moon className="text-sleep size-3.5 shrink-0" aria-hidden />
-        <span className="text-foreground shrink-0 font-medium">Asleep</span>
+        <span className="text-foreground shrink-0 font-medium">{absent ? "Away" : "Asleep"}</span>
         <span className="text-muted-foreground min-w-0 truncate text-micro">workspace and session kept</span>
         <button
           type="button"

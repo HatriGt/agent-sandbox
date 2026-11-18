@@ -1267,9 +1267,9 @@ export function Thread({
                 fresh page with the history gone. */}
             <AnimatePresence mode="wait" initial={false}>
               {sleeping && !wake ? (
-                <SleepingCard key="sleeping" onWake={wakeNow} />
+                <SleepingCard key="sleeping" onWake={wakeNow} absent={!!box.absent} />
               ) : (
-                wake && <WakingCard key="waking" awake={!sleeping} startedAt={wake.startedAt} error={wake.error} onRetry={wakeNow} slowHost={wake.slowHost || hostAsleep} />
+                wake && <WakingCard key="waking" awake={!sleeping} startedAt={wake.startedAt} error={wake.error} onRetry={wakeNow} slowHost={wake.slowHost || hostAsleep} fromCopy={!!box.absent} />
               )}
             </AnimatePresence>
 

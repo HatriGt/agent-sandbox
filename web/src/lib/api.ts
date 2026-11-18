@@ -16,6 +16,8 @@ export interface BoxView {
   host?: string;
   /** msb lifecycle: "Running" while the microVM is up, "Stopped" for a sleeping (idle-stopped) box. */
   boxStatus: string;
+  /** The box is gone but the thread is kept (controller src/threads.ts): "Away"; opening or replying brings it back. */
+  absent?: boolean;
   runState: RunState;
   exitCode?: number;
   task?: string;

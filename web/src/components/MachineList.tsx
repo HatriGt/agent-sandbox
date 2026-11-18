@@ -17,7 +17,7 @@ const EASE = [0.2, 0.8, 0.2, 1] as const;
 
 export type StateWord = { word: string; tone: "live" | "attention" | "sleep" | "destructive" | "muted" | "ok" };
 /** The shared live-state vocabulary: one word and one tone per state, for the sidebar and the Hub alike. */
-export function stateWord(state: DisplayState, exitCode?: number, stalled?: boolean): StateWord {
+export function stateWord(state: DisplayState, exitCode?: number, stalled?: boolean, absent?: boolean): StateWord {
   if (stalled && state === "running") return { word: "Stalled", tone: "destructive" };
   switch (state) {
     case "running":
@@ -25,7 +25,8 @@ export function stateWord(state: DisplayState, exitCode?: number, stalled?: bool
     case "waiting":
       return { word: "Action needed", tone: "attention" };
     case "sleeping":
-      return { word: "Asleep", tone: "sleep" };
+      // Away: the machine is gone, the thread is kept; opening it brings a machine back.
+      return absent ? { word: "Away", tone: "sleep" } : { word: "Asleep", tone: "sleep" };
     case "done":
       return exitCode != null && exitCode !== 0 ? { word: "Failed", tone: "destructive" } : { word: "Done", tone: "ok" };
     default:
@@ -38,6 +39,7 @@ function tooltipOf(v: StableBox, state: DisplayState, sleepTtlSec?: number): str
   if (state === "waiting" && v.question) lines.push(`Asks: ${questionHeadline(v.question)}`);
   if (v.stalled) lines.push("No output for a while");
   if (v.leaving) lines.push("Shutting down");
+  else if (v.absent) lines.push("Machine gone, thread kept: opening brings it back");
   else if (v.kept) lines.push("Kept");
   else if (state === "sleeping") lines.push(sleepTtlSec && v.asleepSec != null ? `Gone in ${fmtDuration(Math.max(0, sleepTtlSec - v.asleepSec))}` : "Wakes on reply");
   if (v.role === "pool-free") lines.push(roleLabel(v.role));
@@ -66,7 +68,7 @@ function AgentRow({
   onSelect: (name: string) => void;
 }) {
   const state = displayState(v);
-  const { word, tone } = stateWord(state, v.exitCode, v.stalled);
+  const { word, tone } = stateWord(state, v.exitCode, v.stalled, v.absent);
   const flashes = useChangeCount(`${state}:${word}`);
   return (
     <button

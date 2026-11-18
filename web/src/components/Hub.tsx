@@ -1074,7 +1074,7 @@ function RecentActivity({ onAll }: { onAll: () => void }) {
 }
 
 function LiveState({ b }: { b: BoxView }) {
-  const { word, tone } = stateWord(displayState(b), b.exitCode, b.stalled);
+  const { word, tone } = stateWord(displayState(b), b.exitCode, b.stalled, b.absent);
   return (
     <StatusDot tone={tone} pulse={b.runState === "running" && !b.stalled} className="w-28 shrink-0 whitespace-nowrap">
       {word}
