@@ -1,7 +1,7 @@
 import * as React from "react";
-import { Activity, Moon, Pencil, Plus, Server, Sun, Trash2 } from "lucide-react";
+import { Activity, Camera, Moon, Pencil, Plus, Server, Sun, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type HostSpecInput, type HostView, type HealthResponse } from "@/lib/api";
+import { api, type HostProviderInfo, type HostSpecInput, type HostView, type HealthResponse } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { fmtAgo } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -26,15 +26,24 @@ import { cn } from "@/lib/utils";
  * never sees this section (the server answers 403 and the panel stays away).
  *
  * The primary host comes from .env: its connection is shown, not edited, and it cannot be removed.
- * Any other host is a form: an SSH target and, for a Freestyle VM, the VM id and an API key that
- * lets the controller pause it the moment it falls asleep and start it the moment a run needs it.
+ * Any other host is a form: an SSH target and, for a cloud VM, the VM id and an API key that lets
+ * the controller pause it the moment it falls asleep and start it the moment a run needs it. The
+ * providers on offer come from the server (`providers` on /hosts.json), so a new adapter shows up
+ * here without a dashboard change; one that can build a machine from a key alone gets the second
+ * mode of the add dialog, "from an API key".
  */
+
+/** The server's list, or the two every controller has had, for a dashboard ahead of its controller. */
+const FALLBACK_PROVIDERS: HostProviderInfo[] = [
+  { id: "freestyle", label: "Freestyle VM", hint: "A Freestyle VM pauses itself when idle and bills only while awake; the API key lets the controller pause and start it.", needs: ["vmId"], secrets: ["apiKey"], sshHint: "name+root:TOKEN@beta-ssh.freestyle.sh — the identity token from the runbook", sshPlaceholder: "asb-host+root:…@beta-ssh.freestyle.sh", canProvision: false, canSnapshot: false, metered: true },
+  { id: "static", label: "My own machine", hint: "A machine of your own: a VPS, a home server. Nothing is paused.", needs: [], secrets: [], sshHint: "user@host, reachable with the controller's key", sshPlaceholder: "root@203.0.113.7", canProvision: false, canSnapshot: false, metered: false },
+];
 export function HostsPanel({ onChanged }: { onChanged?: () => void }) {
   // Admin-only: the server answers /hosts.json with 403 for anyone else (and /health.json says
   // admin: false), so the gate is the response, not a client-side identity that token mode never sets.
   const health = useCached<HealthResponse>("health", (signal) => api.health(signal));
   const admin = health.data?.admin !== false;
-  const { data, refresh } = useCached<{ hosts: HostView[]; capacity: number }>("hosts", (signal) => (admin ? api.hosts(signal) : Promise.reject(new Error("not an admin"))));
+  const { data, refresh } = useCached<{ hosts: HostView[]; capacity: number; providers?: HostProviderInfo[] }>("hosts", (signal) => (admin ? api.hosts(signal) : Promise.reject(new Error("not an admin"))));
   React.useEffect(() => {
     if (!admin) return;
     void refresh();
@@ -45,10 +54,16 @@ export function HostsPanel({ onChanged }: { onChanged?: () => void }) {
   const [busy, setBusy] = React.useState<Record<string, string>>({});
   if (!admin || !data) return null;
   const hosts = data.hosts;
+  const providers = data.providers?.length ? data.providers : FALLBACK_PROVIDERS;
 
-  const act = async (host: HostView, action: "check" | "wake" | "pause" | "remove") => {
+  const act = async (host: HostView, action: "check" | "wake" | "pause" | "remove" | "snapshot") => {
     setBusy((b) => ({ ...b, [host.id]: action }));
     try {
+      if (action === "snapshot") {
+        const s = await api.hostSnapshot(host.id);
+        toast.success(`${host.name} snapshotted: ${s.slug ?? s.snapshotId}`, { description: s.hint ?? s.snapshotId, duration: 15_000 });
+        return;
+      }
       const r = await api.hostAction({ action, id: host.id });
       if (action === "check") {
         if (r.check?.ok) toast.success(`${host.name} answers`, { description: `${r.check.detail} · ${(r.check.ms / 1000).toFixed(1)} s` });
@@ -68,7 +83,7 @@ export function HostsPanel({ onChanged }: { onChanged?: () => void }) {
   };
 
   const columns: Column<HostView>[] = [
-    { id: "host", header: "Host", primary: true, cell: (h) => <HostCell host={h} /> },
+    { id: "host", header: "Host", primary: true, cell: (h) => <HostCell host={h} providers={providers} /> },
     { id: "state", header: "State", width: "w-[10rem]", cell: (h) => <StateCell host={h} /> },
     { id: "machines", header: "Machines", width: "w-[7rem]", align: "end", sort: (h) => h.running, cell: (h) => <MachinesCell host={h} /> },
     { id: "allowance", header: "This month", width: "w-[11rem]", hideBelow: "md", cell: (h) => <AllowanceCell host={h} /> },
@@ -78,7 +93,7 @@ export function HostsPanel({ onChanged }: { onChanged?: () => void }) {
       header: <span className="sr-only">Actions</span>,
       width: "w-[9.5rem]",
       align: "end",
-      cell: (h) => <HostActions host={h} busy={busy[h.id]} onAct={(a) => void act(h, a)} onEdit={() => setEditing(h)} />,
+      cell: (h) => <HostActions host={h} provider={providers.find((p) => p.id === h.provider)} busy={busy[h.id]} onAct={(a) => void act(h, a)} onEdit={() => setEditing(h)} />,
     },
   ];
   return (
@@ -106,6 +121,7 @@ export function HostsPanel({ onChanged }: { onChanged?: () => void }) {
         {editing !== null && (
           <HostDialog
             host={editing === "new" ? null : editing}
+            providers={providers}
             onClose={() => setEditing(null)}
             onSaved={async () => {
               await refresh();
@@ -166,7 +182,7 @@ function StateCell({ host: h }: { host: HostView }) {
   return <StatusDot tone="ok">awake</StatusDot>;
 }
 
-function HostCell({ host: h }: { host: HostView }) {
+function HostCell({ host: h, providers }: { host: HostView; providers: HostProviderInfo[] }) {
   return (
     <div className="min-w-0">
       <p className="text-foreground truncate text-meta">
@@ -175,7 +191,7 @@ function HostCell({ host: h }: { host: HostView }) {
       </p>
       {/* Only the SSH target gives way when the column is narrow; the words around it stay whole. */}
       <span className="text-muted-foreground stamp mt-0.5 flex min-w-0 items-center gap-2 text-micro">
-        <span className="shrink-0">{h.provider === "freestyle" ? "Freestyle VM" : "your machine"}</span>
+        <span className="shrink-0">{h.provider === "static" ? "your machine" : (providers.find((p) => p.id === h.provider)?.label ?? h.provider)}</span>
         <span className="bg-border h-2.5 w-px shrink-0" aria-hidden />
         <span className="min-w-0 truncate" title={h.ssh}>
           {h.ssh}
@@ -233,8 +249,8 @@ function AllowanceCell({ host: h }: { host: HostView }) {
   );
 }
 
-function HostActions({ host: h, busy, onAct, onEdit }: { host: HostView; busy?: string; onAct: (a: "check" | "wake" | "pause" | "remove") => void; onEdit: () => void }) {
-  const metered = h.provider !== "static" && h.freestyle?.hasApiKey;
+function HostActions({ host: h, provider, busy, onAct, onEdit }: { host: HostView; provider?: HostProviderInfo; busy?: string; onAct: (a: "check" | "wake" | "pause" | "remove" | "snapshot") => void; onEdit: () => void }) {
+  const metered = h.provider !== "static" && h.cloud?.hasApiKey;
   return (
     <div className="flex items-center justify-end gap-0.5" onClick={stopRow} onKeyDown={stopRow}>
       <Tooltip>
@@ -262,6 +278,16 @@ function HostActions({ host: h, busy, onAct, onEdit }: { host: HostView; busy?: 
           <TooltipContent>{h.asleep || h.providerState?.state === "paused" ? "Start the VM now" : "Pause the VM now (refused while an agent works)"}</TooltipContent>
         </Tooltip>
       )}
+      {metered && provider?.canSnapshot && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="icon-sm" variant="ghost" aria-label={`Snapshot ${h.name}`} loading={busy === "snapshot"} onClick={() => onAct("snapshot")} className="text-muted-foreground">
+              <Camera />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Snapshot the VM in its account, with msb and the images on it, so the next host built there boots ready</TooltipContent>
+        </Tooltip>
+      )}
       <Button size="icon-sm" variant="ghost" aria-label={`Edit ${h.name}`} onClick={onEdit} className="text-muted-foreground">
         <Pencil />
       </Button>
@@ -274,11 +300,13 @@ function HostActions({ host: h, busy, onAct, onEdit }: { host: HostView; busy?: 
 
 type Form = {
   name: string;
-  provider: "static" | "freestyle";
+  provider: string;
   ssh: string;
   sshExtraOpts: string;
   vmId: string;
   apiKey: string;
+  /** Provision mode: the image the new VM boots from; blank is the provider's stock image. */
+  snapshotId: string;
   priority: string;
   sleepMin: string;
   warm: boolean;
@@ -296,13 +324,14 @@ type Form = {
   claudeImage: string;
 };
 
-const formOf = (h: HostView | null): Form => ({
+const formOf = (h: HostView | null, providers: HostProviderInfo[]): Form => ({
   name: h?.name ?? "",
-  provider: (h?.provider as Form["provider"]) ?? "freestyle",
+  provider: h?.provider ?? providers[0]?.id ?? "static",
   ssh: h && !h.primary ? h.ssh : "",
   sshExtraOpts: "",
-  vmId: h?.freestyle?.vmId ?? "",
+  vmId: h?.cloud?.vmId ?? "",
   apiKey: "",
+  snapshotId: "",
   priority: String(h?.priority ?? 10),
   sleepMin: String(Math.round((h?.sleepAfterMs ?? 5 * 60_000) / 60_000)),
   warm: h?.warm ?? false,
@@ -320,19 +349,45 @@ const formOf = (h: HostView | null): Form => ({
   claudeImage: h?.claudeImage ?? "",
 });
 
-function HostDialog({ host, onClose, onSaved }: { host: HostView | null; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [f, setF] = React.useState<Form>(() => formOf(host));
+function HostDialog({ host, providers, onClose, onSaved }: { host: HostView | null; providers: HostProviderInfo[]; onClose: () => void; onSaved: () => Promise<void> }) {
+  // Offered first: a provider that can build the machine itself (the usual case for a new account).
+  const provisionable = providers.filter((p) => p.canProvision);
+  const [mode, setMode] = React.useState<"provision" | "existing">(!host && provisionable.length ? "provision" : "existing");
+  const [f, setF] = React.useState<Form>(() => formOf(host, mode === "provision" ? provisionable : providers));
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setF((p) => ({ ...p, [k]: v }));
   const primary = !!host?.primary;
-  const freestyle = f.provider === "freestyle";
-  const can = !!f.name.trim() && (primary || (!!f.ssh.trim() && (!freestyle || !!f.vmId.trim())));
+  const provision = !host && mode === "provision";
+  const provider = providers.find((p) => p.id === f.provider) ?? providers[0];
+  const needsVm = !!provider?.needs.includes("vmId");
+  const hasKeyField = !!provider?.secrets.includes("apiKey");
+  const can = !!f.name.trim() && (primary || (provision ? !!f.apiKey.trim() : !!f.ssh.trim() && (!needsVm || !!f.vmId.trim())));
   const submit = async () => {
     if (!can || busy) return;
     setBusy(true);
     setErr(null);
     try {
+      if (provision) {
+        const r = await api.hostProvision({
+          provider: f.provider,
+          name: f.name.trim(),
+          apiKey: f.apiKey.trim(),
+          ...(f.snapshotId.trim() ? { snapshotId: f.snapshotId.trim() } : {}),
+          priority: Number(f.priority) || 0,
+          sleepAfterMs: Math.max(0, Number(f.sleepMin) || 0) * 60_000,
+          ...(f.maxBoxes.trim() ? { maxBoxes: Number(f.maxBoxes) } : {}),
+          warm: f.warm,
+          enabled: f.enabled,
+          allowance: f.metered ? { vcpuHours: Number(f.vcpuHours) || 0, vcpu: Number(f.vcpu) || 1, resetDay: Number(f.resetDay) || 1 } : null,
+        });
+        const built = r.host?.name ?? f.name.trim();
+        if (r.check && !r.check.ok) toast.warning(`${built} built, but it does not answer yet: ${r.check.detail}`, { duration: 12_000 });
+        else toast.success(`${built} built and added${r.check ? ` · ${r.check.detail}` : ""}`, { description: f.snapshotId.trim() ? undefined : "A stock image: install msb and load the box images before a run lands here (see the runbook).", duration: 15_000 });
+        await onSaved();
+        onClose();
+        return;
+      }
       const spec: HostSpecInput = {
         name: f.name.trim(),
         priority: Number(f.priority) || 0,
@@ -346,14 +401,14 @@ function HostDialog({ host, onClose, onSaved }: { host: HostView | null; onClose
         spec.ssh = f.ssh.trim();
         if (f.sshExtraOpts.trim()) spec.sshExtraOpts = f.sshExtraOpts.trim();
         spec.maxBoxes = f.maxBoxes.trim() ? Number(f.maxBoxes) : null;
-        spec.freestyle = freestyle ? { vmId: f.vmId.trim(), apiKey: f.apiKey.trim() } : null;
+        spec.cloud = needsVm || hasKeyField ? { vmId: f.vmId.trim(), apiKey: f.apiKey.trim() } : null;
         if (f.advanced || host) {
           spec.msb = f.msb.trim();
           spec.msbHome = f.msbHome.trim();
           spec.stagingDir = f.stagingDir.trim();
           spec.snapshot = f.snapshot.trim();
           spec.claudeImage = f.claudeImage.trim();
-        } else if (freestyle) {
+        } else if (provider?.metered) {
           // A fresh VM has no snapshot of the primary's: boot from the image, or cold.
           spec.snapshot = "";
         }
@@ -371,7 +426,13 @@ function HostDialog({ host, onClose, onSaved }: { host: HostView | null; onClose
   return (
     <DialogContent
       title={host ? `Edit ${host.name}` : "Add a box host"}
-      description={primary ? "The primary host's connection comes from .env; the rest is yours to tune." : "A machine with microsandbox installed that the controller can reach over SSH. Runs are handed out by order number; equal hosts share."}
+      description={
+        primary
+          ? "The primary host's connection comes from .env; the rest is yours to tune."
+          : provision
+            ? "The provider builds the machine from your account key: a VM, an identity with root on it and a token for SSH. One to three minutes."
+            : "A machine with microsandbox installed that the controller can reach over SSH. Runs are handed out by order number; equal hosts share."
+      }
       className="w-[min(36rem,calc(100vw-2rem))]"
       onKeyDown={(e) => {
         if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -381,30 +442,51 @@ function HostDialog({ host, onClose, onSaved }: { host: HostView | null; onClose
       }}
     >
       <div className="flex flex-col gap-4">
+        {!host && provisionable.length > 0 && (
+          <Segmented
+            ariaLabel="How to add the host"
+            value={mode}
+            onChange={(v) => {
+              setMode(v);
+              setF((p) => ({ ...p, provider: v === "provision" ? (provisionable.some((x) => x.id === p.provider) ? p.provider : provisionable[0].id) : p.provider }));
+            }}
+            options={[
+              { value: "provision", label: "From an API key" },
+              { value: "existing", label: "An existing machine" },
+            ]}
+          />
+        )}
         <Field label="Name">{(w) => <Input {...w} value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="Freestyle account A" autoFocus />}</Field>
         {!primary && (
           <>
-            <Field label="Provider" hint={freestyle ? "A Freestyle VM pauses itself when idle and bills only while awake; the API key lets the controller pause and start it." : "A machine of your own: a VPS, a home server. Nothing is paused."}>
-              <Segmented
-                ariaLabel="Provider"
-                value={f.provider}
-                onChange={(v) => set("provider", v)}
-                options={[
-                  { value: "freestyle", label: "Freestyle VM" },
-                  { value: "static", label: "My own machine" },
-                ]}
-              />
+            <Field label="Provider" hint={provider?.hint}>
+              <Segmented ariaLabel="Provider" value={f.provider} onChange={(v) => set("provider", v)} options={(provision ? provisionable : providers).map((p) => ({ value: p.id, label: p.label }))} />
             </Field>
-            <Field label="SSH target" hint={freestyle ? "name+root:TOKEN@beta-ssh.freestyle.sh — the identity token from the runbook" : "user@host, reachable with the controller's key"}>
-              {(w) => <Input {...w} mono value={f.ssh} onChange={(e) => set("ssh", e.target.value)} placeholder={freestyle ? "asb-host+root:…@beta-ssh.freestyle.sh" : "root@203.0.113.7"} spellCheck={false} />}
-            </Field>
-            {freestyle && (
+            {provision ? (
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="VM id">{(w) => <Input {...w} mono value={f.vmId} onChange={(e) => set("vmId", e.target.value)} placeholder="vm-…" spellCheck={false} />}</Field>
-                <Field label="API key" optional hint={host?.freestyle?.hasApiKey ? "Stored; leave blank to keep it" : "Lets the controller pause and start the VM"}>
+                <Field label="API key" hint="The account's key; stored with the host, never shown again">
                   {(w) => <Input {...w} mono type="password" value={f.apiKey} onChange={(e) => set("apiKey", e.target.value)} autoComplete="off" />}
                 </Field>
+                <Field label="Boot from" optional hint="A snapshot you took of a ready host; blank is the stock image, which still needs msb and the box images">
+                  {(w) => <Input {...w} mono value={f.snapshotId} onChange={(e) => set("snapshotId", e.target.value)} placeholder="snapshot id or slug" spellCheck={false} />}
+                </Field>
               </div>
+            ) : (
+              <>
+                <Field label="SSH target" hint={provider?.sshHint}>
+                  {(w) => <Input {...w} mono value={f.ssh} onChange={(e) => set("ssh", e.target.value)} placeholder={provider?.sshPlaceholder} spellCheck={false} />}
+                </Field>
+                {(needsVm || hasKeyField) && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {needsVm && <Field label="VM id">{(w) => <Input {...w} mono value={f.vmId} onChange={(e) => set("vmId", e.target.value)} placeholder="vm-…" spellCheck={false} />}</Field>}
+                    {hasKeyField && (
+                      <Field label="API key" optional hint={host?.cloud?.hasApiKey ? "Stored; leave blank to keep it" : "Lets the controller pause and start the VM"}>
+                        {(w) => <Input {...w} mono type="password" value={f.apiKey} onChange={(e) => set("apiKey", e.target.value)} autoComplete="off" />}
+                      </Field>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
@@ -434,7 +516,7 @@ function HostDialog({ host, onClose, onSaved }: { host: HostView | null; onClose
             <Field label="Resets on day">{(w) => <Input {...w} mono type="number" min={1} max={28} value={f.resetDay} onChange={(e) => set("resetDay", e.target.value)} />}</Field>
           </div>
         </Collapse>
-        {!primary && (
+        {!primary && !provision && (
           <>
             <button type="button" className="text-muted-foreground hover:text-foreground self-start text-micro underline-offset-2 hover:underline" onClick={() => set("advanced", !f.advanced)}>
               {f.advanced ? "Hide paths and boot sources" : "Paths and boot sources…"}
@@ -461,7 +543,7 @@ function HostDialog({ host, onClose, onSaved }: { host: HostView | null; onClose
           Cancel
         </Button>
         <Button size="sm" loading={busy} disabled={!can} onClick={() => void submit()}>
-          {host ? "Save" : "Add host"}
+          {host ? "Save" : provision ? (busy ? "Building the VM…" : "Build and add") : "Add host"}
         </Button>
       </DialogFooter>
     </DialogContent>

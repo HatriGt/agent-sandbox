@@ -14,9 +14,25 @@
  */
 import type { Db } from "./db.js";
 import type { Config } from "./config.js";
+import { cloudOf, knownProvider, listProviders, providerFor } from "./host-providers.js";
 
-/** Where a host comes from. "static": a machine of our own, nothing to pause. */
-export type HostProvider = "static" | "freestyle";
+/**
+ * Where a host comes from: an adapter id from src/host-providers.ts ("static": a machine of our
+ * own, nothing to pause; "freestyle": a VM the controller can pause, start and build through the
+ * API). Open so a new provider is one adapter, not a type change in every file.
+ */
+export type HostProvider = string;
+
+/**
+ * The provider's handles for the machine: `vmId` and `apiKey` for every cloud, plus whatever the
+ * adapter put there when it built the machine (Freestyle: `slug`, `identityId`, `tokenId`). The
+ * key is stored, never sent back; a blank key on an edit keeps it.
+ */
+export interface HostCloud {
+  vmId: string;
+  apiKey: string;
+  [k: string]: string;
+}
 
 export interface HostAllowance {
   /** Billable vCPU-hours per month on this account (Freestyle Free: 200, with a card: 400). */
@@ -33,7 +49,7 @@ export interface HostSpec {
   /** What the dashboard calls it. */
   name: string;
   provider: HostProvider;
-  /** The SSH target (`user@host`, or `box+user:token@beta-ssh.freestyle.sh` for a Freestyle VM). */
+  /** The SSH target (`user@host`, or `vm+user:token@<proxy>` for a VM behind its provider's SSH proxy). */
   ssh: string;
   /** Extra ssh -o flags for this host only (an identity file, StrictHostKeyChecking). */
   sshExtraOpts?: string[];
@@ -53,8 +69,10 @@ export interface HostSpec {
   warm: boolean;
   enabled: boolean;
   allowance?: HostAllowance;
-  /** Provider handles: the VM id and the API key that may pause and start it. */
-  freestyle?: { vmId: string; apiKey: string };
+  /** Provider handles: the VM id and the API key that may pause and start it (see HostCloud). */
+  cloud?: HostCloud;
+  /** @deprecated Rows written before 2026-11-19 carry the block under this name; read through `cloudOf`, never written. */
+  freestyle?: HostCloud;
   /** Boot sources on this host when they differ from the primary's (an image not loaded there). */
   snapshot?: string;
   ompSnapshot?: string;
@@ -124,7 +142,8 @@ export function normalizeHostSpec(raw: Partial<HostSpec> & { id?: string }, exis
   const id = (raw.id ?? existing?.id ?? slugify(String(raw.name ?? ""))).trim();
   if (!SLUG.test(id)) throw new Error("host id must be a lowercase slug (letters, digits, dashes)");
   const provider = raw.provider ?? existing?.provider ?? "static";
-  if (provider !== "static" && provider !== "freestyle") throw new Error(`unknown provider "${String(provider)}"`);
+  if (!knownProvider(provider)) throw new Error(`unknown provider "${String(provider)}" (one of ${listProviders().map((p) => p.id).join(", ")})`);
+  const adapter = providerFor({ provider });
   const ssh = String(raw.ssh ?? existing?.ssh ?? "").trim();
   if (!ssh || /\s/.test(ssh)) throw new Error("ssh target is required (user@host, no spaces)");
   if (ssh.startsWith("-")) throw new Error("ssh target cannot start with a dash");
@@ -150,16 +169,28 @@ export function normalizeHostSpec(raw: Partial<HostSpec> & { id?: string }, exis
     };
     if (allowance.vcpuHours <= 0) allowance = undefined;
   }
-  let freestyle = existing?.freestyle;
-  if (raw.freestyle === null) freestyle = undefined;
-  else if (raw.freestyle) {
-    const vmId = String(raw.freestyle.vmId ?? "").trim();
+  // The credentials block: `cloud` today, `freestyle` from older rows and older callers; both read, `cloud` written.
+  const stored = existing ? cloudOf(existing) : undefined;
+  const given = raw.cloud === undefined ? raw.freestyle : raw.cloud;
+  let cloud = stored;
+  if (given === null) cloud = undefined;
+  else if (given) {
+    const vmId = String(given.vmId ?? "").trim();
     // An edit that leaves the key blank keeps the stored one: the dashboard never shows it back.
-    const apiKey = String(raw.freestyle.apiKey ?? "").trim() || existing?.freestyle?.apiKey || "";
-    if (vmId && !/^[A-Za-z0-9_-]{3,80}$/.test(vmId)) throw new Error("Freestyle VM id looks wrong");
-    freestyle = vmId ? { vmId, apiKey } : undefined;
+    const apiKey = String(given.apiKey ?? "").trim() || stored?.apiKey || "";
+    if (vmId && !/^[A-Za-z0-9_-]{3,80}$/.test(vmId)) throw new Error(`${adapter.label} id looks wrong`);
+    const extra: Record<string, string> = {};
+    for (const [k, v] of Object.entries(given)) {
+      if (k === "vmId" || k === "apiKey" || v === undefined || v === null) continue;
+      if (!/^[A-Za-z][A-Za-z0-9]{0,30}$/.test(k)) continue;
+      const sv = String(v).trim().slice(0, 200);
+      if (sv) extra[k] = sv;
+    }
+    // Handles the adapter wrote on provision (identityId, tokenId, slug) survive an edit that did not resend them.
+    for (const [k, v] of Object.entries(stored ?? {})) if (k !== "vmId" && k !== "apiKey" && !(k in extra)) extra[k] = v;
+    cloud = vmId ? { ...extra, vmId, apiKey } : undefined;
   }
-  if (provider === "freestyle" && !freestyle?.vmId) throw new Error("a Freestyle host needs its VM id");
+  for (const need of adapter.needs) if (!cloud?.[need]) throw new Error(`a ${adapter.label} host needs its ${need === "vmId" ? "VM id" : need}`);
   const str = (k: "msb" | "msbHome" | "stagingDir" | "snapshot" | "ompSnapshot" | "claudeImage" | "ompImage"): string | undefined => {
     const v = raw[k];
     if (v === undefined) return existing?.[k];
@@ -178,11 +209,11 @@ export function normalizeHostSpec(raw: Partial<HostSpec> & { id?: string }, exis
     ...(str("stagingDir") ? { stagingDir: str("stagingDir") } : {}),
     ...(maxBoxes !== undefined ? { maxBoxes } : {}),
     priority: Math.round(num(raw.priority, existing?.priority ?? 10, -1000, 1000)),
-    sleepAfterMs: Math.round(num(raw.sleepAfterMs, existing?.sleepAfterMs ?? (provider === "freestyle" ? 300_000 : 0), 0, 24 * 3600_000)),
-    warm: raw.warm === undefined ? (existing?.warm ?? provider === "static") : !!raw.warm,
+    sleepAfterMs: Math.round(num(raw.sleepAfterMs, existing?.sleepAfterMs ?? (adapter.metered ? 300_000 : 0), 0, 24 * 3600_000)),
+    warm: raw.warm === undefined ? (existing?.warm ?? !adapter.metered) : !!raw.warm,
     enabled: raw.enabled === undefined ? (existing?.enabled ?? true) : !!raw.enabled,
     ...(allowance ? { allowance } : {}),
-    ...(freestyle ? { freestyle } : {}),
+    ...(cloud ? { cloud } : {}),
     ...(str("snapshot") !== undefined ? { snapshot: str("snapshot") } : {}),
     ...(str("ompSnapshot") !== undefined ? { ompSnapshot: str("ompSnapshot") } : {}),
     ...(str("claudeImage") !== undefined ? { claudeImage: str("claudeImage") } : {}),
@@ -190,14 +221,21 @@ export function normalizeHostSpec(raw: Partial<HostSpec> & { id?: string }, exis
   };
 }
 
+/** The `cloud` block as the dashboard sees it: every handle but the secrets, which become "is set" flags. */
+export type PublicHostCloud = { vmId: string; hasApiKey: boolean } & Record<string, string | boolean>;
+
 /** What the dashboard may see: the same spec with secrets replaced by "is set" flags. */
-export function publicHostSpec(spec: HostSpec): Omit<HostSpec, "freestyle" | "ssh"> & { ssh: string; freestyle?: { vmId: string; hasApiKey: boolean } } {
-  const { freestyle, ssh, ...rest } = spec;
-  return {
-    ...rest,
-    ssh: redactSshTarget(ssh),
-    ...(freestyle ? { freestyle: { vmId: freestyle.vmId, hasApiKey: !!freestyle.apiKey } } : {}),
-  };
+export function publicHostSpec(spec: HostSpec): Omit<HostSpec, "freestyle" | "cloud" | "ssh"> & { ssh: string; cloud?: PublicHostCloud } {
+  const { freestyle: _legacy, cloud: _cloud, ssh, ...rest } = spec;
+  const cloud = cloudOf(spec);
+  if (!cloud) return { ...rest, ssh: redactSshTarget(ssh) };
+  const secrets = new Set(providerFor(spec).secrets);
+  const pub: Record<string, string | boolean> = {};
+  for (const [k, v] of Object.entries(cloud)) {
+    if (secrets.has(k)) pub[`has${k[0].toUpperCase()}${k.slice(1)}`] = !!v;
+    else pub[k] = v;
+  }
+  return { ...rest, ssh: redactSshTarget(ssh), cloud: { ...pub, vmId: cloud.vmId, hasApiKey: !!cloud.apiKey } };
 }
 
 /** `box+user:TOKEN@proxy` → `box+user:…@proxy`; a plain `user@host` is unchanged. */
@@ -207,12 +245,20 @@ export function redactSshTarget(ssh: string): string {
 
 // --- storage --------------------------------------------------------------------------------------
 
+/** A stored row as a spec: the credentials block under its current name whichever one the row used. */
+function readSpec(json: string): HostSpec {
+  const raw = JSON.parse(json) as HostSpec;
+  const { freestyle, ...rest } = raw;
+  const cloud = raw.cloud ?? freestyle;
+  return cloud ? { ...rest, cloud } : rest;
+}
+
 export function listHostSpecs(db: Db): HostSpec[] {
   const rows = db.prepare(`SELECT spec_json FROM hosts ORDER BY created_at`).all() as { spec_json: string }[];
   const out: HostSpec[] = [];
   for (const r of rows) {
     try {
-      out.push(JSON.parse(r.spec_json) as HostSpec);
+      out.push(readSpec(r.spec_json));
     } catch {
       /* a corrupt row is skipped, never fatal */
     }
@@ -224,7 +270,7 @@ export function getHostSpec(db: Db, id: string): HostSpec | undefined {
   const row = db.prepare(`SELECT spec_json FROM hosts WHERE id = ?`).get(id) as { spec_json: string } | undefined;
   if (!row) return undefined;
   try {
-    return JSON.parse(row.spec_json) as HostSpec;
+    return readSpec(row.spec_json);
   } catch {
     return undefined;
   }

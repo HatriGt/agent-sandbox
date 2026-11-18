@@ -171,6 +171,31 @@ The per-VM maximum on Free is the default size, so a 32 GB disk is the ceiling: 
 about 5 GB, each box's private upper is small on an image boot, and the package store is under
 1 GB.
 
+## Provisioning from the dashboard (2026-11-19)
+
+The hand steps above (create the VM, make an identity, grant root, mint a token, build the SSH
+target) are now one call: **Fleet view → Box hosts → Add host → From an API key**, or
+`POST /hosts/provision.json {provider:"freestyle", name, apiKey}`. The controller creates the VM
+(idle timeout 300 s, outbound Internet allowed), the identity with root on that VM only and a
+token with no expiry, proves SSH through the proxy, then saves the row with the handles it will
+need later (`cloud.identityId`, `cloud.tokenId`, `cloud.slug`). A failure deletes what it made.
+Details and the HTTP shape are in [hosts.md](hosts.md#adding-a-freestyle-account).
+
+What is still by hand, once per account: msb 0.6.9 and the two box images. A VM provisioned from
+the stock `freestyle/ubuntu` has neither, so before a run lands on it do the "Move the host-side
+state and the box images" block above against its new SSH target (the token is in the row's SSH
+target, shown redacted; it is in the controller's `hosts` table). Then press **snapshot** on the
+row (`POST /hosts/snapshot.json {id}`): the id it returns, pasted into "Boot from" or set as
+`ASB_FREESTYLE_SNAPSHOT` in the controller's env, makes the next provision on that account boot
+with msb and the images in place. Snapshots are per account.
+
+Proven on account B on 2026-11-19 with `.shots/live/provision-proof.mjs` (run inside the
+controller container next to a copy of `dist/host-providers.js`; it reads the account's key from
+the hosts table, read-only): a VM provisioned through the adapter from the stock image answered
+`uname -n; id -un` through its minted token 8 s after the call started, the delete removed the
+identity and the VM, the account was back to its one paused `asb-host`, and the revoked token
+was refused by the proxy ("Permission denied"). The Free plan accepted the second VM.
+
 ## Second account (2026-11-18)
 
 A second Freestyle account was added as host `freestyle-b`, built the same way: VM

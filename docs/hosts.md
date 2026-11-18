@@ -17,15 +17,15 @@ and with no other row the controller behaves exactly as before.
 | Field | Meaning |
 | --- | --- |
 | `id`, `name` | The id is a slug made from the name; the primary host is always `primary`. |
-| `provider` | `static` (a machine of your own; nothing to pause) or `freestyle` (a VM the controller can pause and start through the API). |
-| `ssh` | The target, `user@host` or `box+user:TOKEN@beta-ssh.freestyle.sh`. Shown redacted everywhere (`box+user:…@proxy`). |
+| `provider` | An adapter id from `src/host-providers.ts`: `static` (a machine of your own; nothing to pause) or `freestyle` (a VM the controller can pause, start and build through the API). Open: a new provider is one adapter, and the add-host form offers whatever the controller lists. |
+| `ssh` | The target, `user@host` or `vm+user:TOKEN@<proxy>` for a VM behind its provider's SSH proxy (Freestyle: `beta-ssh.freestyle.sh`). Shown redacted everywhere (`vm+user:…@proxy`). |
 | `sshExtraOpts`, `msb`, `msbHome`, `stagingDir` | Per-host overrides of the `.env` values; blank means the primary's. |
 | `maxBoxes` | Slots on this host; blank means the primary's `MAX_BOXES`. |
 | `priority` | Lower runs first. The primary seeds at 0; a metered VM is sensibly 10. |
 | `sleepAfterMs` | The host's own quiet delay (src/host-sleep.ts); 0 never sleeps. |
 | `warm` | Keep a warm box ready here. Off for a metered host: a warm boot is not work, but it is a reason to be awake. |
 | `allowance` | `{vcpuHours, vcpu, resetDay}` for a metered account; awake minutes are counted against it. |
-| `freestyle` | `{vmId, apiKey}`; the key is stored and never sent back, a blank key on an edit keeps it. |
+| `cloud` | The provider's handles: `{vmId, apiKey}` for every cloud, plus what the provisioner wrote (Freestyle: `slug`, `identityId`, `tokenId`). The key is stored and never sent back, a blank key on an edit keeps it; the dashboard sees `hasApiKey`. Rows written before 2026-11-19 carry the block as `freestyle` and are read either way; callers may still send `freestyle`. |
 | `snapshot`, `ompSnapshot`, `claudeImage`, `ompImage` | Boot sources on this host, when they differ from the primary's. |
 
 The primary host's connection follows `.env` (`VPS_SSH`, `SSH_EXTRA_OPTS`, `MSB`, `MSB_HOME`,
@@ -247,37 +247,63 @@ Both are one number per host in the edit dialog, changed at any time.
 Admins only. **Fleet view → Box hosts** lists every host with its state (working, idle, asleep
 since, unreachable with the last error, draining, off), machines over slots, this month's allowance, the
 order number, and per-row actions: check (an SSH round trip and, for a VM, the provider state),
-pause or wake (Freestyle), edit, remove. Removing a host with machines still running is refused;
-disable it and let them finish. **Add host** is a form: name, provider, SSH target, VM id and API
-key, order, sleep-after, slots, the warm and enabled switches, an optional monthly allowance,
-and the paths and boot sources under a fold.
+pause or wake (a cloud VM), snapshot (a provider that can capture the VM), edit, remove. Removing
+a host with machines still running is refused; disable it and let them finish. **Add host** has
+two modes: **From an API key** (the provider builds the machine; see below) and **An existing
+machine**: name, provider, SSH target, VM id and API key, order, sleep-after, slots, the warm and
+enabled switches, an optional monthly allowance, and the paths and boot sources under a fold. The
+providers on offer, what each needs and what the SSH field should look like all come from the
+server (`providers` on `GET /hosts.json`).
 
 The same over HTTP, admin bearer:
 
 ```
-GET  /hosts.json                      → { hosts: HostView[], capacity }
+GET  /hosts.json                      → { hosts: HostView[], capacity, providers: ProviderInfo[] }
 POST /hosts.json  {action:"upsert", id?, spec:{...}}
 POST /hosts.json  {action:"remove" | "check" | "wake" | "pause", id}
+POST /hosts/provision.json {provider, name, apiKey, snapshotId?, priority?, sleepAfterMs?, maxBoxes?, warm?, enabled?, allowance?}
+POST /hosts/snapshot.json  {id, slug?}   → { snapshotId, slug, hint }
 ```
 
 `/health.json` carries `hosts` for admins and the Fleet page's health line says "3 hosts ·
 1 asleep · 1 unreachable" when there is more than one. Every mutation is audited
-(`host.upsert:<id>`, `host.remove:<id>`, `host.wake:<id>`, `host.pause:<id>`).
+(`host.upsert:<id>`, `host.remove:<id>`, `host.wake:<id>`, `host.pause:<id>`,
+`host.provision:<id>`, `host.snapshot:<id>`).
 
 ## Adding a Freestyle account
 
-Each account is its own VM and its own host row. Per account, once:
+Each account is its own VM and its own host row. Since 2026-11-19 the row can be built from the
+account's API key alone: **Add host → From an API key**, provider Freestyle VM, a name, the key,
+and the usual order, sleep-after, slots and allowance. `POST /hosts/provision.json` does the same.
+What it does, in order, through the same REST API the `freestyle` CLI uses:
 
-```bash
-npx -y freestyle@latest vm create asb-host-b --image freestyle/ubuntu   # then msb, images, identity: see freestyle-host.md
-npx -y freestyle@latest vm update asb-host-b --idle-timeout-seconds 300
-```
+1. Creates a VM in that account (slug = the host's id, display name `agent-sandbox <id>`,
+   idle timeout 300 s, outbound Internet allowed, from `snapshotId` if given, else
+   `ASB_FREESTYLE_SNAPSHOT` from the controller's env, else the stock `freestyle/ubuntu`).
+2. Creates an identity, grants it root on that VM only, mints a token with no expiry.
+3. Builds the SSH target `<id>+root:<token>@beta-ssh.freestyle.sh` and proves it with a plain
+   `ssh … true` through the proxy (up to two minutes; a resumed or cold VM takes a while to
+   answer).
+4. Saves the row with `cloud: {vmId, apiKey, slug, identityId, tokenId}`, runs the inline check
+   and the host-guard learn like any added host.
 
-Then **Add host**: provider Freestyle VM, the SSH target with that account's identity token, the
-VM id, that account's API key, order 10, sleep after 5, allowance 200 vCPU-hours (400 with a card),
-vCPUs 4, resets on the 1st. The controller checks the host at once and starts routing to it by
-the rules above. The VPS stays at order 0, so a run goes to a Freestyle account only when the VPS
-is full, or when you raise the VPS's order number above theirs.
+A failure at any step deletes what the earlier steps made (the identity, then the VM) and comes
+back as one line (`create VM → 402: …`, `SSH never answered: …`) with the step log; nothing is
+saved. One provision runs at a time. The key and the token are never logged.
+
+What it does **not** do: a VM from the stock image has no `msb` and no box images, so a run
+placed there would fail at boot until the runbook steps in [freestyle-host.md](freestyle-host.md)
+(copy the msb 0.6.9 bundle, load `agent-claude` and `agent-omp`) have been done on it, by hand,
+through its SSH target. The clean way around that is a **snapshot**: prepare one host, press the
+snapshot action on its row (`POST /hosts/snapshot.json`), and the next provision on that account
+boots from the id it returns (paste it in "Boot from", or set `ASB_FREESTYLE_SNAPSHOT`).
+Snapshots are per account: one taken on account A seeds account A's next VM, not B's, so each
+new account needs one prepared host first, or a public snapshot.
+
+The old way still works: create the VM with the CLI, do the runbook, and **Add host → An
+existing machine** with the SSH target, the VM id and the key. Either way, the controller checks
+the host at once and starts routing to it by the rules above. With the Freestyle hosts at order 0
+and the VPS at 10, runs go to the accounts first and share between them.
 
 ## Adding any other machine
 
@@ -334,6 +360,10 @@ for), and the hourly canary had woken the VM for nothing.
 - A box does not move between hosts. A pinned or sleeping run lives on the host it started on;
   disabling that host keeps it reachable for a resume, removing the host does not.
 - Provider adapters exist for `static` and `freestyle` (src/host-providers.ts). Another provider
-  with a pause/start API is one adapter with `state`, `pause` and `start`.
+  is one adapter: `state`, `pause`, `start`, `canDrive`, the facts the form needs (`label`,
+  `hint`, `needs`, `secrets`, the SSH hints), `proxyHost` and `sshTarget` when its machines sit
+  behind an SSH proxy, and optionally `provision`, `snapshot` and `destroy`. Nothing else in the
+  controller names a provider. A provider's machines must expose nested virtualisation
+  (`/dev/kvm`) for microsandbox, whatever the adapter says.
 - The allowance is the controller's count of awake minutes, not the provider's bill; it will be
   a little under the bill (resume time before the first SSH is not counted).
