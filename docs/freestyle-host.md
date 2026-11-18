@@ -170,3 +170,16 @@ pause the way it handles any dead box.
 The per-VM maximum on Free is the default size, so a 32 GB disk is the ceiling: images take
 about 5 GB, each box's private upper is small on an image boot, and the package store is under
 1 GB.
+
+## Second account (2026-11-18)
+
+A second Freestyle account was added as host `freestyle-b`, built the same way: VM
+`vm-bfa6ac70bbd74d2f8dd914a997df2a63` (slug `asb-host`, `freestyle/ubuntu`, idle timeout 300 s),
+msb 0.6.9 from hostbrr, identity `idn-e9dd65f0ec1e47f1a614ab0e98891d21` granted root on that VM,
+the two images streamed in through the controller container, and only `mcp.json`,
+`gh-tokens.json` and the npm store copied from hostbrr (claims, keep, parked, runs and titles
+describe boxes on other hosts and start empty). The SSH target with its token lives beside the
+first account's in `/root/agent-sandbox-deploy/.env.freestyle-b` on hostbrr, never in the repo.
+Both Freestyle hosts sit at order 0, so the picker shares runs between them by the emptier
+share and the allowance left; the VPS stays at order 10 as the fallback.
+
