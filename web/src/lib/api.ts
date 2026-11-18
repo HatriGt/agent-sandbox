@@ -550,6 +550,22 @@ export interface WatchSnapshot extends Omit<BoxView, "role"> {
   mcpNotes?: string[];
 }
 
+/** One provider the controller knows (src/host-providers.ts listProviders): what the add-host form asks for. */
+export interface HostProviderInfo {
+  id: string;
+  label: string;
+  hint: string;
+  /** `cloud` fields a host of this kind must carry ("vmId"). */
+  needs: string[];
+  /** `cloud` fields that are secrets: stored, never sent back ("apiKey"). */
+  secrets: string[];
+  sshHint: string;
+  sshPlaceholder: string;
+  canProvision: boolean;
+  canSnapshot: boolean;
+  metered: boolean;
+}
+
 /** One box host as /hosts.json and /health.json describe it (src/host-pool.ts HostStateView). */
 export interface HostView {
   id: string;
@@ -577,7 +593,8 @@ export interface HostView {
   providerState?: { state: string; detail?: string; at: number };
   check?: { ok: boolean; ms: number; detail: string; at: number };
   disk?: { reading?: { totalMib: number; usedMib: number; availMib: number; usedPct: number }; at: number; error?: string };
-  freestyle?: { vmId: string; hasApiKey: boolean };
+  /** The provider's handles with the secrets as "is set" flags; absent on a static host. */
+  cloud?: { vmId: string; hasApiKey: boolean } & Record<string, string | boolean>;
   msbHome?: string;
   stagingDir?: string;
   msb?: string;
@@ -591,7 +608,7 @@ export interface HostView {
 export interface HostSpecInput {
   id?: string;
   name?: string;
-  provider?: "static" | "freestyle";
+  provider?: string;
   ssh?: string;
   sshExtraOpts?: string;
   msb?: string;
@@ -603,7 +620,7 @@ export interface HostSpecInput {
   warm?: boolean;
   enabled?: boolean;
   allowance?: { vcpuHours: number; vcpu: number; resetDay: number } | null;
-  freestyle?: { vmId: string; apiKey: string } | null;
+  cloud?: { vmId: string; apiKey: string } | null;
   snapshot?: string;
   ompSnapshot?: string;
   claudeImage?: string;
@@ -1276,7 +1293,12 @@ export const api = {
   browserInstall: (session: string) => post<{ ok: true }>("/browser/install.json", { session }),
   updateImage: () => post<NonNullable<HealthResponse["imageUpdate"]>>("/health/image-update.json", {}),
   /** The box hosts (admins only). */
-  hosts: (signal?: AbortSignal) => fetch(url("/hosts.json"), { headers: authHeaders, signal }).then(parse<{ hosts: HostView[]; capacity: number }>),
+  hosts: (signal?: AbortSignal) => fetch(url("/hosts.json"), { headers: authHeaders, signal }).then(parse<{ hosts: HostView[]; capacity: number; providers?: HostProviderInfo[] }>),
+  /** Build a host from an API key alone (the provider makes the VM, its identity and token); one to three minutes. */
+  hostProvision: (body: { provider: string; name: string; apiKey: string; snapshotId?: string; priority?: number; sleepAfterMs?: number; maxBoxes?: number; warm?: boolean; enabled?: boolean; allowance?: { vcpuHours: number; vcpu: number; resetDay: number } | null }) =>
+    post<{ ok: boolean; host?: HostView; hosts?: HostView[]; capacity?: number; check?: HostView["check"]; log?: string[]; snapshotId?: string }>("/hosts/provision.json", body),
+  /** Snapshot a prepared host in its account so the next provision there boots from it. */
+  hostSnapshot: (id: string, slug?: string) => post<{ ok: boolean; snapshotId: string; slug?: string; hint?: string }>("/hosts/snapshot.json", { id, ...(slug ? { slug } : {}) }),
   /** A run is probably coming (the composer got focus): start the box's host, or the one a new task would take, if it is paused. */
   prewake: (box?: string) => post<{ ok: true; starting: boolean; host?: string }>("/hosts/prewake.json", box ? { box } : {}),
   hostAction: (body: { action: "upsert"; id?: string; spec: HostSpecInput } | { action: "remove" | "check" | "wake" | "pause"; id: string }) =>

@@ -49,7 +49,8 @@ import { RESCUE_MAX_MB, capturedTurn, listRescues, pullRescue, pushRescue, readR
 import { KeptBoxError } from "./msb.js";
 import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadViews, upsertThread } from "./threads.js";
 import { closeSshMasters } from "./ssh.js";
-import { PRIMARY_HOST_ID, boxHostOf } from "./hosts.js";
+import { PRIMARY_HOST_ID, boxHostOf, slugify as hostSlug } from "./hosts.js";
+import { listProviders, providerFor } from "./host-providers.js";
 import { sweepHosts } from "./host-sweep.js";
 import { countBoxes as countBoxesOnHost } from "./msb.js";
 import { BAKED_MCP_PACKAGES, BASE_PACKAGES, fetchLatestVersions, imageChanges, packageNameOf, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
@@ -89,7 +90,7 @@ import { currentPrincipal, guardDeps, makeOwnership, NotOwnedError, QuotaError, 
 import { allowShellScripts, securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, readAgentLogFull, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, mirrorInboxMessage, takeDeliveredInbox, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo, pauseRunForResize, type MemoryTier, type DiskTier } from "./msb.js";
 import { isBoxName } from "./sync.js";
-import { shellQuote } from "./exec.js";
+import { run as runCmd, shellQuote } from "./exec.js";
 import { touchClaimed, markParked } from "./claims.js";
 import { askParkEnabled, askParkGraceMs, parkWaitingBox, shouldPark } from "./snapshot.js";
 import { safeWorkspacePath } from "./artifact.js";
@@ -5708,7 +5709,7 @@ app.get("/hosts.json", (req: Request, res: Response) => {
     res.status(403).json({ error: "admins only" });
     return;
   }
-  res.json({ hosts: hostPool.state(), capacity: hostPool.capacity() });
+  res.json({ hosts: hostPool.state(), capacity: hostPool.capacity(), providers: listProviders() });
 });
 app.post("/hosts.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
@@ -5732,7 +5733,7 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
           before.msb !== spec.msb ||
           before.msbHome !== spec.msbHome ||
           JSON.stringify(before.sshExtraOpts ?? []) !== JSON.stringify(spec.sshExtraOpts ?? []) ||
-          before.freestyle?.vmId !== spec.freestyle?.vmId ||
+          before.cloud?.vmId !== spec.cloud?.vmId ||
           (!before.enabled && spec.enabled);
         const check = spec.enabled && spec.id !== PRIMARY_HOST_ID && connectionChanged ? await hostPool.check(spec.id) : undefined;
         // A new host's own addresses, before any box starts on it (src/host-guard.ts).
@@ -5793,6 +5794,128 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
   }
+});
+
+// Build a box host from an API key alone (src/host-providers.ts provision): the provider makes the
+// machine, an identity with root on it and a token, the SSH target is proved through the proxy,
+// and only then is the row saved and checked like any other. What the machine runs is the
+// provider's base image unless a snapshot is named (`snapshotId` here, or ASB_FREESTYLE_SNAPSHOT):
+// from the stock image it still needs msb and the box images from the runbook before a run lands.
+// One provision at a time: two in flight would race for the same slug and the same key.
+let provisioning: string | undefined;
+app.post("/hosts/provision.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  if (!isAdmin(principalOf(res))) {
+    res.status(403).json({ error: "admins only" });
+    return;
+  }
+  const body = (req.body ?? {}) as { provider?: string; name?: string; apiKey?: string; snapshotId?: string; priority?: unknown; maxBoxes?: unknown; sleepAfterMs?: unknown; warm?: unknown; enabled?: unknown; allowance?: unknown };
+  const provider = String(body.provider ?? "freestyle");
+  const adapter = providerFor({ provider });
+  if (adapter.id !== provider || !adapter.provision) {
+    res.status(400).json({ error: `provider "${provider}" cannot be provisioned from a key (${listProviders().filter((p) => p.canProvision).map((p) => p.id).join(", ") || "none can"})` });
+    return;
+  }
+  const name = String(body.name ?? "").trim().slice(0, 60);
+  const id = hostSlug(name);
+  const apiKey = String(body.apiKey ?? "").trim();
+  if (!name || !id) {
+    res.status(400).json({ error: "a name is required" });
+    return;
+  }
+  if (!apiKey) {
+    res.status(400).json({ error: "the account's API key is required" });
+    return;
+  }
+  if (hostPool.get(id)) {
+    res.status(409).json({ error: `a host "${id}" exists already; pick another name` });
+    return;
+  }
+  if (provisioning) {
+    res.status(409).json({ error: `"${provisioning}" is being provisioned; wait for it` });
+    return;
+  }
+  provisioning = id;
+  const log = (m: string) => console.error(`[hosts] provision ${id}: ${m}`);
+  try {
+    // The VM's sshd behind the proxy has to take the token before the row is worth saving: a plain
+    // ssh (no master: the pool opens its own once the row exists), tried for up to two minutes.
+    const sshReady = async (target: string): Promise<void> => {
+      const until = Date.now() + 120_000;
+      let last = "";
+      for (;;) {
+        try {
+          await runCmd("ssh", ["-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=20", ...(cfg.sshExtraOpts ?? []), target, "true"], { timeoutMs: 40_000 });
+          return;
+        } catch (e) {
+          last = String((e as Error).message ?? e).split("\n")[0];
+          if (Date.now() >= until) throw new Error(last);
+          await new Promise((r) => setTimeout(r, 5_000));
+        }
+      }
+    };
+    const made = await adapter.provision({ apiKey, slug: id, snapshotId: String(body.snapshotId ?? "").trim() || process.env.ASB_FREESTYLE_SNAPSHOT || undefined, idleTimeoutSeconds: 300 }, { log, sshReady });
+    if (!made.ok) {
+      res.status(502).json({ error: made.error, log: made.log });
+      return;
+    }
+    const num = (v: unknown): number | undefined => (v === undefined || v === null || v === "" ? undefined : Number(v));
+    const spec = hostPool.upsert({
+      id,
+      name,
+      provider,
+      ssh: made.ssh,
+      cloud: made.cloud,
+      priority: num(body.priority) ?? 10,
+      sleepAfterMs: num(body.sleepAfterMs) ?? 300_000,
+      warm: body.warm === undefined ? false : !!body.warm,
+      enabled: body.enabled === undefined ? true : !!body.enabled,
+      ...(num(body.maxBoxes) !== undefined ? { maxBoxes: num(body.maxBoxes) } : {}),
+      allowance: body.allowance === null ? undefined : ((body.allowance as { vcpuHours: number; vcpu: number; resetDay: number } | undefined) ?? { vcpuHours: 200, vcpu: 4, resetDay: 1 }),
+      // A fresh VM has no snapshot of the primary's: boot from the image, or cold.
+      snapshot: "",
+    } as Parameters<typeof hostPool.upsert>[0]);
+    res.locals.auditAction = `host.provision:${spec.id}`;
+    const check = await hostPool.check(spec.id);
+    if (spec.enabled) void learnHostGuard(hostPool.cfgFor(spec.id));
+    res.json({ ok: true, host: hostPool.state().find((h) => h.id === spec.id), hosts: hostPool.state(), capacity: hostPool.capacity(), check, log: made.log, snapshotId: made.snapshotId });
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  } finally {
+    provisioning = undefined;
+  }
+});
+
+// Capture a prepared host (msb and the images on it) as a snapshot in its account, so the next
+// provision there boots from it instead of the stock image. Snapshots are per account: one taken
+// on account A seeds account A's next VM, not B's.
+app.post("/hosts/snapshot.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  if (!isAdmin(principalOf(res))) {
+    res.status(403).json({ error: "admins only" });
+    return;
+  }
+  const body = (req.body ?? {}) as { id?: string; slug?: string };
+  const h = typeof body.id === "string" ? hostPool.get(body.id) : undefined;
+  if (!h) {
+    res.status(404).json({ error: "no such host" });
+    return;
+  }
+  const adapter = providerFor(h.spec);
+  if (!adapter.snapshot) {
+    res.status(400).json({ error: `a ${adapter.label} host cannot be snapshotted through its provider` });
+    return;
+  }
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/(\d{8})(\d{4})/, "$1-$2");
+  const slug = String(body.slug ?? "").trim() || `asb-host-${stamp}`;
+  const r = await adapter.snapshot(h.spec, { slug, displayName: `agent-sandbox host ${h.spec.id} ${stamp}` });
+  if (!r.ok) {
+    res.status(502).json({ error: r.error });
+    return;
+  }
+  res.locals.auditAction = `host.snapshot:${h.spec.id}`;
+  console.error(`[hosts] snapshot ${h.spec.id}: ${r.snapshotId}${r.slug ? ` (${r.slug})` : ""}`);
+  res.json({ ok: true, snapshotId: r.snapshotId, slug: r.slug ?? slug, hint: `set ASB_FREESTYLE_SNAPSHOT=${r.snapshotId} (or pass snapshotId) so the next provision on this account boots from it` });
 });
 
 // The dashboard says a run is probably on its way (a thread's composer or the new-task field got

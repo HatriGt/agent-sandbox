@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openMemoryDb } from "../src/db.js";
 import type { Config } from "../src/config.js";
+import { cloudOf } from "../src/host-providers.ts";
 import {
   PRIMARY_HOST_ID,
   addAwakeMs,
@@ -95,13 +96,26 @@ test("normalizeHostSpec: validates, keeps a stored key on an edit, redacts for t
   assert.equal(a.id, "freestyle-account-a");
   assert.equal(a.priority, 7);
   assert.equal(a.warm, false, "a metered host keeps no warm boxes by default");
-  const edited = normalizeHostSpec({ id: a.id, name: "Account A", freestyle: { vmId: "vm-a", apiKey: "" } }, a);
-  assert.equal(edited.freestyle?.apiKey, "secret", "a blank key on an edit keeps the stored one");
+  assert.deepEqual(a.cloud, { vmId: "vm-a", apiKey: "secret" }, "the old `freestyle` input lands in `cloud`");
+  assert.equal(a.freestyle, undefined, "and is never written under the old name");
+  const edited = normalizeHostSpec({ id: a.id, name: "Account A", cloud: { vmId: "vm-a", apiKey: "" } }, a);
+  assert.equal(edited.cloud?.apiKey, "secret", "a blank key on an edit keeps the stored one");
+  assert.equal(cloudOf(edited)?.apiKey, "secret");
   assert.equal(edited.ssh, a.ssh);
   const pub = publicHostSpec(edited);
   assert.equal(pub.ssh, "a+root:…@beta-ssh.freestyle.sh");
-  assert.deepEqual(pub.freestyle, { vmId: "vm-a", hasApiKey: true });
-  assert.ok(!("apiKey" in (pub.freestyle as object)));
+  assert.deepEqual(pub.cloud, { vmId: "vm-a", hasApiKey: true });
+  assert.ok(!("apiKey" in (pub.cloud as object)));
+  assert.ok(!("freestyle" in pub));
+  // Handles the provisioner wrote (identity, token, slug) ride along, survive an edit that did not
+  // resend them, and reach the dashboard as they are; only the secrets become flags.
+  const built = normalizeHostSpec({ name: "Built", ssh: "built+root:t@beta-ssh.freestyle.sh", provider: "freestyle", cloud: { vmId: "vm-b", apiKey: "k", identityId: "idn-1", tokenId: "tok-1", slug: "built", "bad key": "x", nested: { a: 1 } as never } });
+  assert.deepEqual(built.cloud, { vmId: "vm-b", apiKey: "k", identityId: "idn-1", tokenId: "tok-1", slug: "built", nested: "[object Object]" });
+  const builtEdit = normalizeHostSpec({ id: built.id, cloud: { vmId: "vm-b", apiKey: "" } }, built);
+  assert.deepEqual(builtEdit.cloud, { vmId: "vm-b", apiKey: "k", identityId: "idn-1", tokenId: "tok-1", slug: "built", nested: "[object Object]" });
+  assert.deepEqual(publicHostSpec(built).cloud, { vmId: "vm-b", hasApiKey: true, identityId: "idn-1", tokenId: "tok-1", slug: "built", nested: "[object Object]" });
+  assert.equal(normalizeHostSpec({ id: built.id, cloud: null as never, provider: "static" }, built).cloud, undefined, "null clears the block");
+  assert.throws(() => normalizeHostSpec({ name: "x", ssh: "root@x", provider: "nope" as never }), /unknown provider "nope" \(one of static, freestyle\)/);
   assert.equal(redactSshTarget("root@vps"), "root@vps");
   const off = normalizeHostSpec({ id: a.id, allowance: null as never, enabled: false }, a);
   assert.equal(off.allowance, undefined);
@@ -136,6 +150,23 @@ test("billingMonth follows the reset day", () => {
   assert.equal(billingMonth(Date.UTC(2026, 10, 16), 1), "2026-11");
   assert.equal(billingMonth(Date.UTC(2026, 10, 16), 20), "2026-10", "before the 20th it is still October's allowance");
   assert.equal(billingMonth(Date.UTC(2026, 0, 3), 5), "2025-12");
+});
+
+test("a row stored before the rename (its block under `freestyle`) reads as `cloud`, and is written back as `cloud`", () => {
+  const db = openMemoryDb();
+  db.prepare(`INSERT INTO hosts (id, spec_json, created_at, updated_at) VALUES ('old', ?, 1, 1)`).run(
+    JSON.stringify({ id: "old", name: "Old row", provider: "freestyle", ssh: "old+root:t@beta-ssh.freestyle.sh", priority: 0, sleepAfterMs: 300000, warm: false, enabled: true, freestyle: { vmId: "vm-old", apiKey: "k-old" } })
+  );
+  const read = getHostSpec(db, "old")!;
+  assert.deepEqual(read.cloud, { vmId: "vm-old", apiKey: "k-old" });
+  assert.equal("freestyle" in read, false);
+  assert.deepEqual(listHostSpecs(db)[0].cloud, { vmId: "vm-old", apiKey: "k-old" });
+  // An edit through the normal path keeps the key and writes the new shape.
+  const edited = normalizeHostSpec({ id: "old", name: "Renamed" }, read);
+  saveHostSpec(db, edited);
+  const raw = JSON.parse((db.prepare(`SELECT spec_json FROM hosts WHERE id = 'old'`).get() as { spec_json: string }).spec_json) as Record<string, unknown>;
+  assert.deepEqual(raw.cloud, { vmId: "vm-old", apiKey: "k-old" });
+  assert.equal(raw.freestyle, undefined);
 });
 
 test("getHostSpec tolerates a corrupt row", () => {

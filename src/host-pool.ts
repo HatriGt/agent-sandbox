@@ -45,6 +45,7 @@ import {
   saveHostSpec,
   seedPrimaryHost,
   type HostSpec,
+  type PublicHostCloud,
 } from "./hosts.js";
 
 export interface HostCheck {
@@ -108,7 +109,8 @@ export interface HostStateView {
   providerState?: ProviderState;
   check?: HostCheck;
   disk?: { reading?: import("./host-disk.js").DiskReading; at: number; error?: string };
-  freestyle?: { vmId: string; hasApiKey: boolean };
+  /** The provider's handles with the secrets as "is set" flags (src/hosts.ts publicHostSpec). */
+  cloud?: PublicHostCloud;
   msbHome?: string;
   stagingDir?: string;
   msb?: string;
@@ -311,7 +313,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
   const tunnel = opts.tunnel === undefined ? { ensure: ensureTunnel, drop: dropTunnel } : opts.tunnel;
   const tunnelWanted = (h: HostRuntime) => (): boolean => runtimes.get(h.spec.id) === h && h.spec.enabled && !dormant(h) && !h.unreachableSince;
   const dialTunnel = (h: HostRuntime): void => {
-    if (!tunnel || h.spec.provider === "static") return;
+    if (!tunnel || !providerFor(h.spec).proxyHost) return;
     void tunnel.ensure(h.cfg, tunnelWanted(h)).catch(() => {});
   };
 
@@ -369,7 +371,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     // A metered host the pool has no reading for yet (a restart while its VM was paused): asked now,
     // so the first sweep serves it from memory instead of burning HOST_ANSWER_TIMEOUT_MS on a dead SSH.
     for (const h of runtimes.values()) {
-      if (!h.provider && h.spec.enabled && providerFor(h.spec).metered && h.spec.freestyle?.apiKey) initial.push(refreshProvider(h.spec.id).catch(() => undefined));
+      if (!h.provider && h.spec.enabled && providerFor(h.spec).canDrive(h.spec)) initial.push(refreshProvider(h.spec.id).catch(() => undefined));
     }
   };
 
@@ -452,7 +454,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     // timer while the clock read awake): either way the VM has to be started, not only marked awake.
     const was = dormant(h);
     h.sleep.wake(reason);
-    if (was && h.spec.provider !== "static" && h.spec.freestyle?.apiKey) void providerSync(h, "start").catch(() => {});
+    if (was && providerFor(h.spec).canDrive(h.spec)) void providerSync(h, "start").catch(() => {});
   };
 
   // What a launch path gets from sleepFor(cfg): the host's clock, with a wake that goes through the
@@ -603,7 +605,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
         }
       }
       h.sleep.noteFleet(boxes);
-      if (!wasAsleep && h.sleep.asleep() && h.spec.provider !== "static" && h.spec.freestyle?.apiKey) void providerSync(h, "pause").catch(() => {});
+      if (!wasAsleep && h.sleep.asleep() && providerFor(h.spec).canDrive(h.spec)) void providerSync(h, "pause").catch(() => {});
     },
     noteSweepError: (id, err) => {
       const h = get(id);
@@ -614,7 +616,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
         log(`[hosts] ${id} unreachable: ${h.lastError}`);
       }
       // A VM that is paused at its provider is not dead; the next round serves it from memory.
-      if (providerFor(h.spec).metered && h.spec.freestyle?.apiKey) void refreshProvider(id).catch(() => {});
+      if (providerFor(h.spec).canDrive(h.spec)) void refreshProvider(id).catch(() => {});
     },
     noteDisk: (id, disk) => {
       const h = get(id);
@@ -639,7 +641,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
         // up late, or was paused or started behind the controller's back, is noticed without an SSH.
         // One that runs while the clock says asleep (the pause call failed, or someone started it by
         // hand) and has nothing working on it is paused again; it would bill until somebody noticed.
-        if (dormant(h) && providerFor(h.spec).metered && h.spec.freestyle?.apiKey) {
+        if (dormant(h) && providerFor(h.spec).canDrive(h.spec)) {
           void refreshProvider(h.spec.id)
             .then((st) => {
               if (st.state === "running" && h.sleep.asleep() && st.at - h.sleep.state().since > 90_000 && !h.lastBoxes.some(isWorkingBox)) {
@@ -701,7 +703,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
             ...(h.provider ? { providerState: h.provider } : {}),
             ...(h.check ? { check: h.check } : {}),
             ...(h.disk ? { disk: h.disk } : {}),
-            ...(pub.freestyle ? { freestyle: pub.freestyle } : {}),
+            ...(pub.cloud ? { cloud: pub.cloud } : {}),
             msbHome: h.cfg.msbHome,
             stagingDir: h.cfg.vpsStagingDir,
             msb: h.cfg.msb,
@@ -742,7 +744,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       if (!h) throw new Error(`no host "${id}"`);
       const t0 = now();
       let r: HostCheck;
-      if (providerFor(h.spec).metered && h.spec.freestyle?.apiKey) {
+      if (providerFor(h.spec).canDrive(h.spec)) {
         const st = await refreshProvider(id).catch((e): ProviderState => ({ state: "unknown", detail: String((e as Error).message ?? e), at: now() }));
         if (st.state === "paused" || st.state === "stopped") {
           // No SSH to a paused VM: it is dormant, and `ready` starts it for the next run that picks it.
@@ -822,7 +824,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     const cap = opts.answerTimeoutMs ?? HOST_ANSWER_TIMEOUT_MS;
     const patience = o.patienceMs ?? 150_000;
     let cameUp = false;
-    if (p.metered && h.spec.freestyle?.apiKey) {
+    if (p.canDrive(h.spec)) {
       // Until the provider says running, within the patience given (a Freestyle resume answered in
       // 18 s to 2 min live, and once not at all). A VM seen paused or stopped is started, including one
       // that was still pausing at the first read: the pause issued when the host fell asleep can be in

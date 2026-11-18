@@ -32,7 +32,7 @@ const instantProvider = {
 };
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
 
-const vmSpec = { id: "fs-1", name: "Freestyle 1", provider: "freestyle" as const, ssh: "a+root:t@beta-ssh.freestyle.sh", freestyle: { vmId: "vm-1", apiKey: "k" }, priority: 10, sleepAfterMs: 5 * 60_000, allowance: { vcpuHours: 200, vcpu: 4, resetDay: 1 } };
+const vmSpec = { id: "fs-1", name: "Freestyle 1", provider: "freestyle" as const, ssh: "a+root:t@beta-ssh.freestyle.sh", cloud: { vmId: "vm-1", apiKey: "k" }, priority: 10, sleepAfterMs: 5 * 60_000, allowance: { vcpuHours: 200, vcpu: 4, resetDay: 1 } };
 
 test("a pool with only the .env host routes everything to it and never sleeps", () => {
   const pool = makeHostPool(cfg, openMemoryDb());
@@ -58,6 +58,7 @@ test("adding a host: routing by box, per-host sleep, reservations, unreachable, 
   const spec = pool.upsert(vmSpec);
   assert.equal(spec.id, "fs-1");
   assert.equal(pool.capacity(), 10);
+  assert.deepEqual(pool.state().find((h) => h.id === "fs-1")?.cloud, { vmId: "vm-1", hasApiKey: true }, "the view carries the handles with the key as a flag");
   assert.ok(said.some((m) => m.includes("added fs-1")));
 
   // The primary (priority 0) is picked first; each pick holds a slot until released.
@@ -122,7 +123,9 @@ test("awake time is counted per month against a metered host, and the picker pre
   const db = openMemoryDb();
   const pool = makeHostPool(cfg, db, { now: () => t });
   pool.upsert(vmSpec);
-  pool.upsert({ ...vmSpec, id: "fs-2", name: "Freestyle 2", freestyle: { vmId: "vm-2", apiKey: "k2" } });
+  // The second one through the old `freestyle` key: an older caller is still driven (paused, started, counted).
+  pool.upsert({ ...vmSpec, id: "fs-2", name: "Freestyle 2", cloud: undefined, freestyle: { vmId: "vm-2", apiKey: "k2" } });
+  assert.deepEqual(pool.get("fs-2")!.spec.cloud, { vmId: "vm-2", apiKey: "k2" });
   // Two awake minutes on both.
   t += 60_000;
   pool.tickUsage();
