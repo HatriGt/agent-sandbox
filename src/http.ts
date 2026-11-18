@@ -47,7 +47,7 @@ import { createBox, claudeRootSource } from "./msb.js";
 import { markClaimed } from "./claims.js";
 import { RESCUE_MAX_MB, capturedTurn, listRescues, pullRescue, pushRescue, readRescue, summarize, sweepRescues } from "./rescue.js";
 import { closeSshMasters } from "./ssh.js";
-import { PRIMARY_HOST_ID } from "./hosts.js";
+import { PRIMARY_HOST_ID, boxHostOf } from "./hosts.js";
 import { sweepHosts } from "./host-sweep.js";
 import { countBoxes as countBoxesOnHost } from "./msb.js";
 import { BAKED_MCP_PACKAGES, BASE_PACKAGES, fetchLatestVersions, imageChanges, packageNameOf, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
@@ -117,7 +117,7 @@ import { makeRedactor, isPlumbingError } from "./redact.js";
 import { isSecretKey, probeMcpServer, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
 import type { BoxView, WatchSnapshot } from "./monitor.js";
 import { listChanges, readDiff, readFullDiff, discardChange, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
-import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
+import { loadRunMetas, saveRunMeta, forgetRunMeta, loadRunMetasLocal, saveRunMetaLocal, forgetRunMetaLocal, type RunMeta } from "./run-memory.js";
 import { contentDisposition, readArtifact } from "./artifact.js";
 import { existsSync, readFileSync } from "node:fs";
 import { withStartedBy, currentStartedBy, recordStartedBy, startedByOf, type StartedBy } from "./started-by.js";
@@ -1218,11 +1218,13 @@ const harnessLineOf = (box: string): { harness: { id: string; name: string; line
   if ("harness" in out) harnessLineCache.set(box, out);
   return out;
 };
+/** Hosts whose durable run memory has been read since this controller started (see the store below). */
+const runMemoryRead = new Set<string>();
 const readFleet = makeFleetReader(
   cfg,
   async () => {
     const sweepAt = Date.now();
-    const { boxes, kept, claims, titles } = await sweepHosts(cfg);
+    const { boxes, kept, claims, titles, stale } = await sweepHosts(cfg);
     // A box seen Running last sweep and Stopped now just fell asleep: re-stamp its claim so the sleep
     // TTL (and the "asleep for" figure) count from the nap rather than from when the run started.
     for (const b of boxes) {
@@ -1337,7 +1339,9 @@ const readFleet = makeFleetReader(
     sweepAttempts();
     // Memory v2: harvest live runs so a mid-run lesson reaches the thread now, not at the finish.
     void memoryTick(boxes);
-    return boxes.map((b) => ({
+    // A Stopped box nobody remembers is dead capacity only when nobody holds it (fleet.ts mergeWithMemory).
+    const held = (name: string): boolean => kept.has(name) || claims.has(name) || ownerOf(db, name) != null;
+    const views = boxes.map((b) => ({
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),
       ...harnessLineOf(b.name),
@@ -1351,6 +1355,7 @@ const readFleet = makeFleetReader(
       // For a stopped box the claim age is (a good proxy for) how long it has been asleep.
       ...(!/^running$/i.test(b.boxStatus) && claims.has(b.name) ? { asleepSec: claims.get(b.name) } : {}),
     }));
+    return { boxes: views, stale, held };
   },
   {
   decorate: (boxes) =>
@@ -1365,18 +1370,41 @@ const readFleet = makeFleetReader(
     // so this is reached only when a sweep is wedged).
     staleMs: 12_000,
     store: {
-      // Each host keeps the memory of its own boxes; the load merges every enabled host's.
+      // Each host keeps the memory of its own boxes, and the controller keeps a mirror of all of them
+      // (run-memory.ts). The mirror is read first, so a host that is asleep or unreachable when the
+      // controller starts still has its sleeping threads listed; the host's own answer wins per box
+      // and a host that could not be read (or was asleep — an SSH would wake it) is read on a later
+      // sweep instead of being written off.
       load: async () => {
-        const out = new Map<string, Awaited<ReturnType<typeof loadRunMetas>> extends Map<string, infer V> ? V : never>();
+        const out = new Map<string, RunMeta>();
+        for (const [k, v] of await loadRunMetasLocal(cfg).catch(() => new Map<string, RunMeta>())) out.set(k, v);
         await Promise.all(
           hostPool.active().map(async (h) => {
-            for (const [k, v] of await loadRunMetas(h.cfg).catch(() => new Map())) out.set(k, v);
+            const id = h.spec.id;
+            if (runMemoryRead.has(id) || hostPool.dormant(id)) return;
+            try {
+              for (const [k, v] of await loadRunMetas(h.cfg)) {
+                const m: RunMeta = { ...v, host: id };
+                out.set(k, m);
+                // The mirror learns what the host remembers, so the next restart does not depend on the host answering.
+                void saveRunMetaLocal(cfg, m).catch(() => {});
+              }
+              runMemoryRead.add(id);
+            } catch (e) {
+              console.error(`[fleet] run memory of ${id} not read yet: ${String((e as Error).message ?? e).slice(0, 120)}`);
+            }
           })
         );
         return out;
       },
-      save: (meta) => saveRunMeta(hcfg(meta.name), meta as Parameters<typeof saveRunMeta>[1]),
-      forget: (box) => forgetRunMeta(hcfg(box), box),
+      incomplete: () => hostPool.active().some((h) => !runMemoryRead.has(h.spec.id)),
+      save: async (meta) => {
+        const m = meta as RunMeta;
+        await Promise.all([saveRunMetaLocal(cfg, m), saveRunMeta(hcfg(m.name), m)]);
+      },
+      forget: async (box) => {
+        await Promise.all([forgetRunMetaLocal(cfg, box), forgetRunMeta(hcfg(box), box)]);
+      },
     },
   }
 );
@@ -3885,7 +3913,13 @@ app.get("/rescue.json", async (req: Request, res: Response) => {
     ownership.check(session);
     const m = await readRescue(cfg, session);
     const present = (await readFleet()).boxes.some((b) => b.name === session);
-    res.json({ rescue: m ? summarize(m) : null, present, maxMb: RESCUE_MAX_MB });
+    // Not listed is not gone: the box's host may be asleep or unreachable, in which case the fleet
+    // is going by memory. The client words the page accordingly and the restore checks the host first.
+    const lastHost = hostPool.hostOfBox(session) ?? boxHostOf(db, session) ?? null;
+    const unsure = (h: { id: string; asleep: boolean; unreachable: boolean }) => h.asleep || h.unreachable;
+    const hosts = hostPool.state();
+    const uncertain = !present && (lastHost ? hosts.some((h) => h.id === lastHost && unsure(h)) : hosts.some(unsure));
+    res.json({ rescue: m ? summarize(m) : null, present, uncertain, host: lastHost, maxMb: RESCUE_MAX_MB });
   } catch (e) {
     failWith(res, e);
   }
@@ -3927,6 +3961,46 @@ app.post("/rescue/restore.json", async (req: Request, res: Response) => {
     try {
       const lostAt = Date.now();
       const t0 = Date.now();
+      // The fleet not listing a box is not proof it is gone: its host may have been asleep or
+      // unreachable when the fleet last looked. (2026-11-18: a deploy restarted the controller while
+      // the Freestyle tunnel was down; a pinned thread read as lost for hours while its machine sat
+      // untouched, and the restore of that day wiped it before the copy could land.) So the host the
+      // box was last seen on is asked directly, woken if need be, before anything is created or wiped.
+      const lastHost = hostPool.hostOfBox(session) ?? boxHostOf(db, session);
+      if (lastHost) {
+        hostPool.rememberBox(session, lastHost);
+        const hostCfg = await hostPool.readyForBox(session, `restore ${session}`).catch((e) => {
+          console.error(`[rescue] ${session}: host ${lastHost} not ready: ${String((e as Error).message ?? e).slice(0, 200)}`);
+          return null;
+        });
+        const outcome = hostCfg ? await startBoxIfStopped(hostCfg, session) : "absent";
+        if (hostCfg && outcome === "running") {
+          const probe = await execInBox(hostCfg, session, "wc -c < /workspace/.agent.log 2>/dev/null || echo 0").catch(() => ({ stdout: "0" }));
+          const logBytes = Number(probe.stdout.trim().split("\n").pop()) || 0;
+          await markClaimed(hostCfg, session).catch(() => {});
+          const back = () => {
+            readFleet.forget(session);
+            watchHub.drop(session);
+            noteRunning(session);
+          };
+          if (logBytes > 0) {
+            // Out of sight, not gone: nothing is restored. The next sweep lists it.
+            back();
+            console.error(`[rescue] ${session}: found intact on ${lastHost} (${logBytes} bytes of transcript), nothing restored`);
+            res.json({ ok: true, box: session, found: true, host: lastHost });
+            return;
+          }
+          // The machine is there but empty (a restore that failed half-way): the copy goes into it.
+          await execInBox(hostCfg, session, "touch /.claimed");
+          await pushRescue(hostCfg, session, m, lostAt);
+          if (m.title) await saveTitle(hostCfg, session, m.title).catch(() => {});
+          back();
+          console.error(`[rescue] ${session}: machine found empty on ${lastHost}, copy of turn ${m.turn} put back in ${Date.now() - t0} ms`);
+          res.json({ ok: true, box: session, turn: m.turn, at: m.at, host: lastHost, inBox: true });
+          return;
+        }
+        if (outcome === "failed") throw new Error(`the machine is still on ${lastHost} but will not start; try again in a minute`);
+      }
       const hostId = await placeRun(hostPool, cfg, `restore ${session}`, async (hostCfg, onAcquired) => {
         // The same rootfs a cold claude run boots from (prepareRunCfg in deps.ts), under the old name.
         const runCfg: Config = { ...hostCfg, ...claudeRootSource(hostCfg) };

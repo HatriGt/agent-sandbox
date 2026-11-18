@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { capturedTurn, dropRescue, listRescues, pullRescue, pushRescue, readRescue, restoreSh, sizeProbeSh, pullSh, sweepRescues, type RescueIO } from "../src/rescue.ts";
+import { capturedTurn, dropRescue, listRescues, pullRescue, pushRescue, readRescue, restoreSh, sizeProbeSh, pullSh, sweepRescues, uploadSh, RESTORE_FILE, type RescueIO } from "../src/rescue.ts";
 import type { Config } from "../src/config.ts";
 
 const tmpCfg = async (): Promise<Config> => ({ dataDir: await fs.mkdtemp(path.join(os.tmpdir(), "asb-rescue-")), msb: "msb", vpsSsh: "root@host", hostId: "h1" }) as unknown as Config;
@@ -18,25 +18,39 @@ test("capturedTurn reads the checkpoint result: OK is a fresh tar, HAVE an exist
   assert.equal(capturedTurn("tar: error"), undefined);
 });
 
-test("the in-box commands name the checkpoint tar and the restore wipes, untars at /, claims, and seams the log", () => {
+test("the in-box commands name the checkpoint tar; the restore checks the archive BEFORE it wipes, untars at /, claims, and seams the log", () => {
   assert.match(sizeProbeSh(3), /\/root\/\.agent-ckpt\/t3\.tar/);
   assert.match(sizeProbeSh(3), /stat -c %s/);
   assert.match(pullSh(3), /^gzip -1 -c '\/root\/\.agent-ckpt\/t3\.tar'$/);
   const r = restoreSh(5, Date.UTC(2026, 10, 18, 12, 6));
+  assert.ok(r.indexOf(`gzip -t '${RESTORE_FILE}'`) < r.indexOf("rm -rf /workspace /root/.claude"), "a torn upload must fail before anything is wiped");
   assert.match(r, /rm -rf \/workspace \/root\/\.claude/);
-  assert.match(r, /gzip -dc \| tar -xf - -C \//);
+  assert.match(r, /gzip -dc '\/root\/rescue-restore\.tar\.gz' \| tar -xf - -C \//);
   assert.match(r, /touch \/\.claimed/);
   assert.match(r, /brought back from a copy taken after turn 5/);
   assert.match(r, /2026-11-18 12:06 UTC/);
   assert.match(r, />> \/workspace\/\.agent\.log/);
   assert.match(r, /echo RESTORED t5$/);
+  // The host-side upload stages under the host's own dir and moves the file in with `msb copy` (not exec stdin).
+  const u = uploadSh("/root/.local/bin/msb", "pool-1-abc");
+  assert.match(u, /cat > "\$HOME\/\.agent-sandbox\/rescue-in\/pool-1-abc\.tar\.gz"/);
+  assert.match(u, /'\/root\/\.local\/bin\/msb' copy -q "\$HOME\/\.agent-sandbox\/rescue-in\/pool-1-abc\.tar\.gz" 'pool-1-abc:\/root\/rescue-restore\.tar\.gz'/);
+  assert.match(u, /trap 'rm -f .*' EXIT/);
+  assert.match(u, /echo UPLOADED$/);
+  assert.throws(() => uploadSh("msb", "../etc"), /box/i);
 });
 
-function fakeIO(sizes: Record<number, number | "MISSING">, payload = "gz-bytes"): RescueIO & { pulled: string[]; pushed: Array<{ sh: string; file: string }> } {
+function fakeIO(sizes: Record<number, number | "MISSING">, payload = "gz-bytes"): RescueIO & { pulled: string[]; uploaded: string[]; applied: string[] } {
   const io = {
     pulled: [] as string[],
-    pushed: [] as Array<{ sh: string; file: string }>,
+    uploaded: [] as string[],
+    applied: [] as string[],
     exec: async (_c: Config, _b: string, sh: string) => {
+      const restore = sh.match(/RESTORED t(\d+)/);
+      if (restore) {
+        io.applied.push(sh);
+        return { stdout: `RESTORED t${restore[1]}\n` };
+      }
       const m = sh.match(/t(\d+)\.tar/);
       const s = sizes[Number(m![1])];
       return { stdout: s === undefined ? "MISSING\n" : `${s}\n` };
@@ -46,9 +60,9 @@ function fakeIO(sizes: Record<number, number | "MISSING">, payload = "gz-bytes")
       await fs.writeFile(file, payload);
       return { code: 0, stderr: "", bytes: payload.length };
     },
-    push: async (_c: Config, _b: string, sh: string, file: string) => {
-      io.pushed.push({ sh, file });
-      return { code: 0, stderr: "", stdout: "RESTORED t2\n" };
+    upload: async (_c: Config, _b: string, file: string) => {
+      io.uploaded.push(file);
+      return { code: 0, stderr: "", stdout: "UPLOADED\n" };
     },
   };
   return io;
@@ -92,15 +106,20 @@ test("pullRescue with no such checkpoint in the box leaves what is there", async
   assert.equal(await readRescue(cfg, "pool-3-abc"), null);
 });
 
-test("pushRescue feeds the kept tar to the restore command and demands the box's confirmation", async () => {
+test("pushRescue uploads the kept tar first, then applies it, and demands the box's confirmation at each step", async () => {
   const cfg = await tmpCfg();
   const io = fakeIO({ 2: 500 });
   const m = await pullRescue(cfg, "pool-4-abc", 2, {}, io);
   await pushRescue(cfg, "pool-4-abc", m!, Date.now(), io);
-  assert.equal(io.pushed.length, 1);
-  assert.match(io.pushed[0].sh, /RESTORED t2/);
-  assert.match(io.pushed[0].file, /t2\.tar\.gz$/);
-  const silent: RescueIO = { ...io, push: async () => ({ code: 0, stderr: "", stdout: "" }) };
+  assert.equal(io.uploaded.length, 1);
+  assert.match(io.uploaded[0], /t2\.tar\.gz$/);
+  assert.equal(io.applied.length, 1);
+  assert.match(io.applied[0], /RESTORED t2/);
+  // An upload that did not land: nothing is applied, so nothing in the box is wiped.
+  const lost: RescueIO & { applied: string[] } = { ...io, applied: [], upload: async () => ({ code: 1, stderr: "copy: no such sandbox", stdout: "" }) };
+  await assert.rejects(pushRescue(cfg, "pool-4-abc", m!, Date.now(), lost), /did not reach the box/);
+  assert.equal(lost.applied.length, 0);
+  const silent: RescueIO = { ...io, exec: async () => ({ stdout: "" }) };
   await assert.rejects(pushRescue(cfg, "pool-4-abc", m!, Date.now(), silent), /did not confirm/);
 });
 

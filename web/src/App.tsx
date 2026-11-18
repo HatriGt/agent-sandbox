@@ -445,7 +445,7 @@ export default function App() {
   // A thread whose machine is not in the fleet: lost, or never ours. Before bouncing home, ask
   // whether a copy of it is kept (src/rescue.ts) — if so the URL stays and the page offers to
   // bring the machine back; a thread must never just vanish on the person reading it.
-  const [lost, setLost] = React.useState<{ name: string; rescue: RescueSummary } | null>(null);
+  const [lost, setLost] = React.useState<{ name: string; rescue: RescueSummary; uncertain: boolean } | null>(null);
   React.useEffect(() => {
     if (lost && lost.name !== selected) setLost(null);
   }, [lost, selected]);
@@ -458,7 +458,7 @@ export default function App() {
       .rescue(selected)
       .then((r) => {
         if (cancelled) return;
-        if (r.rescue && !r.present) setLost({ name: selected, rescue: r.rescue });
+        if (r.rescue && !r.present) setLost({ name: selected, rescue: r.rescue, uncertain: !!r.uncertain });
         else go({ view: "hub" }, { replace: true });
       })
       .catch(() => {
@@ -1101,7 +1101,7 @@ export default function App() {
                   // The Thread takes over once it is up.
                   <BootingThread task={selectedRaw?.task || (selected === launched ? launchTask.current : "")} warm={false} machine={selected ?? undefined} inferred={selected ? inferredNotes[selected] : undefined} launchId={selected ? launchIds[selected] : undefined} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && lost && lost.name === selected ? (
-                  <LostThread name={lost.name} rescue={lost.rescue} onBack={backToRail} />
+                  <LostThread name={lost.name} rescue={lost.rescue} uncertain={lost.uncertain} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && !data ? (
                   <ThreadPageSkeleton />
                 ) : selectedBox ? (

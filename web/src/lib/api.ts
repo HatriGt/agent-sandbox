@@ -1069,9 +1069,12 @@ export const api = {
   wake: (session: string) => post<{ ok: true }>("/wake.json", { box: session }),
   /** Is a copy of this thread kept off its machine (src/rescue.ts), and is the machine still here? */
   rescue: (session: string, signal?: AbortSignal) =>
-    fetch(url("/rescue.json", { box: session }), { headers: authHeaders, signal }).then(parse<{ rescue: RescueSummary | null; present: boolean; maxMb: number }>),
+    fetch(url("/rescue.json", { box: session }), { headers: authHeaders, signal }).then(
+      parse<{ rescue: RescueSummary | null; present: boolean; /** Not listed, but its host is asleep or unreachable: it may only be out of sight. */ uncertain?: boolean; host?: string | null; maxMb: number }>
+    ),
   /** Bring a lost thread back: a fresh machine under the same name, the kept copy put into it. */
-  restoreThread: (session: string) => post<{ ok: true; box: string; turn: number; at: number; host: string | null }>("/rescue/restore.json", { box: session }),
+  /** `found`: the machine was still on its host, nothing was restored. `inBox`: the copy went into the existing (emptied) machine. */
+  restoreThread: (session: string) => post<{ ok: true; box: string; turn?: number; at?: number; host: string | null; found?: boolean; inBox?: boolean }>("/rescue/restore.json", { box: session }),
   sleep: (session: string) => post<{ ok: true }>("/sleep.json", { box: session }),
   /**
    * Resize a box's memory. Always reboots the machine — this runtime has no live resize — but the

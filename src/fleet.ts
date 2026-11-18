@@ -62,44 +62,69 @@ export function lifecycleOf(cfg: Config): FleetLifecycle {
   };
 }
 
+export interface MergeOpts {
+  /**
+   * Hosts this sweep could not read (asleep or unreachable) and served from their last snapshot. A
+   * remembered box on one of them is NOT forgotten for being absent — the snapshot may be empty
+   * (right after a controller restart it always is) — it is listed as Stopped until the host answers.
+   * On 2026-11-18 a deploy restarted the controller while the Freestyle host's tunnel was down; the
+   * first sweep saw an empty snapshot for it, forgot every box there and deleted their durable
+   * memory, and a pinned thread was "gone" for hours while its machine sat untouched on the host.
+   */
+  stale?: ReadonlySet<string>;
+  /**
+   * Is this box someone's: kept, claimed, or owned (the host markers and the owner table)? A Stopped
+   * box the memory does not know is dead capacity ONLY when nobody holds it; one that is held is a
+   * sleeping thread whose memory was lost, and it is listed under its name so it can be opened.
+   */
+  held?: (name: string) => boolean;
+}
+
+/** A remembered box, shown asleep: last-seen description, no live vitals (a frozen meter looks live). */
+function asleep(known: BoxView): BoxView {
+  return { ...known, boxStatus: "Stopped", cpu: undefined, mem: undefined, memUsage: undefined, disk: undefined };
+}
+
 /**
  * Merge the latest sweep with what we last knew about each box.
  *
  * A Stopped box still appears in `msb ls`, but its sentinels are unreadable, so the sweep reports it
  * with no task/question and runState "idle". If we saw it running earlier we know better: keep its
  * task, question and last run state so the UI can show "sleeping — wakes on reply". Unclaimed pool
- * boxes that stopped are just dead capacity (the maintainer reaps them) and are dropped. Boxes that
- * left `msb ls` entirely are forgotten.
+ * boxes that stopped are just dead capacity (the maintainer reaps them) and are dropped — unless
+ * someone holds them (`opts.held`). Boxes that left `msb ls` are forgotten, unless their host did
+ * not answer this sweep (`opts.stale`): absence from a snapshot the host never gave is no evidence.
  */
-export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>): BoxView[] {
+export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>, opts: MergeOpts = {}): BoxView[] {
   const out: BoxView[] = [];
+  const seen = new Set<string>();
   for (const b of latest) {
+    seen.add(b.name);
     if (isRunning(b.boxStatus)) {
       memory.set(b.name, b);
       out.push(b);
       continue;
     }
     const known = memory.get(b.name);
-    // A stopped box's role cannot be read (no exec); trust memory, else treat as dead capacity.
-    if (!known) continue;
     if (known) {
-      out.push({
-        ...known,
-        boxStatus: "Stopped",
-        // Metrics of a stopped box are stale; keep the last-seen uptime as "ran for" and drop live
-        // vitals. The usage meters must go with them — a meter showing a frozen number is worse than
-        // no meter, because it looks live.
-        cpu: undefined,
-        mem: undefined,
-        memUsage: undefined,
-        disk: undefined,
-      });
-    } else {
-      out.push(b);
+      // Keep the last-seen uptime as "ran for"; the host tag follows the sweep (a box is where it is listed).
+      out.push(asleep({ ...known, host: b.host ?? known.host }));
+      continue;
     }
+    // A stopped box's role cannot be read (no exec): held by someone, it is a sleeping thread; else dead capacity.
+    if (!opts.held?.(b.name)) continue;
+    const view: BoxView = { ...b, role: b.role === "pool-free" ? "pool-claimed" : b.role, runState: "idle" };
+    memory.set(b.name, view);
+    out.push(asleep(view));
   }
-  const alive = new Set(latest.map((b) => b.name));
-  for (const name of [...memory.keys()]) if (!alive.has(name)) memory.delete(name);
+  for (const [name, known] of [...memory]) {
+    if (seen.has(name)) continue;
+    if (known.host && opts.stale?.has(known.host)) {
+      out.push(asleep(known));
+      continue;
+    }
+    memory.delete(name);
+  }
   return out;
 }
 
@@ -108,17 +133,22 @@ export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>)
  * `sweep` is the SSH-backed gatherMonitor in production.
  */
 export interface RunMemoryStore {
-  /** All remembered runs (loaded once, at the first sweep). */
+  /** All remembered runs (loaded at the first sweep, and again while `incomplete()` says a source was missed). */
   load(): Promise<Map<string, Partial<BoxView> & { name: string }>>;
   /** Persist one running box's description (called only when it changed). */
   save(meta: Partial<BoxView> & { name: string }): Promise<void>;
   /** Forget a box that left `msb ls`. */
   forget(box: string): Promise<void>;
+  /** True while some source of memory (a host that was asleep or unreachable) has not been read yet. */
+  incomplete?(): boolean;
 }
+
+/** What one sweep answers: the boxes, and (from a host pool) which hosts were served from memory and who holds a box. */
+export type SweepAnswer = BoxView[] | { boxes: BoxView[]; stale?: readonly string[]; held?: (name: string) => boolean };
 
 export function makeFleetReader(
   cfg: Config,
-  sweep: () => Promise<BoxView[]>,
+  sweep: () => Promise<SweepAnswer>,
   opts: {
     ttlMs?: number;
     now?: () => number;
@@ -159,7 +189,7 @@ export function makeFleetReader(
     if (!opts.store) return;
     for (const b of boxes) {
       if (!isRunning(b.boxStatus) || b.role === "pool-free") continue;
-      const meta = { name: b.name, role: b.role, runState: b.runState, exitCode: b.exitCode, task: b.task, question: b.question, repos: b.repos, uptime: b.uptime };
+      const meta = { name: b.name, host: b.host, role: b.role, runState: b.runState, exitCode: b.exitCode, task: b.task, question: b.question, repos: b.repos, uptime: b.uptime };
       const fp = JSON.stringify(meta);
       if (written.get(b.name) === fp) continue;
       written.set(b.name, fp);
@@ -170,21 +200,26 @@ export function makeFleetReader(
   const run = (): Promise<FleetSnapshot> => {
     inFlightAt = now();
     const mine = (async () => {
-      if (!hydrated && opts.store) {
+      // Hydrate until every source answered: a host asleep or unreachable at startup is read when it
+      // is back, and its sleeping threads appear then instead of never.
+      if (opts.store && (!hydrated || opts.store.incomplete?.())) {
         try {
           for (const [name, meta] of await opts.store.load()) {
             if (!memory.has(name)) memory.set(name, { boxStatus: "Stopped", runState: "idle", role: "session", ...meta } as BoxView);
           }
+          hydrated = true;
         } catch {
-          /* start without memory; the next sweep rebuilds it */
+          /* start without memory; the next sweep tries again */
         }
-        hydrated = true;
       }
       return sweep();
     })()
-      .then((boxes) => {
+      .then((answer) => {
+        const boxes = Array.isArray(answer) ? answer : answer.boxes;
+        const stale = Array.isArray(answer) ? undefined : new Set(answer.stale ?? []);
+        const held = Array.isArray(answer) ? undefined : answer.held;
         const before = new Set(memory.keys());
-        const merged = mergeWithMemory(boxes, memory);
+        const merged = mergeWithMemory(boxes, memory, { stale, held });
         persist(boxes);
         if (opts.store) for (const name of before) if (!memory.has(name)) void opts.store.forget(name).catch(() => {});
         cached = { boxes: opts.decorate ? opts.decorate(merged) : merged, lifecycle: opts.capacity ? { ...lifecycle, capacity: opts.capacity() } : lifecycle, at: now() };

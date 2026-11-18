@@ -29,6 +29,8 @@ export const RESCUE_MAX_MB = Math.max(1, Number(process.env.RESCUE_MAX_MB) || 51
 export const RESCUE_TTL_DAYS = Math.max(1, Number(process.env.RESCUE_TTL_DAYS) || 14);
 /** A pull or a push of a few hundred MB through a proxied SSH route needs minutes, not seconds. */
 const TRANSFER_TIMEOUT_MS = 15 * 60_000;
+/** Where the copy lands in the box before it is applied (the host's `msb copy` puts it there). */
+export const RESTORE_FILE = "/root/rescue-restore.tar.gz";
 
 export interface RescueMeta {
   v: 1;
@@ -104,18 +106,39 @@ export function pullSh(turn: number): string {
 }
 
 /**
- * The in-box restore, fed the gzipped tar on stdin: wipe what a fresh box has at those paths, untar
- * at /, mark the box claimed (a run, for every reaper), and say in the transcript what happened so
- * the agent and the reader both know the dependencies are not there. Prints RESTORED on success.
+ * The host-side upload: the gzipped tar arrives on stdin, is staged under the host's own
+ * ~/.agent-sandbox and moved into the box by `msb copy`. The copy used to travel on the stdin of
+ * `msb exec` straight into `tar`; that path carries a few MB and then parks forever (measured
+ * 2026-11-18 on msb 0.6.9: 1 and 4 MB in a second, 16 MB never), and the box had already been
+ * wiped. `msb copy` moves the same 16 MB in six seconds. Prints UPLOADED on success.
  */
-export function restoreSh(turn: number, lostAt: number): string {
+export function uploadSh(msb: string, box: string): string {
+  assertBoxName(box);
+  const stage = `"$HOME/.agent-sandbox/rescue-in/${box}.tar.gz"`;
+  return (
+    `set -e; mkdir -p "$HOME/.agent-sandbox/rescue-in"; trap 'rm -f ${stage}' EXIT; ` +
+    `cat > ${stage}; ` +
+    `${shellQuote(msb)} copy -q ${stage} ${shellQuote(`${box}:${RESTORE_FILE}`)}; ` +
+    `echo UPLOADED`
+  );
+}
+
+/**
+ * The in-box restore of the uploaded file: check the archive is whole BEFORE anything is wiped,
+ * wipe what a fresh box has at those paths, untar at /, mark the box claimed (a run, for every
+ * reaper), and say in the transcript what happened so the agent and the reader both know the
+ * dependencies are not there. Prints RESTORED on success.
+ */
+export function restoreSh(turn: number, lostAt: number, file: string = RESTORE_FILE): string {
   const when = new Date(lostAt).toISOString().replace("T", " ").slice(0, 16) + " UTC";
   const seam =
     `● brought back from a copy taken after turn ${turn} — the machine was lost around ${when}; ` +
     `installed dependencies (node_modules and the like) are not in the copy, run the package manager's install if builds act oddly`;
+  const f = shellQuote(file);
   return (
-    `set -e; rm -rf /workspace /root/.claude; mkdir -p /workspace; ` +
-    `gzip -dc | tar -xf - -C /; ` +
+    `set -e; gzip -t ${f}; ` +
+    `rm -rf /workspace /root/.claude; mkdir -p /workspace; ` +
+    `gzip -dc ${f} | tar -xf - -C /; rm -f ${f}; ` +
     `touch /.claimed; ` +
     `printf '\\n%s\\n' ${shellQuote(seam)} >> /workspace/.agent.log; ` +
     `echo RESTORED t${turn}`
@@ -129,22 +152,22 @@ function sshExecArgv(cfg: Config, box: string, sh: string): string[] {
 }
 
 export interface RescueIO {
-  /** A short text command in the box (the size probe). */
-  exec: (cfg: Config, box: string, sh: string) => Promise<{ stdout: string }>;
+  /** A text command in the box (the size probe; the restore, which may take minutes). */
+  exec: (cfg: Config, box: string, sh: string, timeoutMs?: number) => Promise<{ stdout: string }>;
   /** Stream a box command's stdout to a file. */
   pull: (cfg: Config, box: string, sh: string, file: string) => Promise<{ code: number; stderr: string; bytes: number }>;
-  /** Feed a file to a box command's stdin, returning its stdout. */
-  push: (cfg: Config, box: string, sh: string, file: string) => Promise<{ code: number; stderr: string; stdout: string }>;
+  /** Feed a file to the host-side upload command's stdin (uploadSh), returning its stdout. */
+  upload: (cfg: Config, box: string, file: string) => Promise<{ code: number; stderr: string; stdout: string }>;
 }
 
 export const realRescueIO: RescueIO = {
-  exec: async (cfg, box, sh) => {
-    const r = await runStream("ssh", sshExecArgv(cfg, box, sh), { timeoutMs: 60_000 });
+  exec: async (cfg, box, sh, timeoutMs = 60_000) => {
+    const r = await runStream("ssh", sshExecArgv(cfg, box, sh), { timeoutMs });
     if (r.code !== 0) throw new Error(`exec in ${box} failed (${r.code}): ${r.stderr.trim().slice(-300)}`);
     return { stdout: r.stdout };
   },
   pull: (cfg, box, sh, file) => runStream("ssh", sshExecArgv(cfg, box, sh), { stdoutFile: file, timeoutMs: TRANSFER_TIMEOUT_MS }),
-  push: (cfg, box, sh, file) => runStream("ssh", sshExecArgv(cfg, box, sh), { stdinFile: file, timeoutMs: TRANSFER_TIMEOUT_MS }),
+  upload: (cfg, box, file) => runStream("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, uploadSh(cfg.msb, box)], { stdinFile: file, timeoutMs: TRANSFER_TIMEOUT_MS }),
 };
 
 const inFlight = new Map<string, Promise<RescueMeta | null>>();
@@ -210,14 +233,18 @@ async function writeMeta(dir: string, m: RescueMeta): Promise<void> {
 }
 
 /**
- * Put the copy into a fresh box that already exists under the box's name on the host `cfg` is
- * bound to. Throws when the copy is missing or the box did not confirm.
+ * Put the copy into a box that already exists under the box's name on the host `cfg` is bound to:
+ * upload first (nothing in the box is touched), then apply. Throws when the copy is missing, the
+ * upload did not land, or the box did not confirm — and in every case the box still holds whatever
+ * it held before.
  */
 export async function pushRescue(cfg: Config, box: string, m: RescueMeta, lostAt: number, io: RescueIO = realRescueIO): Promise<void> {
   if (m.tooBig && !m.bytes) throw new Error("the last checkpoint was too big to copy, so there is nothing to bring back");
   const file = path.join(rescueDirOf(cfg, box), m.tar);
-  const r = await io.push(cfg, box, restoreSh(m.turn, lostAt), file);
-  if (r.code !== 0 || !/RESTORED t\d+/.test(r.stdout)) throw new Error(`the box did not confirm the restore (${r.code}): ${(r.stderr || r.stdout).trim().slice(-300)}`);
+  const up = await io.upload(cfg, box, file);
+  if (up.code !== 0 || !/UPLOADED/.test(up.stdout)) throw new Error(`the copy did not reach the box (${up.code}): ${(up.stderr || up.stdout).trim().slice(-300)}`);
+  const r = await io.exec(cfg, box, restoreSh(m.turn, lostAt), TRANSFER_TIMEOUT_MS).catch((e) => ({ stdout: "", error: e as Error }));
+  if (!/RESTORED t\d+/.test(r.stdout)) throw new Error(`the box did not confirm the restore: ${("error" in r ? r.error.message : r.stdout).trim().slice(-300)}`);
 }
 
 export async function dropRescue(cfg: Pick<Config, "dataDir">, box: string): Promise<void> {

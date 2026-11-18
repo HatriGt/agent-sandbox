@@ -58,6 +58,45 @@ test("mergeWithMemory: a never-claimed pool box that died is dropped; a vanished
   assert.equal(mem.has("gone"), false);
 });
 
+test("mergeWithMemory: a box on a host that did not answer is kept and shown asleep, not forgotten", () => {
+  // The 2026-11-18 shape: the controller restarted while the Freestyle host's tunnel was down. Its
+  // snapshot was empty, and the box there (loaded from durable memory, so Stopped) must survive
+  // that sweep — and the next — until the host answers.
+  const mem = new Map<string, BoxView>();
+  mem.set("delegate-1-fs", { name: "delegate-1-fs", host: "freestyle-a", role: "session", boxStatus: "Stopped", runState: "done", task: "the pinned thread" });
+  const stale = new Set(["freestyle-a"]);
+  const out = mergeWithMemory([running("on-primary", { host: "primary" })], mem, { stale });
+  assert.deepEqual(out.map((b) => b.name).sort(), ["delegate-1-fs", "on-primary"]);
+  assert.equal(out.find((b) => b.name === "delegate-1-fs")?.boxStatus, "Stopped");
+  assert.equal(out.find((b) => b.name === "delegate-1-fs")?.task, "the pinned thread");
+  assert.ok(mem.has("delegate-1-fs"), "still remembered");
+  // The host answers and does list it: a normal sleeping box, memory intact.
+  const listed = mergeWithMemory([{ name: "delegate-1-fs", host: "freestyle-a", role: "session", boxStatus: "Stopped", runState: "idle" }], mem, { stale: new Set() });
+  assert.equal(listed[0]?.task, "the pinned thread");
+  // The host answers and does NOT list it: now it is gone.
+  const gone = mergeWithMemory([], mem, { stale: new Set() });
+  assert.equal(gone.length, 0);
+  assert.equal(mem.has("delegate-1-fs"), false);
+});
+
+test("mergeWithMemory: a Stopped box nobody remembers is listed when someone holds it (kept, claimed or owned)", () => {
+  const mem = new Map<string, BoxView>();
+  const held = (name: string) => name === "pool-2-held";
+  const out = mergeWithMemory(
+    [
+      { name: "pool-2-held", host: "freestyle-a", role: "pool-free", boxStatus: "Stopped", runState: "idle" },
+      { name: "pool-3-free", host: "freestyle-a", role: "pool-free", boxStatus: "Stopped", runState: "idle" },
+    ],
+    mem,
+    { held }
+  );
+  assert.deepEqual(out.map((b) => b.name), ["pool-2-held"]);
+  assert.equal(out[0].role, "pool-claimed", "unreadable role of a held pool box reads as claimed");
+  assert.equal(out[0].boxStatus, "Stopped");
+  assert.ok(mem.has("pool-2-held"), "remembered from here on");
+  assert.equal(mem.has("pool-3-free"), false);
+});
+
 test("makeFleetReader: caches within ttl and dedupes concurrent sweeps", async () => {
   let sweeps = 0;
   let t = 0;
@@ -127,11 +166,11 @@ test("makeFleetReader: stops sharing a sweep that never settles", async () => {
 });
 
 test("makeFleetReader: hydrates sleeping runs from the durable store and persists running ones", async () => {
-  const saved: Array<{ name: string }> = [];
+  const saved: Array<{ name: string; host?: string }> = [];
   const forgotten: string[] = [];
   const store = {
     load: async () => new Map([["pool-old", { name: "pool-old", role: "pool-claimed" as const, runState: "done" as const, task: "yesterday's run" }]]),
-    save: async (m: { name: string }) => void saved.push(m),
+    save: async (m: { name: string; host?: string }) => void saved.push(m),
     forget: async (b: string) => void forgotten.push(b),
   };
   const cfg = { idleTimeout: "15m", poolIdleTimeout: "6h", maxDuration: "1h", maxBoxes: 5, poolSize: 1 } as Config;
@@ -140,7 +179,7 @@ test("makeFleetReader: hydrates sleeping runs from the durable store and persist
     cfg,
     async () => [
       { name: "pool-old", role: "pool-free", boxStatus: "Stopped", runState: "idle" }, // stopped: role unreadable
-      running("live", { role: "pool-claimed" }),
+      running("live", { role: "pool-claimed", host: "primary" }),
     ],
     { ttlMs: 1, now: () => (t += 10), store }
   );
@@ -151,10 +190,39 @@ test("makeFleetReader: hydrates sleeping runs from the durable store and persist
   assert.equal(old.task, "yesterday's run", "a sleeping run survives a controller restart");
   assert.equal(old.runState, "done");
   assert.deepEqual(saved.map((s) => s.name), ["live"], "running claimed boxes are persisted once");
+  assert.equal(saved[0].host, "primary", "the host is remembered with the run");
   await read();
   await new Promise((r) => setImmediate(r));
   assert.equal(saved.length, 1, "unchanged description is not re-written");
   assert.deepEqual(forgotten, []);
+});
+
+test("makeFleetReader: a store that missed a source is read again; a box on a host served from memory is neither dropped nor forgotten", async () => {
+  // Restart with one host unreadable: its box comes from the controller-side mirror, the sweep
+  // serves that host from an (empty) snapshot, and the box must stay listed and its memory kept.
+  let loads = 0;
+  const forgotten: string[] = [];
+  const store = {
+    load: async () => {
+      loads++;
+      return new Map([["delegate-9-fs", { name: "delegate-9-fs", host: "freestyle-a", role: "session" as const, runState: "done" as const, task: "pinned work" }]]);
+    },
+    save: async () => {},
+    forget: async (b: string) => void forgotten.push(b),
+    incomplete: () => loads < 2,
+  };
+  const cfg = { idleTimeout: "15m", poolIdleTimeout: "6h", maxDuration: "1h", maxBoxes: 5, poolSize: 1 } as Config;
+  let t = 0;
+  const read = makeFleetReader(cfg, async () => ({ boxes: [running("live", { host: "primary" })], stale: ["freestyle-a"] }), { ttlMs: 1, now: () => (t += 10), store });
+  const first = await read();
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(first.boxes.map((b) => b.name).sort(), ["delegate-9-fs", "live"]);
+  assert.equal(first.boxes.find((b) => b.name === "delegate-9-fs")?.boxStatus, "Stopped");
+  await read();
+  await read();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(loads, 2, "loaded again while incomplete, then left alone");
+  assert.deepEqual(forgotten, [], "nothing forgotten on the word of a host that did not answer");
 });
 
 test("makeFleetReader: asleep serves the last snapshot flagged hostAsleep and never sweeps; awake sweeps and reports", async () => {

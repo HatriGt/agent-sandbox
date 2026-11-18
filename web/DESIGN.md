@@ -544,6 +544,13 @@ check when the fleet lists the box again, and App swaps the pane for the live Th
 whose box is gone but whose copy is kept show the same action. Fixture:
 `node .shots/thread-fixture.mjs lost .shots/thread-lost [--dark] [--interact=bringback]`.
 
+When `/rescue.json` says `uncertain` (the box's host is asleep or unreachable, so "not listed" is
+not "gone"), the same page speaks more carefully: the pill reads "Machine out of sight", the card
+leads with "its host is asleep or not answering, so the machine may still be there", and the one
+action is *Check and bring it back*. The progress chip walks a different set of stages (asking its
+host, waking the host, looking for the machine) and the finish is "Found · it was still there" with
+a toast saying nothing was restored. Never promise a wipe-and-rebuild when the machine may be whole.
+
 ## Composer context
 
 Picking a file from the `@` menu turns it into a removable **chip** above the text (Cursor's context

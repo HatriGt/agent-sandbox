@@ -79,6 +79,37 @@ dashboard no longer bounces to the hub when a box is missing: it asks `/rescue.j
 a copy exists, keeps the URL and shows the lost-thread page with one action, *Bring it back*.
 History rows carry the same summary and offer the action too.
 
+### Not listed is not gone (2026-11-18, second incident)
+
+The rebuilt thread "vanished" the same evening without any reaper touching it. A deploy restarted
+the controller while the Freestyle host's SSH tunnel was down; the first sweep served that host
+from an empty snapshot, `mergeWithMemory` took "absent from the snapshot" as "gone", forgot every
+box on the host and deleted their durable run memory, and the box — which had merely fallen asleep
+— was then an unknown Stopped box, dropped as dead capacity and invisible. Pressing *Bring it back*
+made it worse: the restore wiped `/workspace` and `/root/.claude` in a fresh box before streaming
+the copy in over `msb exec` stdin, which parks forever above a few MB. The in-box checkpoint tar
+saved the thread that time. Four rules now hold:
+
+- **A host that did not answer cannot lose a box.** `sweepHosts` reports which hosts it served
+  from memory (`stale`); `mergeWithMemory` keeps a remembered box on such a host, lists it as
+  Stopped, and forgets a box only when its host answered and did not list it. Run memory carries
+  the box's `host` for this.
+- **Run memory has a copy on the controller's own volume** (`<dataDir>/runs/<box>.json`, mirrored
+  on every save). It is read first at startup, so a host that is asleep or unreachable still has
+  its sleeping threads listed; the host's own memory is read when it can be (`incomplete()` retries
+  a missed host on later sweeps) and wins per box.
+- **A Stopped box that someone holds is a sleeping thread, not dead capacity.** Kept, claimed or
+  owned (`held` in the sweep answer), an unknown Stopped box is listed under its name instead of
+  dropped.
+- **The restore asks the box's host before it creates or wipes anything.** `/rescue/restore.json`
+  looks up the last host (`hostOfBox` / `box_hosts`), wakes it, `msb start`s the box if needed and
+  reads `/workspace/.agent.log`: a non-empty log means *found*, nothing is restored and the thread
+  simply reappears; an empty one gets the copy; only an absent box gets a fresh machine. The copy
+  travels host-side (`uploadSh`: stdin → `~/.agent-sandbox/rescue-in/` → `msb copy` into the box)
+  and the in-box apply runs `gzip -t` on the uploaded archive BEFORE `rm -rf`, so a torn transfer
+  leaves the box as it was. `/rescue.json` adds `uncertain` when the box's host is asleep or
+  unreachable, and the lost-thread page then says "out of sight" and offers *Check and bring it back*.
+
 What a restore does not bring back: installed dependencies (excluded from the checkpoint; the agent
 reinstalls), and anything written after the last turn ended.
 

@@ -16,6 +16,11 @@ import { cn } from "@/lib/utils";
  * task bubble where it always is), says plainly what happened, and offers ONE action: bring the
  * machine back. The restore boots a fresh sandbox under the same name and puts the copy in; the
  * fleet then lists the box and App swaps this pane for the live Thread, transcript and all.
+ *
+ * `uncertain`: the box is not listed but its host is asleep or unreachable, so the machine may only
+ * be out of sight. The page says so (grey pill "Out of sight", not "gone"), and the one action reads
+ * "Check and bring it back": the controller asks the host first and, when the machine is there,
+ * simply opens it — nothing is created or wiped.
  */
 const STAGES = [
   { at: 0, text: "finding a host" },
@@ -23,29 +28,38 @@ const STAGES = [
   { at: 14, text: "putting the copy back" },
   { at: 24, text: "almost there" },
 ];
+const CHECK_STAGES = [
+  { at: 0, text: "asking its host" },
+  { at: 6, text: "waking the host" },
+  { at: 14, text: "looking for the machine" },
+  { at: 24, text: "putting the copy back" },
+  { at: 40, text: "almost there" },
+];
 
 function fmtSize(bytes: number): string {
   if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(bytes >= 10 * 1048576 ? 0 : 1)} MB`;
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
-export function LostThread({ name, rescue, onBack }: { name: string; rescue: RescueSummary; onBack: () => void }) {
-  const [restore, setRestore] = React.useState<{ startedAt: number; done: boolean; error: string | null } | null>(null);
+export function LostThread({ name, rescue, uncertain = false, onBack }: { name: string; rescue: RescueSummary; uncertain?: boolean; onBack: () => void }) {
+  const [restore, setRestore] = React.useState<{ startedAt: number; done: boolean; found: boolean; error: string | null } | null>(null);
   const now = useNow(!!restore && !restore.done && !restore.error, 500);
   const elapsed = restore ? Math.max(0, Math.floor((now - restore.startedAt) / 1000)) : 0;
-  const stage = Math.min(STAGES.length - 1, STAGES.filter((s) => elapsed >= s.at).length - 1);
+  const stages = uncertain ? CHECK_STAGES : STAGES;
+  const stage = Math.min(stages.length - 1, stages.filter((s) => elapsed >= s.at).length - 1);
   const task = rescue.task ?? "";
   const firstLine = task.trim().split("\n")[0] ?? "";
   const title = rescue.title || (firstLine.length > 72 ? `${firstLine.slice(0, 71)}…` : firstLine) || friendlyName(name);
   const nothingKept = !!rescue.tooBig && !rescue.bytes;
 
   const bringBack = () => {
-    setRestore({ startedAt: Date.now(), done: false, error: null });
+    setRestore({ startedAt: Date.now(), done: false, found: false, error: null });
     api
       .restoreThread(name)
-      .then(() => {
-        setRestore((r) => (r ? { ...r, done: true } : r));
-        toast.success("The machine is back", { description: "Files, transcript and the agent's session were restored from the kept copy." });
+      .then((r) => {
+        setRestore((s) => (s ? { ...s, done: true, found: !!r.found } : s));
+        if (r.found) toast.success("The machine was still there", { description: "It was only out of sight. Nothing was restored; the thread continues as it was." });
+        else toast.success("The machine is back", { description: "Files, transcript and the agent's session were restored from the kept copy." });
       })
       .catch((e: unknown) => setRestore((r) => (r ? { ...r, error: e instanceof Error ? e.message : String(e) } : r)));
   };
@@ -66,7 +80,7 @@ export function LostThread({ name, rescue, onBack }: { name: string; rescue: Res
         <div className="text-muted-foreground mt-1 flex min-h-6 min-w-0 flex-nowrap items-center gap-x-2 text-meta">
           <span className="bg-foreground/6 text-muted-foreground inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold">
             <span className="bg-current size-2 rounded-full opacity-60" aria-hidden />
-            Machine gone
+            {uncertain ? "Machine out of sight" : "Machine gone"}
           </span>
           <span className="text-faint" aria-hidden>
             ·
@@ -96,8 +110,13 @@ export function LostThread({ name, rescue, onBack }: { name: string; rescue: Res
                 >
                   <p id="lost-title" className="label text-muted-foreground flex items-center gap-1.5">
                     <span className="bg-muted-foreground/60 size-1.5 rounded-full" aria-hidden />
-                    The machine behind this thread is gone
+                    {uncertain ? "The machine behind this thread is out of sight" : "The machine behind this thread is gone"}
                   </p>
+                  {uncertain && (
+                    <p className="text-foreground mt-2 text-body">
+                      Its host is asleep or not answering, so the machine may still be there with everything on it. Checking wakes the host and, if the machine is found, opens it as it was.
+                    </p>
+                  )}
                   {nothingKept ? (
                     <p className="text-foreground mt-2 text-body">
                       Its last checkpoint was {fmtSize(rescue.tooBig ?? 0)}, over the copy limit, so nothing could be kept. The archived record of each turn is still in History.
@@ -105,8 +124,8 @@ export function LostThread({ name, rescue, onBack }: { name: string; rescue: Res
                   ) : (
                     <>
                       <p className="text-foreground mt-2 text-body">
-                        A copy taken after turn {rescue.turn} ({fmtAgo(Math.round(rescue.at / 1000))}, {fmtSize(rescue.bytes)}) is kept: the files in the workspace, the transcript, and the agent's memory of the
-                        conversation. Bringing it back starts a fresh machine under the same name and puts all of that into it — your next message continues the same session.
+                        {uncertain ? "If it is not, a" : "A"} copy taken after turn {rescue.turn} ({fmtAgo(Math.round(rescue.at / 1000))}, {fmtSize(rescue.bytes)}) is kept: the files in the workspace, the transcript, and the agent's
+                        memory of the conversation. Bringing it back starts a fresh machine under the same name and puts all of that into it — your next message continues the same session.
                       </p>
                       <p className="text-muted-foreground mt-1.5 text-meta">
                         Installed dependencies are not in the copy; the agent reinstalls them when it needs them.
@@ -118,7 +137,7 @@ export function LostThread({ name, rescue, onBack }: { name: string; rescue: Res
                     {!nothingKept && !restore && (
                       <Button size="sm" onClick={bringBack}>
                         <ArchiveRestore />
-                        Bring it back
+                        {uncertain ? "Check and bring it back" : "Bring it back"}
                       </Button>
                     )}
                     {restore && (
@@ -135,10 +154,12 @@ export function LostThread({ name, rescue, onBack }: { name: string; rescue: Res
                           )}
                         </span>
                         <span className={cn("shrink-0 font-medium", restore.error ? "text-destructive" : "text-foreground")}>
-                          {restore.error ? "Could not bring it back" : restore.done ? "Back" : "Bringing it back"}
+                          {restore.error ? "Could not bring it back" : restore.done ? (restore.found ? "Found" : "Back") : uncertain ? "Checking" : "Bringing it back"}
                         </span>
                         {!restore.error && (
-                          <code className="text-muted-foreground bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-micro">{restore.done ? "the transcript follows" : STAGES[stage].text}</code>
+                          <code className="text-muted-foreground bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-micro">
+                            {restore.done ? (restore.found ? "it was still there" : "the transcript follows") : stages[stage].text}
+                          </code>
                         )}
                         {restore.error && <span className="text-muted-foreground min-w-0 truncate text-micro">{restore.error}</span>}
                         {!restore.done && !restore.error && (

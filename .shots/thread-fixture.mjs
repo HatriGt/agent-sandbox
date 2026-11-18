@@ -13,7 +13,8 @@ import { execSync as execSyncX } from "node:child_process";
 //             nearly full mid-run: the rescue card) · resized (a turn paused for a memory bump, the
 //             continuation row, the agent carrying on) · lost (the machine is gone, a rescue copy
 //             is kept: LostThread; --interact=bringback presses the button, /rescue/restore.json
-//             answers after --restore-ms, default 4000)
+//             answers after --restore-ms, default 4000; --uncertain: the box's host is asleep, the
+//             page says "out of sight" and the restore answers "found")
 // interact  : file · review · scrolled · slash · mention · model · multiline · workspace · ws-tour (--slow-files for the skeleton) · minimap · question-kbd · sidechat
 //             bump (press "Add memory & continue" on the pressure scenario; /memory.json answers after --resize-ms, default 2500)
 // --stream  : serve /watch.sse from a local server that drips the final answer in over ~6s
@@ -495,10 +496,17 @@ await page.route("**/*", async (route) => {
     case "/monitor.json":
       return json(route, { boxes: scenario === "lost" && !restored ? [] : [box] });
     case "/rescue.json":
-      return json(route, { rescue: { box: NAME, turn: 4, at: Date.now() - 23 * 60_000, bytes: 18.4 * 1048576, agent: "claude", task: TASK, title: "Sliding-window rate limiter" }, present: scenario !== "lost" || restored, maxMb: 512 });
+      return json(route, {
+        rescue: { box: NAME, turn: 4, at: Date.now() - 23 * 60_000, bytes: 18.4 * 1048576, agent: "claude", task: TASK, title: "Sliding-window rate limiter" },
+        present: scenario !== "lost" || restored,
+        uncertain: flags.includes("--uncertain") && !restored,
+        host: "freestyle-a",
+        maxMb: 512,
+      });
     case "/rescue/restore.json": {
       await new Promise((r) => setTimeout(r, Number(flag("restore-ms", 4000))));
       restored = true;
+      if (flags.includes("--uncertain")) return json(route, { ok: true, box: NAME, found: true, host: "freestyle-a" });
       return json(route, { ok: true, box: NAME, turn: 4, at: Date.now(), host: "freestyle-a" });
     }
     case "/watch.json":
