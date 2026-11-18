@@ -67,6 +67,8 @@ import { findPullRequests } from "@/lib/testReport";
 import { ThreadSkeleton } from "./Skeletons";
 import { Swap } from "@/components/ui/swap";
 import { AttachedFromTask } from "./BootingThread";
+import { LaunchBubble, LaunchReceipt } from "./LaunchSteps";
+import { endLaunch } from "@/hooks/useLaunch";
 import { SendBar } from "./SendBar";
 import { cn } from "@/lib/utils";
 
@@ -81,6 +83,7 @@ export function Thread({
   fleet = [],
   onOpenBox,
   inferredRepos,
+  launchId,
   replies,
   onReplied,
   onRepliesSettled,
@@ -95,6 +98,8 @@ export function Thread({
   hostAsleep = false,
 }: {
   box: BoxView;
+  /** The launch feed this tab opened for the box (hooks/useLaunch): its stages are shown until the first words. */
+  launchId?: string;
   lifecycle: FleetLifecycle;
   /** The box's host is asleep, paused or starting: a wake takes a minute, and the card says so. */
   hostAsleep?: boolean;
@@ -500,6 +505,10 @@ export function Thread({
   // output (or the run ending) is what replaces it.
   const emptyLaunch = !!snap && !snap.log.trim() && !!box.task && runState !== "done" && exitCode == null;
   const loadingTrace = (!snap || emptyLaunch) && !sleeping;
+  // The first words are here: the launch feed has nothing more to tell this tab.
+  React.useEffect(() => {
+    if (launchId && !loadingTrace) endLaunch(launchId);
+  }, [launchId, loadingTrace]);
 
   // The run receipt: fetched once when a run ends (keyed by exit code + trace length so a box that
   // resumes and finishes again gets a fresh digest). Silent on failure — the thread stands alone.
@@ -1160,17 +1169,17 @@ export function Thread({
               </div>
             )}
             {inferredRepos && inferredRepos.length > 0 && <AttachedFromTask repos={inferredRepos} />}
+            {!loadingTrace && !sleeping && <LaunchReceipt launchId={launchId} />}
 
-
-            {/* Skeleton → transcript is a crossfade, not a cut: the placeholder is shaped like the
-                content, so the swap reads as the bones filling in. */}
+            {/* Launch bubble (this tab's launch) or skeleton → transcript is a crossfade, not a cut:
+                the placeholder is shaped like the content, so the swap reads as the bones filling in. */}
             <ExpandAll.Provider value={expandAll}>
             <LiveRegistryContext.Provider value={liveContext}>
             <VizFullscreenGate.Provider value={onVizFullscreen}>
             <RepeatedPolls.Provider value={repeats}>
             <Density.Provider value={density}>
             <Swap state={loadingTrace} mode="popLayout" className="flex flex-col gap-5">
-            {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
+            {loadingTrace && (launchId ? <LaunchBubble launchId={launchId} machine={box.name} /> : <ThreadSkeleton withTask={!!box.task} />)}
             {!loadingTrace && groups.map((g, i) => {
               const key = keys[i];
               // The ⟦ask⟧ block lands in the log the moment the agent asks. While that question is

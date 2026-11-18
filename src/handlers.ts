@@ -19,6 +19,7 @@ import type { GitAccessResolution } from "./gh-token-store.js";
 import type { AgentCreds } from "./msb.js";
 import { reserveBox } from "./capacity.js";
 import type { ElicitOutcome } from "./interactive.js";
+import type { LaunchReporter } from "./launch-progress.js";
 import { verifyPlanOf, formatVerifyResult, type VerifyPlan, type VerifyResult } from "./verify.js";
 
 /**
@@ -31,6 +32,8 @@ export interface Interact {
   progress?: (message: string) => Promise<void>;
   /** Return at launch instead of blocking to the first boundary (dashboard path — see delegate-flow). */
   detach?: boolean;
+  /** Each stage of the launch as it starts (src/launch-progress.ts); the dashboard shows them live. */
+  phase?: LaunchReporter;
 }
 
 export interface DelegationResult {

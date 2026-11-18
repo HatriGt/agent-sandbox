@@ -64,6 +64,8 @@ import { describeEvent } from "@/lib/activity";
 import { titleOf, runDuration, tokensOf } from "@/lib/history-format";
 import { fmtTokens } from "@/components/thread/OutcomeCard";
 import { HubPulse } from "@/components/HubPulse";
+import { newLaunchId } from "@/lib/launch";
+import { endLaunch, startLaunch } from "@/hooks/useLaunch";
 
 /**
  * The hub: what you see with no machine selected.
@@ -244,7 +246,8 @@ export function Hub({
   /** The fleet poll is failing and nothing has been received: the sentence must not promise a machine. */
   offline?: boolean;
   sessionRuns: SessionRun[];
-  onBooting: (task: string) => void;
+  /** Send was pressed: the booting pane takes over, following the launch's feed under `launchId`. */
+  onBooting: (task: string, launchId: string) => void;
   onStarted: (box: string, task: string, inferred?: string[]) => void;
   onFailed: () => void;
   onPending: (p: { id: string; task: string }) => void;
@@ -467,11 +470,16 @@ export function Hub({
     setBusy(true);
     setError(null);
     const attached = images;
+    // The launch's feed is opened BEFORE the request goes out: the controller names each stage
+    // (host, clone, sandbox, agent) while this POST is still open, and the pane shows them live.
+    const launchId = newLaunchId();
+    startLaunch(launchId);
     onPending({ id, task: t });
-    onBooting(t);
+    onBooting(t, launchId);
     try {
       const res = await api.delegate({
         task: t,
+        launchId,
         repos: picked.length ? picked.map((p) => ({ repo: p.repo, ref: p.ref || undefined })) : undefined,
         attachments: attached.length ? attached.map((i) => ({ name: i.name, dataUrl: i.dataUrl })) : undefined,
         ...(provPick ? { model: provPick.id, provider: provPick.provider } : model.picked ? { model: model.picked } : {}),
@@ -506,11 +514,13 @@ export function Hub({
           ...(verify && verifyActive ? { verify } : {}),
           error: res.question,
         };
+        endLaunch(launchId);
         onFailed();
         setError(res.question);
         toast.error("Could not start the task", { description: res.question });
       }
     } catch (e) {
+      endLaunch(launchId);
       const msg = e instanceof Error ? e.message : String(e);
       failedSubmit = {
         task: t,

@@ -17,6 +17,7 @@ import { reserveBox } from "./capacity.js";
 import type { VerifyPlan } from "./verify.js";
 import { providerFitsDriver, driversFor, type ProviderRecord } from "./providers.js";
 import { AGENT_LABELS } from "./agent-kind.js";
+import type { LaunchReporter } from "./launch-progress.js";
 
 export interface DelegateFlowInput {
   source?: DelegateSource;
@@ -46,6 +47,8 @@ export interface DelegateFlowInput {
    * than it was. MCP callers keep the blocking default — the open tool call IS their listener.
    */
   detach?: boolean;
+  /** Each launch stage as it starts (src/launch-progress.ts), for the dashboard's launch bubble. */
+  onPhase?: LaunchReporter;
   /** Explicit acknowledgement of a "supervised: partial" driver. */
   allowPartialSupervision?: boolean;
   /** The caller's model provider (already resolved to the owner's record by the route). */
@@ -104,6 +107,7 @@ export async function runDelegateFlow(
   const tFlow = Date.now();
   let creds: AgentCreds | undefined;
   {
+    input.onPhase?.("access");
     const res = await deps.resolveGitAccess(cfg, v.plan, {
       githubToken: input.githubToken,
       githubAccount: input.githubAccount,
@@ -136,7 +140,7 @@ export async function runDelegateFlow(
   }
 
   try {
-    const r = await deps.runDelegation(cfg, v.plan, input.allowDomains, creds, { detach: input.detach });
+    const r = await deps.runDelegation(cfg, v.plan, input.allowDomains, creds, { detach: input.detach, phase: input.onPhase });
     return { ok: true, box: r.box, warm: r.warm, output: r.output, repos: v.plan.repos, ...(r.setupDetected ? { setupDetected: r.setupDetected } : {}) };
   } finally {
     release();

@@ -32,6 +32,28 @@ await page.route("**/delegate.json*", async (r) => {
   if (mode === "fail") return r.fulfill({ status: 500, json: { error: "no capacity (test)" } });
   r.fulfill({ json: { ok: true, box: BOX, warm: false, output: "" } });
 });
+// The launch feed (src/launch-progress.ts): stages land while /delegate is still open.
+const STEPS = [
+  ["accepted", 100],
+  ["access", 250],
+  ["host", 350],
+  ["clone", 500, "acme/orders-api"],
+  ["sandbox", 800, "warm"],
+  ["agent", 1100],
+  ["started", DELEGATE_MS - 100, BOX],
+];
+const LABELS = { accepted: "Checking the task", access: "Resolving repository access", host: "Picking a host", clone: "Cloning acme/orders-api", sandbox: "Claiming a warm sandbox", agent: "Starting the agent", started: "Agent started" };
+await page.route("**/launch.sse*", async (r) => {
+  if (mode === "fail") {
+    await new Promise((res) => setTimeout(res, DELEGATE_MS));
+    return r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: `event: step\nid: 0\ndata: ${JSON.stringify({ phase: "failed", label: "Could not start", detail: "no capacity (test)", at: Date.now() })}\n\nevent: done\ndata: {}\n\n` });
+  }
+  // Playwright cannot trickle a body, so the whole feed is answered at once after the last stage's
+  // delay would have passed; the bubble's row-by-row arrival is checked live, not here.
+  await new Promise((res) => setTimeout(res, STEPS[STEPS.length - 1][1]));
+  const body = STEPS.map(([phase, , detail], i) => `event: step\nid: ${i}\ndata: ${JSON.stringify({ phase, label: LABELS[phase], ...(detail ? { detail } : {}), at: Date.now() })}\n\n`).join("") + "event: done\ndata: {}\n\n";
+  r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body });
+});
 let sseHits = 0;
 await page.route("**/watch.sse*", async (r) => {
   sseHits++;
@@ -70,7 +92,8 @@ for (let i = 0; i < N; i++) {
       url: location.pathname,
       bubble: r ? [Math.round(r.x * 10) / 10, Math.round(r.y * 10) / 10, Math.round(r.width), Math.round(r.height)] : null,
       opacity: bubble ? Math.round(op * 100) / 100 : 0,
-      skeleton: !!document.querySelector("main [aria-label='Loading the conversation']"),
+      skeleton: !!document.querySelector("main [aria-label='Loading the conversation'], main [data-launch-steps]"),
+      steps: [...document.querySelectorAll("main [data-launch-steps] li")].map((li) => li.textContent.trim()),
       prose: text.includes("reproducing the flaky"),
       hub: !!ta,
       hubText: ta ? ta.value : null,

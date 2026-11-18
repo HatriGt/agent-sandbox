@@ -496,6 +496,7 @@ export const deps: HandlerDeps = {
     // Which host takes this run (src/host-pick.ts; placeRun holds the slot until the box is in
     // `msb ls`, so a parallel fan-out cannot overshoot one host while the total gate still passes,
     // and moves the run to the next host when this one fails before the box exists).
+    interact?.phase?.("host");
     return placeRun(
       hostPool(),
       cfg,
@@ -503,7 +504,7 @@ export const deps: HandlerDeps = {
       (hostCfg, onAcquired) => runOnHost(prepareRunCfg(hostCfg, plan, allowDomains), hostCfg, plan, allowDomains, creds, interact, onAcquired),
       undefined,
       // The controller's own canary checks what is up; it never wakes a paused VM for that.
-      { awakeOnly: isCanaryTask(plan.task) }
+      { awakeOnly: isCanaryTask(plan.task), onWaking: (host) => interact?.phase?.("host", host) }
     );
   },
 
@@ -748,6 +749,7 @@ async function runOnHost(runCfg: Config, cfg: Config, plan: DelegatePlan, allowD
   try {
     for (const r of plan.repos) {
       const dest = repoStagingPath(runCfg, id, r.name);
+      interact?.phase?.("clone", r.repo);
       if (plan.source === "git") {
         const owner = ownerOf(r.repo);
         if (owner) repoOwners[r.name] = owner;
@@ -793,7 +795,8 @@ async function runOnHost(runCfg: Config, cfg: Config, plan: DelegatePlan, allowD
   }
   let acquiredBox: { box: string; warm: boolean };
   try {
-    acquiredBox = await acquireBox(runCfg, id, sessionRoot, eligible, poolAgent, boxOwner);
+    interact?.phase?.("sandbox");
+    acquiredBox = await acquireBox(runCfg, id, sessionRoot, eligible, poolAgent, boxOwner, (kind) => interact?.phase?.("sandbox", kind));
   } catch (e) {
     // No box: the staged checkout would otherwise sit on this host (placeRun may try another one next).
     if (sessionRoot) void cleanupStaging(runCfg, sessionRoot);
@@ -837,14 +840,17 @@ async function runOnHost(runCfg: Config, cfg: Config, plan: DelegatePlan, allowD
   let layout: RepoLayout[] = plan.repos;
   let setupDetected: Record<string, SetupProfile> | undefined;
   if (plan.setup && plan.repos.length) {
+    interact?.phase?.("setup");
     const r = await prepareRepoSetup(runCfg, box, plan.repos, plan.setup);
     layout = r.layout;
     if (Object.keys(r.detected).length) setupDetected = r.detected;
     mark("setup");
   }
   // Harness rules ride beside the task (system prompt), never inside it — see DelegatePlan.rules.
+  interact?.phase?.("agent");
   await runAgentTask(runCfg, box, plan.task, layout, runCreds, plan.model, plan.agent, plan.rules, plan.secrets);
   mark("launch");
+  interact?.phase?.("started", box);
   console.error(`[timing] delegate ${box} warm=${warm} total=${Date.now() - t0}ms ${marks.join(" ")}`);
   const extra = setupDetected ? { setupDetected } : {};
   // A detached caller (the dashboard) needs only the box name — its thread view attaches over

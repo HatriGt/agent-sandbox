@@ -91,7 +91,8 @@ import { safeWorkspacePath } from "./artifact.js";
 import { gitStatus, gitCommitAll, gitPush } from "./git-ops.js";
 import { loadTitles, generateTitle, forgetTitle, saveTitle, cleanTitle } from "./titles.js";
 import { runDelegateFlow } from "./delegate-flow.js";
-import { streamWatch } from "./watch-sse.js";
+import { sseFrame, streamWatch } from "./watch-sse.js";
+import { LaunchRegistry, isLaunchId, type LaunchReporter } from "./launch-progress.js";
 import { WatchHub } from "./watch-hub.js";
 import { makeFleetReader } from "./fleet.js";
 import { Inbox, startInboxDelivery } from "./inbox.js";
@@ -466,6 +467,9 @@ const withMemoryNew = (snap: WatchSnapshot, box: string): WatchSnapshot => {
   const memoryNew = memoryHarvester.memoryNew(box);
   return memoryNew ? { ...snap, memoryNew } : snap;
 };
+// What each dashboard launch is doing, from the POST to the agent's first words (src/launch-progress.ts).
+const launches = new LaunchRegistry();
+
 const watchHub = new WatchHub({
   read: async (s) => withMemoryNew(redactSnap(await gatherWatch(hcfg(s), s, undefined, { metrics: false })), s),
   // A thread open on a box whose host is asleep or paused is served its last snapshot: an SSH would
@@ -2015,6 +2019,64 @@ app.get("/watch.sse", (req: Request, res: Response) => {
   // Stop the server-side tail the instant the browser goes away (tab closed, navigated, network drop)
   // so a disconnected viewer never keeps hitting SSH for a box no one is watching.
   req.on("close", stop);
+});
+
+// A launch's stages as they happen (src/launch-progress.ts): `step` frames (id = the step's index,
+// so a reconnect's Last-Event-ID resumes after it), `done` once the agent has started or the launch
+// failed. Same header-only auth as /watch.sse; the entry must belong to the caller. Subscribing
+// before the delegate POST has opened the entry is the normal order — the browser does both at once.
+app.get("/launch.sse", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const id = req.query.id;
+  if (!isLaunchId(id)) {
+    res.status(400).json({ error: "id query param required" });
+    return;
+  }
+  const principal = principalOf(res);
+  const owner = principal.kind === "user" ? principal.userId : OPERATOR_OWNER;
+  const lastEventId = Number(req.headers["last-event-id"]);
+  const from = Number.isFinite(lastEventId) && lastEventId >= 0 ? lastEventId + 1 : 0;
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+  res.write(`retry: 2000\n\n`);
+  let closed = false;
+  const beat = setInterval(() => {
+    if (!closed) res.write(`: ping\n\n`);
+  }, 15_000);
+  const finish = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(beat);
+    res.end();
+  };
+  const off = launches.subscribe(
+    id,
+    {
+      owner,
+      onStep: (step, index) => {
+        if (!closed) res.write(sseFrame("step", step, index));
+      },
+      onClose: () => {
+        if (!closed) res.write(sseFrame("done", {}));
+        finish();
+      },
+    },
+    from
+  );
+  if (off === false) {
+    // Not this caller's launch: nothing to tell, and nothing to reveal.
+    res.write(sseFrame("done", {}));
+    finish();
+    return;
+  }
+  req.on("close", () => {
+    off();
+    finish();
+  });
 });
 
 // Download / preview a file the agent produced inside a box's /workspace. Same header-only dashAuthed
@@ -4602,7 +4664,26 @@ type DelegateReply = { status: number; json: Record<string, unknown> };
  * MCP `attempts` lane start each attempt through exactly the same gates. `principal` replaces the
  * response locals; `attempt` links the box to its group instead of a harness compare.
  */
-const delegateOnce = async (body0: Record<string, unknown>, principal: Principal, attempt?: { groupId: string; index: number }): Promise<DelegateReply> => {
+const delegateOnce = async (body: Record<string, unknown>, principal: Principal, attempt?: { groupId: string; index: number }): Promise<DelegateReply> => {
+  // The launch bubble's feed: opened on the browser's id, closed by the flow's `started` step or by
+  // whatever stopped the launch, so a viewer is never left waiting on a launch that already failed.
+  // One attempt of a group does not report: the group's page follows its boxes, not one launch.
+  const launchId = !attempt && isLaunchId(body.launchId) ? body.launchId : undefined;
+  const launch = launchId ? launches.open(launchId, principal.kind === "user" ? principal.userId : OPERATOR_OWNER) : undefined;
+  launch?.("accepted");
+  try {
+    const r = await delegateOnceInner(body, principal, attempt, launch);
+    if (launchId && (r.status !== 200 || (r.json as { ok?: boolean }).ok === false)) {
+      launches.fail(launchId, String((r.json as { error?: string; question?: string }).error ?? (r.json as { question?: string }).question ?? `HTTP ${r.status}`));
+    }
+    return r;
+  } catch (e) {
+    if (launchId) launches.fail(launchId, (e as Error).message ?? String(e));
+    throw e;
+  }
+};
+
+const delegateOnceInner = async (body0: Record<string, unknown>, principal: Principal, attempt: { groupId: string; index: number } | undefined, launch: LaunchReporter | undefined): Promise<DelegateReply> => {
   let body = body0;
   if (typeof body.task !== "string" || !body.task.trim()) return { status: 400, json: { error: "task is required" } };
   const rawTask = body.task;
@@ -4779,6 +4860,7 @@ const delegateOnce = async (body0: Record<string, unknown>, principal: Principal
       // The browser needs only the box name (the thread attaches over SSE); blocking this response
       // on the interactive wait window made task starts ~50s slower than the box actually was.
       detach: true,
+      onPhase: launch,
     }));
     if (result.ok) {
       if (model) boxModels.set(result.box, model);
@@ -4815,7 +4897,7 @@ const attempts = makeAttempts({
   startOne: async (spec, task, link) => {
     const job = attemptJobs.get(link.groupId);
     if (!job) return { ok: false, question: "attempt group context lost" };
-    const body: Record<string, unknown> = { ...job.body, task, attempts: undefined, attemptSpecs: undefined, compareId: undefined, compareSide: undefined };
+    const body: Record<string, unknown> = { ...job.body, task, attempts: undefined, attemptSpecs: undefined, compareId: undefined, compareSide: undefined, launchId: undefined };
     for (const k of ["agent", "model", "provider", "harness"] as const) if (spec[k]) body[k] = spec[k];
     if (spec.agent && !spec.model) delete body.model;
     if (spec.agent && !spec.provider && spec.model) delete body.provider;

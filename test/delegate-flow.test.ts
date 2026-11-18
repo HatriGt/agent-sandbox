@@ -157,3 +157,18 @@ test("harness end to end: applyHarness output reaches the plan — task untouche
   } as any, { source: "git", repo: "o/n", task: "t" });
   assert.equal(plain.rules, undefined);
 });
+
+test("onPhase: the access stage is reported by the flow and the reporter reaches runDelegation as interact.phase", async () => {
+  const phases: string[] = [];
+  const report = (p: string) => phases.push(p);
+  const r = await runDelegateFlow(cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
+    runDelegation: async (_cfg: any, _plan: any, _domains: any, _creds: any, interact: any) => {
+      interact?.phase?.("agent");
+      return { box: "box-p", warm: true, output: "run:started" };
+    },
+  } as any, { source: "git", repo: "o/n", task: "t", detach: true, onPhase: report as any });
+  assert.equal(r.ok, true);
+  assert.deepEqual(phases, ["access", "agent"]);
+});

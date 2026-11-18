@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { ChatContainerContent, ChatContainerRoot } from "@/components/ui/chat-container";
 import { bootingHeadline } from "@/lib/booting";
 import { friendlyName } from "@/lib/format";
-import { ThreadSkeleton } from "./Skeletons";
+import { LaunchBubble } from "./LaunchSteps";
 import { YouItem } from "./TraceItems";
 import { cn } from "@/lib/utils";
 
@@ -22,12 +22,15 @@ export function BootingThread({
   warm,
   machine,
   inferred,
+  launchId,
   onBack,
 }: {
   task: string;
   warm: boolean;
   machine?: string;
   inferred?: string[];
+  /** The launch feed this tab opened (hooks/useLaunch); absent after a refresh mid-boot. */
+  launchId?: string;
   onBack: () => void;
 }) {
   const name = machine ? friendlyName(machine) : undefined;
@@ -75,7 +78,7 @@ export function BootingThread({
                 </div>
                 {inferred && inferred.length > 0 && <AttachedFromTask repos={inferred} />}
                 <div className="flex min-w-0 flex-col gap-5">
-                  <ThreadSkeleton withTask />
+                  <LaunchBubble launchId={launchId} machine={machine} />
                 </div>
               </ChatContainerContent>
             </ChatContainerRoot>

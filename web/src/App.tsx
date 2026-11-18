@@ -222,11 +222,15 @@ export default function App() {
     machine?: string;
     /** Repos attached because the task named them — shown inline, in the pane and the thread. */
     inferred?: string[];
+    /** The launch feed this tab opened for it (hooks/useLaunch): the pane narrates its stages. */
+    launchId: string;
   } | null>(null);
   const bootingRef = React.useRef(booting);
   bootingRef.current = booting;
   // The inline "Attached from the task" note, keyed by box, surviving the booting→thread swap.
   const [inferredNotes, setInferredNotes] = React.useState<Record<string, string[]>>({});
+  // Each launched box's feed id, so the Thread keeps narrating the launch until the first words.
+  const [launchIds, setLaunchIds] = React.useState<Record<string, string>>({});
   const [pending, setPending] = React.useState<{ id: string; task: string }[]>([]);
   const [replies, setReplies] = React.useState<Record<string, PendingReply[]>>({});
 
@@ -1067,12 +1071,12 @@ export default function App() {
                     <PullRequestPage session={route.name} repo={route.repo} number={route.number} />
                   </PageEnter>
                 ) : booting && !selectedBox ? (
-                  <BootingThread task={booting.task} warm={booting.warm} machine={booting.machine} inferred={booting.inferred} onBack={backToRail} />
+                  <BootingThread task={booting.task} warm={booting.warm} machine={booting.machine} inferred={booting.inferred} launchId={booting.launchId} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && (selectedRaw || (selected && selected === launched)) ? (
                   // Reopened (or refreshed) while the machine is still booting, or just launched and
                   // not yet in the fleet: the same launch shell, never a blank pane or a bounce home.
                   // The Thread takes over once it is up.
-                  <BootingThread task={selectedRaw?.task || (selected === launched ? launchTask.current : "")} warm={false} machine={selected ?? undefined} inferred={selected ? inferredNotes[selected] : undefined} onBack={backToRail} />
+                  <BootingThread task={selectedRaw?.task || (selected === launched ? launchTask.current : "")} warm={false} machine={selected ?? undefined} inferred={selected ? inferredNotes[selected] : undefined} launchId={selected ? launchIds[selected] : undefined} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && !data ? (
                   <ThreadPageSkeleton />
                 ) : selectedBox ? (
@@ -1083,6 +1087,7 @@ export default function App() {
                     hostAsleep={!!selectedBox.host && !!data?.hostsAsleep?.includes(selectedBox.host)}
                     onOpenBox={(b) => go({ view: "box", name: b })}
                     inferredRepos={inferredNotes[selectedBox.name]}
+                    launchId={launchIds[selectedBox.name]}
                     replies={replies[selectedBox.name] ?? []}
                     onReplied={(reply) =>
                       setReplies((prev) => ({ ...prev, [selectedBox.name]: [...(prev[selectedBox.name] ?? []), reply] }))
@@ -1122,9 +1127,10 @@ export default function App() {
                     loading={loading}
                     offline={!!error && !live}
                     sessionRuns={runs}
-                    onBooting={(task) =>
+                    onBooting={(task, launchId) =>
                       setBooting({
                         task,
+                        launchId,
                         known: new Map(boxes.map((b) => [b.name, b.role])),
                         warm: warmReady > 0,
                         // A cold tab (no fleet snapshot yet) must re-baseline `known` off the first
@@ -1135,6 +1141,7 @@ export default function App() {
                     onStarted={(box, task, inferred) => {
                       remember(box, task);
                       if (inferred?.length) setInferredNotes((prev) => ({ ...prev, [box]: inferred }));
+                      if (bootingRef.current) setLaunchIds((prev) => ({ ...prev, [box]: bootingRef.current!.launchId }));
                       // Navigate NOW so the URL is the run's (a refresh or share lands on it), while the
                       // booting pane stays up under the same "launch" pane key — no second keyed swap,
                       // which under AnimatePresence mode="wait" could strand the pane blank when it

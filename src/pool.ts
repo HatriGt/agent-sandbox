@@ -128,7 +128,9 @@ export async function acquireBox(
   copyDir: string | undefined,
   eligible: boolean,
   agent: AgentKind = "claude",
-  owner?: string
+  owner?: string,
+  /** Which way the box is coming, the moment it is known (src/launch-progress.ts). */
+  onPhase?: (kind: "warm" | "cold") => void
 ): Promise<{ box: string; warm: boolean }> {
   if (eligible) {
     // listPoolBoxes already reaps dead/wedged boxes, so anything it returns is Running + free.
@@ -145,6 +147,7 @@ export async function acquireBox(
     if (warm) {
       claiming.add(warm);
       try {
+        onPhase?.("warm");
         await claimWarmBox(cfg, warm, copyDir);
         // Fast path: a pre-booted, pre-bootstrapped box was claimed. The caller kicks an async
         // reseed right after so the pool refills to size while this delegation runs.
@@ -168,6 +171,7 @@ export async function acquireBox(
   console.error(
     `[pool] cold boot: pool empty (eligible=${eligible}) — booting a fresh box for ${session}`
   );
+  onPhase?.("cold");
   await createBox(cfg, { name: session, copyDir });
   return { box: session, warm: false };
 }

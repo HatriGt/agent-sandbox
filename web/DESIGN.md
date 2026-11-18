@@ -376,15 +376,30 @@ enters with the same short rise; the state pill crossfades on change.
 
 Pressing Send replaces the Hub with the thread layout in one 140ms fade (the Hub exits with no
 beat, nothing slides or morphs): header with the task title and a `Starting` pill, the Task bubble
-in its final spot, a thread-shaped shimmer below, an inert composer frame at the bottom. That
-screen holds through delegate pending, box booting, the URL moving to `/dashboard/box/<name>` and
-an empty first snapshot; only the skeleton is ever replaced, by real output.
+in its final spot, the launch bubble below, an inert composer frame at the bottom. That screen
+holds through delegate pending, box booting, the URL moving to `/dashboard/box/<name>` and an
+empty first snapshot; only the launch bubble is ever replaced, by real output.
 
+- **The launch bubble** (`thread/LaunchSteps.tsx`) is the agent's side of the conversation before
+  it has said anything: a label row (breathing live dot, the machine's name once known) over a card
+  surface listing the launch's stages as they happen — *Sending the task · Checking the task ·
+  Resolving repository access · Picking a host (or Waking the X host) · Cloning owner/name ·
+  Claiming a warm sandbox / Booting a fresh sandbox · Installing dependencies · Starting the agent ·
+  Agent started · Waiting for the first words*. Every row is a stage the controller reported the
+  moment it began (`src/launch-progress.ts`, streamed on `/launch.sse` under an id the tab minted;
+  `hooks/useLaunch.ts`). Never a timer pretending to be progress. Done rows: a check and how long
+  they took; the active row: three breathing dots and a ticking count; past 45 s (90 s for a cold
+  boot, 150 s for a host wake) a quiet "taking longer than usual" line. A failed launch shows the
+  reason in the alarm colour. Rows enter with the shared 200 ms lift, `layout="position"`.
+- Once the transcript takes over, one receipt line sits under the task (`LaunchReceipt`): "Started
+  in 12s on a warm sandbox". Only the tab that pressed Send has the feed, so a reopened thread
+  shows no receipt and a refresh mid-boot shows the bubble with what the tab knows (the machine).
 - `BootingThread` is a static copy of `Thread`'s shell (same header geometry, `ChatContainer`
-  column, `data-turn="task"` bubble, `ThreadSkeleton`). Change one, change the other.
+  column, `data-turn="task"` bubble, launch bubble). Change one, change the other. `ThreadSkeleton`
+  remains the placeholder for a thread opened without a launch feed.
 - Neither animates on mount; the Task bubble is `noEnter` in both. Pane key stays `"launch"` for the
   launched box (App), so the URL change and the BootingThread → Thread hand-off are not pane swaps.
-- Thread keeps the skeleton while the snapshot's log is empty and the run has not ended
+- Thread keeps the bubble while the snapshot's log is empty and the run has not ended
   (`emptyLaunch`), and App backfills the task as typed when the fleet lists the box without one.
 - Delegate failure: back to the Hub, text restored, error shown.
 - Check: `node .shots/launch-frames.mjs [ok|fail] [reduce]` samples every 100ms and asserts the

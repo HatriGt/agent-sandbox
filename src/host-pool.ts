@@ -207,7 +207,7 @@ export async function placeRun<T>(
   label: string,
   attempt: (hostCfg: Config, onAcquired: (box?: string) => void) => Promise<T>,
   log: (m: string) => void = (m) => console.error(m),
-  o: { awakeOnly?: boolean } = {}
+  o: { awakeOnly?: boolean; /** The picked host is paused and is being resumed first; called with its name. */ onWaking?: (host: string) => void } = {}
 ): Promise<T> {
   const tried: string[] = [];
   for (;;) {
@@ -225,6 +225,7 @@ export async function placeRun<T>(
         // so a host sitting out a cooldown or out of allowance is not counted on.
         const alt = pool.pick({ minAllowanceHours: 1, exclude: [...tried, picked.host.spec.id], awakeOnly: true });
         alt.release();
+        if (pool.dormant(picked.host.spec.id)) o.onWaking?.(picked.host.spec.name);
         await pool.ready(picked.host.spec.id, label, { patienceMs: alt.host ? 75_000 : 150_000 });
       }
       return await attempt(hostCfg, (box) => {
