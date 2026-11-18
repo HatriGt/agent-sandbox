@@ -9,6 +9,7 @@
  * asked mid-run. Pure parsing/shaping here; IO at the bottom.
  */
 import { hasUserStoreBackend, loadBlob, saveBlob, ownerKey, OPERATOR_OWNER, sharedOwners, withOwner } from "./user-store.js";
+import type { CopiedFrom } from "./orgs.js";
 import { mergeMcpStores } from "./orgs.js";
 import type { Config } from "./config.js";
 
@@ -35,6 +36,8 @@ export interface McpServer {
   headers?: Record<string, string>;
   enabled: boolean;
   addedAt: number;
+  /** On an organisation's copy of a member's own server: whose, so later saves of theirs reach it (src/orgs.ts). */
+  from?: CopiedFrom;
 }
 
 export interface McpStore {

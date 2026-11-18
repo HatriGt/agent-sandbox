@@ -11,6 +11,7 @@
  * the bottom, mirroring mcp-store.
  */
 import { hasUserStoreBackend, loadBlob, saveBlob, ownerKey, sharedOwners, withOwner } from "./user-store.js";
+import type { CopiedFrom } from "./orgs.js";
 import { mergeSkillStores } from "./orgs.js";
 import type { Config } from "./config.js";
 import { run, shellQuote } from "./exec.js";
@@ -58,6 +59,8 @@ export interface SkillDef {
   enabled: boolean;
   addedAt: number;
   updatedAt: number;
+  /** On an organisation's copy of a member's own skill: whose, so later saves of theirs reach it (src/orgs.ts). */
+  from?: CopiedFrom;
 }
 
 export interface SkillStore {

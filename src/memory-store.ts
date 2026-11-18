@@ -25,6 +25,7 @@
  * load transparently: every note becomes a kept `fact` in the scope of the list it sat in.
  */
 import { hasUserStoreBackend, loadBlob, saveBlob, ownerKey } from "./user-store.js";
+import type { CopiedFrom } from "./orgs.js";
 import { MEMORY_KINDS, REMEMBER_FIELD_RE, REMEMBER_KIND_RE, REMEMBER_RE, type MemoryKind } from "./drivers/sentinels.js";
 import { keyStems, scoreSkill } from "./skill-match.js";
 
@@ -69,6 +70,8 @@ export interface MemoryNote {
   paths?: string[];
   links?: string[];
   stale?: { at: number; box: string; paths: string[] };
+  /** On an organisation's copy of a member's own note: whose, so later edits of theirs reach it (src/orgs.ts). */
+  from?: CopiedFrom;
 }
 
 export interface MemoryStore {

@@ -19,8 +19,8 @@ import crypto from "node:crypto";
 import type { Db } from "./db.js";
 import { nowIso } from "./db.js";
 import { deleteBlobs } from "./user-store.js";
-import type { McpStore } from "./mcp-store.js";
-import type { SkillStore } from "./skill-store.js";
+import type { McpStore, McpServer } from "./mcp-store.js";
+import type { SkillStore, SkillDef } from "./skill-store.js";
 import type { MemoryStore, MemoryNote } from "./memory-store.js";
 
 export type OrgRole = "owner" | "admin" | "member";
@@ -174,6 +174,107 @@ export function mergeMemoryStores(own: MemoryStore, shared: MemoryStore[]): Memo
     }
   }
   return { ...own, global, repos };
+}
+
+/* ───────────────────────────── copies that follow their source ───────────────────────────── */
+
+/**
+ * Provenance of an organisation's copy of a person's own server, skill or note ("From yours").
+ * While the stamp is there the person's later saves of that entry reach the org's copy: the
+ * dashboard routes call followSkill / followServer / followNote after an own-store save, once per
+ * organisation the person can still manage. The org's copy keeps its own `enabled` (whether the
+ * org shares it is the org's call) and its `addedAt`; everything else is the source's. Removing
+ * the source leaves the org's copy in place, unstamped — the org keeps what it was given.
+ *
+ * A copy made before stamps existed is claimed the first time its source is saved: an org entry
+ * under the same name that still equals the source's previous version can only be a copy of it.
+ */
+export interface CopiedFrom {
+  /** The person whose own entry this is a copy of. */
+  user: string;
+  login: string;
+  /** The source entry's name at the last sync (notes keep their id instead). */
+  name?: string;
+  /** When the copy last followed its source. */
+  at: number;
+}
+
+/** JSON with object keys sorted at every level, so two entries compare by content, not key order. */
+function canon(v: unknown): string {
+  return JSON.stringify(v, (_k, x: unknown) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.entries(x as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x));
+}
+const skillBody = (s: SkillDef): string => canon({ description: s.description, content: s.content, files: s.files ?? [] });
+const serverBody = (s: McpServer): string => canon({ type: s.type, command: s.command, args: s.args ?? [], url: s.url, env: s.env ?? {}, headers: s.headers ?? {} });
+
+/** The org entry that is this person's copy of `name`: stamped as such, else an unstamped faithful copy of `before`. */
+function linkedEntry<T extends { from?: CopiedFrom }>(entries: Record<string, T>, user: string, name: string, before: T | undefined, body: (e: T) => string): { key: string; entry: T } | null {
+  for (const [key, entry] of Object.entries(entries)) if (entry.from?.user === user && entry.from.name === name) return { key, entry };
+  const same = entries[name];
+  if (same && !same.from && before && body(same) === body(before)) return { key: name, entry: same };
+  return null;
+}
+
+/**
+ * The person saved (`after`), renamed (`name` is the old one) or removed (`after` undefined) their
+ * own skill: the org's copy follows. Returns whether the org store changed.
+ */
+export function followSkill(org: SkillStore, who: { user: string; login: string }, name: string, before: SkillDef | undefined, after: SkillDef | undefined, now = Date.now()): boolean {
+  const hit = linkedEntry(org.skills, who.user, name, before, skillBody);
+  if (!hit) return false;
+  if (!after) {
+    const had = !!hit.entry.from;
+    delete hit.entry.from;
+    return had;
+  }
+  // A rename onto a name the org already uses for something else: the org's entry stays.
+  if (after.name !== hit.key && org.skills[after.name]) return false;
+  delete org.skills[hit.key];
+  org.skills[after.name] = { ...structuredClone(after), enabled: hit.entry.enabled, addedAt: hit.entry.addedAt, from: { user: who.user, login: who.login, name: after.name, at: now } };
+  return true;
+}
+
+/** Same for an MCP server — the org's copy gets the real env and headers, as the copy did. */
+export function followServer(org: McpStore, who: { user: string; login: string }, name: string, before: McpServer | undefined, after: McpServer | undefined, now = Date.now()): boolean {
+  const hit = linkedEntry(org.servers, who.user, name, before, serverBody);
+  if (!hit) return false;
+  if (!after) {
+    const had = !!hit.entry.from;
+    delete hit.entry.from;
+    return had;
+  }
+  if (after.name !== hit.key && org.servers[after.name]) return false;
+  delete org.servers[hit.key];
+  org.servers[after.name] = { ...structuredClone(after), enabled: hit.entry.enabled, addedAt: hit.entry.addedAt, from: { user: who.user, login: who.login, name: after.name, at: now } };
+  return true;
+}
+
+/**
+ * A memory note keeps its id across the copy, so the id is the link. The org's copy follows the
+ * text, rationale, pin, knowledge-base fields and the repo it is filed under; its recall counters
+ * stay. A note forgotten by its owner stays in the org, unstamped.
+ */
+export function followNote(org: MemoryStore, who: { user: string; login: string }, id: string, after: MemoryNote | undefined, now = Date.now()): boolean {
+  for (const list of [org.global, ...Object.values(org.repos)]) {
+    const i = list.findIndex((n) => n.id === id);
+    if (i < 0) continue;
+    const cur = list[i];
+    if (cur.from && cur.from.user !== who.user) return false;
+    if (!after) {
+      const had = !!cur.from;
+      delete cur.from;
+      return had;
+    }
+    list.splice(i, 1);
+    const { uses: _u, lastUsed: _l, stale: _s, from: _f, ...rest } = after;
+    const next: MemoryNote = { ...structuredClone(rest), source: "you", at: cur.at, from: { user: who.user, login: who.login, at: now } };
+    if (cur.uses) {
+      next.uses = cur.uses;
+      if (cur.lastUsed) next.lastUsed = cur.lastUsed;
+    }
+    (after.scope === "repo" && after.repo ? (org.repos[after.repo] ??= []) : org.global).push(next);
+    return true;
+  }
+  return false;
 }
 
 /* ───────────────────────────── database ───────────────────────────── */

@@ -21,7 +21,7 @@ import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
 import { deps as rawDeps, resolveCredsForBox, detectSetupInBox } from "./deps.js";
 import { SETUP_SENTINEL, parseSentinel, type SetupProfile } from "./setup-profile.js";
-import { addManualNote, deleteNote, exportMemoryMarkdown, getNote, importMemoryMarkdown, forgetEpisode, loadMemoryStore, noteHistory, playbookToSkill, recordEpisode, saveMemoryStore, updateNote, viewMemory, type MemoryReceipt, type MemoryStore } from "./memory-store.js";
+import { addManualNote, deleteNote, exportMemoryMarkdown, getNote, importMemoryMarkdown, forgetEpisode, loadMemoryStore, noteHistory, playbookToSkill, recordEpisode, saveMemoryStore, updateNote, viewMemory, type MemoryNote, type MemoryReceipt, type MemoryStore } from "./memory-store.js";
 import { MemoryHarvester } from "./memory-harvest.js";
 import { deleteSetup, getSetup, listSetups, recordLearned, repoKey, repoSlugFromUrl, saveSetup } from "./setup-store.js";
 import { kickRefill, refillPool, startPoolMaintainer } from "./pool.js";
@@ -37,7 +37,7 @@ import {
 import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, loadBlob, ownerKey, registerSharedOwners, registerUserStoreBackend, saveBlob, withOwner, OPERATOR_OWNER } from "./user-store.js";
-import { addMembers, canManage, createOrg, deleteOrg, getOrg, leaveOrg, listMembers, orgRole, orgsOf, removeMember, renameOrg, searchUsersByLogin, setMemberRole, sharedOrgIds, transferOrg, type OrgRole, type PersonHit } from "./orgs.js";
+import { addMembers, canManage, createOrg, deleteOrg, followNote, followServer, followSkill, getOrg, leaveOrg, listMembers, orgRole, orgsOf, removeMember, renameOrg, searchUsersByLogin, setMemberRole, sharedOrgIds, transferOrg, type OrgRole, type PersonHit } from "./orgs.js";
 import { detectTransitions, formatNotification, makeNotifier, shouldNotify, toggleFor, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { StartFailureStreak, isStartFailure, logTail, startFailureAlertText } from "./run-health.js";
 import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, type CanaryResult } from "./canary.js";
@@ -2682,6 +2682,30 @@ async function sharedViews<T>(res: Response, view: () => Promise<T> | T): Promis
   }
   return out;
 }
+/**
+ * After a person saves one of their OWN servers, skills or notes: every organisation copy of it
+ * ("From yours", stamped `from`) follows, in each organisation the person can still manage —
+ * src/orgs.ts followSkill / followServer / followNote decide per org store. Runs after the
+ * person's own save, under each org's store lock, and never fails that save: an org whose store
+ * cannot be written is logged and skipped. Returns the names of the organisations whose copy
+ * changed, for the dashboard's toast. Nothing happens on an org-scoped request (that IS the org's
+ * copy being edited) or for the operator identity (no orgs).
+ */
+async function followIntoOrgs(res: Response, kind: "skills" | "mcp" | "memory", apply: (who: { user: string; login: string }) => Promise<boolean> | boolean): Promise<string[]> {
+  const p = principalOf(res);
+  if (p.kind !== "user" || res.locals.orgScope) return [];
+  const who = { user: p.userId, login: p.login };
+  const followed: string[] = [];
+  for (const o of orgsOf(db, p.userId)) {
+    if (!canManage(o.role)) continue;
+    try {
+      if (await withOwner(o.id, () => withStoreLock(kind, async () => apply(who)))) followed.push(o.name);
+    } catch (e) {
+      console.error(`[orgs] ${kind}: could not update ${o.id}'s copy:`, (e as Error).message);
+    }
+  }
+  return followed;
+}
 app.get("/orgs.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const p = userOf(res);
@@ -2856,6 +2880,8 @@ app.post("/orgs/copy.json", async (req: Request, res: Response) => {
     res.status(400).json({ error: "nothing to copy" });
     return;
   }
+  const me = userOf(res);
+  if (!me) return;
   try {
     // The caller's own stores, under the caller's principal.
     const ownMcp = want.servers.length ? await loadMcpStore(cfg) : null;
@@ -2863,13 +2889,16 @@ app.post("/orgs/copy.json", async (req: Request, res: Response) => {
     const ownMemory = want.notes.length ? loadMemoryStore() : null;
     const copied = { servers: [] as string[], skills: [] as string[], notes: 0 };
     const now = Date.now();
+    // Each copy is stamped with its source, so the caller's later saves of the original reach it
+    // (followIntoOrgs). The org's copy is enabled regardless of the original's own switch.
+    const from = (name?: string) => ({ user: me.userId, login: me.login, ...(name ? { name } : {}), at: now });
     await withOwner(scope.id, async () => {
       if (ownMcp) {
         const store = await loadMcpStore(cfg);
         for (const name of want.servers) {
           const s = ownMcp.servers[name];
           if (!s) continue;
-          store.servers[name] = { ...structuredClone(s), addedAt: now };
+          store.servers[name] = { ...structuredClone(s), addedAt: now, from: from(name) };
           copied.servers.push(name);
         }
         await saveMcpStore(cfg, store);
@@ -2879,7 +2908,7 @@ app.post("/orgs/copy.json", async (req: Request, res: Response) => {
         for (const name of want.skills) {
           const s = ownSkills.skills[name];
           if (!s) continue;
-          store.skills[name] = { ...structuredClone(s), addedAt: store.skills[name]?.addedAt ?? now, updatedAt: now };
+          store.skills[name] = { ...structuredClone(s), addedAt: store.skills[name]?.addedAt ?? now, updatedAt: now, from: from(name) };
           copied.skills.push(name);
         }
         await saveSkillStore(cfg, store);
@@ -2892,8 +2921,8 @@ app.post("/orgs/copy.json", async (req: Request, res: Response) => {
           if (!n || n.until != null || n.status !== "kept") continue;
           const list = n.scope === "repo" && n.repo ? (store.repos[n.repo] ??= []) : store.global;
           if (list.some((x) => x.id === n.id)) continue;
-          const { uses: _u, lastUsed: _l, stale: _s, ...rest } = n;
-          list.push({ ...structuredClone(rest), source: "you", at: now });
+          const { uses: _u, lastUsed: _l, stale: _s, from: _f, ...rest } = n;
+          list.push({ ...structuredClone(rest), source: "you", at: now, from: from() });
           copied.notes++;
         }
         saveMemoryStore(store);
@@ -2963,12 +2992,15 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
     return;
   }
   try {
+    // What changed, for the organisation copies that follow this server (followIntoOrgs).
+    let change: { name: string; before?: McpServerDef; after?: McpServerDef } | undefined;
     const store = await withStoreLock("mcp", async () => {
       const store = await loadMcpStore(cfg);
       if (action === "upsert") {
         const s = normalizeServer(body.server as Partial<McpServerDef> & { name: string });
         // Rename: the entry moves under the new name and the old one goes.
         const previous = typeof body.previousName === "string" ? body.previousName : "";
+        const before = store.servers[previous && previous !== s.name ? previous : s.name];
         if (previous && previous !== s.name && store.servers[previous]) {
           const old = store.servers[previous];
           s.addedAt = old.addedAt;
@@ -2983,7 +3015,10 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
           s.env = mergeSecrets(s.env, prev.env);
           s.headers = mergeSecrets(s.headers, prev.headers);
         }
+        // An organisation's copy edited in place stays a copy: the form never sends the stamp.
+        if (before?.from) s.from = before.from;
         store.servers[s.name] = s;
+        change = { name: previous || s.name, before, after: s };
       } else if (action === "import") {
         for (const s of parseMcpImport(String(body.json ?? ""))) store.servers[s.name] = s;
       } else if (action === "replace") {
@@ -2991,7 +3026,9 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
         const next = replaceFromJson(store, String(body.json ?? ""));
         store.servers = next.servers;
       } else if (action === "remove") {
-        delete store.servers[String(body.name ?? "")];
+        const name = String(body.name ?? "");
+        change = { name, before: store.servers[name] };
+        delete store.servers[name];
       } else if (action === "toggle") {
         const s = store.servers[String(body.name ?? "")];
         if (s) s.enabled = body.enabled !== false;
@@ -2999,7 +3036,16 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
       await saveMcpStore(cfg, store);
       return store;
     });
-    res.json({ servers: viewServers(store), config: toEditableConfig(store) });
+    const c = change;
+    const followed = c
+      ? await followIntoOrgs(res, "mcp", async (who) => {
+          const org = await loadMcpStore(cfg);
+          if (!followServer(org, who, c.name, c.before, c.after)) return false;
+          await saveMcpStore(cfg, org);
+          return true;
+        })
+      : [];
+    res.json({ servers: viewServers(store), config: toEditableConfig(store), ...(followed.length ? { followed } : {}) });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
   }
@@ -3334,18 +3380,33 @@ app.post("/skills.json", async (req: Request, res: Response) => {
         res.json({ skills: viewSkills(await loadSkillStore(cfg)), updated });
         return;
       }
+      let pulled: { before: SkillDef; after: SkillDef } | undefined;
       const store = await withStoreLock("skills", async () => {
         const store = await loadSkillStore(cfg);
         const s = store.skills[name];
         if (!s) throw new Error(`/${name} was removed while its update was fetched.`);
         // normalizeSkill restamps importedAt = updatedAt = now, so the entry reads as unedited.
-        store.skills[name] = normalizeSkill({ ...s, description: latest.description, content: latest.content, files: latest.files, source: latest.source });
+        const next = normalizeSkill({ ...s, description: latest.description, content: latest.content, files: latest.files, source: latest.source });
+        if (s.from) next.from = s.from;
+        store.skills[name] = next;
+        pulled = { before: s, after: next };
         await saveSkillStore(cfg, store);
         return store;
       });
-      res.json({ skills: viewSkills(store), updated });
+      const p = pulled;
+      const followed = p
+        ? await followIntoOrgs(res, "skills", async (who) => {
+            const org = await loadSkillStore(cfg);
+            if (!followSkill(org, who, name, p.before, p.after)) return false;
+            await saveSkillStore(cfg, org);
+            return true;
+          })
+        : [];
+      res.json({ skills: viewSkills(store), updated, ...(followed.length ? { followed } : {}) });
       return;
     }
+    // What changed, for the organisation copies that follow this skill (followIntoOrgs).
+    let change: { name: string; before?: SkillDef; after?: SkillDef } | undefined;
     const store = await withStoreLock("skills", async () => {
       const store = await loadSkillStore(cfg);
       if (action === "upsert") {
@@ -3361,9 +3422,14 @@ app.post("/skills.json", async (req: Request, res: Response) => {
         // An ordinary save sends no source: the import provenance stays, and the save's later
         // updatedAt is what marks the skill as edited since import. `source: null` detaches it.
         if (!("source" in (body.skill as object)) && before?.source) s.source = before.source;
+        // An organisation's copy edited in place stays a copy: the form never sends the stamp.
+        if (before?.from) s.from = before.from;
         store.skills[s.name] = s;
+        change = { name: previous || s.name, before, after: s };
       } else if (action === "remove") {
-        delete store.skills[String(body.name ?? "")];
+        const name = String(body.name ?? "");
+        change = { name, before: store.skills[name] };
+        delete store.skills[name];
       } else if (action === "toggle") {
         const s = store.skills[String(body.name ?? "")];
         if (s) s.enabled = body.enabled !== false;
@@ -3371,7 +3437,16 @@ app.post("/skills.json", async (req: Request, res: Response) => {
       await saveSkillStore(cfg, store);
       return store;
     });
-    res.json({ skills: viewSkills(store) });
+    const c = change;
+    const followed = c
+      ? await followIntoOrgs(res, "skills", async (who) => {
+          const org = await loadSkillStore(cfg);
+          if (!followSkill(org, who, c.name, c.before, c.after)) return false;
+          await saveSkillStore(cfg, org);
+          return true;
+        })
+      : [];
+    res.json({ skills: viewSkills(store), ...(followed.length ? { followed } : {}) });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
   }
@@ -3415,6 +3490,8 @@ app.post("/memory-notes.json", async (req: Request, res: Response) => {
   const owner = memoryOwner(res);
   const body = (req.body ?? {}) as Record<string, unknown>;
   try {
+    // The edited note, for the organisation copies that follow it (followIntoOrgs).
+    let edited: MemoryNote | undefined;
     const store = await withStoreLock("memory", async () => {
       const store = loadMemoryStore(owner);
       if (body.enabled !== undefined) {
@@ -3430,14 +3507,24 @@ app.post("/memory-notes.json", async (req: Request, res: Response) => {
         const before = getNote(store, body.id);
         const wasPending = before?.status === "pending";
         const note = updateNote(store, body.id, { text: body.text, why: body.why, pinned: body.pinned, status: body.status, area: body.area, paths: body.paths, links: body.links, verified: body.verified, repo: body.repo });
-        const edited = body.text !== undefined || body.why !== undefined || body.area !== undefined || body.paths !== undefined || body.links !== undefined || body.repo !== undefined;
-        res.locals.auditAction = edited ? "memory.edit" : wasPending && body.status === "kept" ? "memory.keep" : body.verified ? "memory.verify" : "memory.edit";
-        memoryHarvester.noteChanged(note.id, { status: note.status, ...(edited ? { text: note.text, why: note.why ?? "" } : {}) });
+        const changed = body.text !== undefined || body.why !== undefined || body.area !== undefined || body.paths !== undefined || body.links !== undefined || body.repo !== undefined;
+        res.locals.auditAction = changed ? "memory.edit" : wasPending && body.status === "kept" ? "memory.keep" : body.verified ? "memory.verify" : "memory.edit";
+        memoryHarvester.noteChanged(note.id, { status: note.status, ...(changed ? { text: note.text, why: note.why ?? "" } : {}) });
+        edited = note;
       }
       saveMemoryStore(store, owner);
       return store;
     });
-    res.json(memoryView(store));
+    const n = edited;
+    const followed = n
+      ? await followIntoOrgs(res, "memory", (who) => {
+          const org = loadMemoryStore();
+          if (!followNote(org, who, n.id, n)) return false;
+          saveMemoryStore(org);
+          return true;
+        })
+      : [];
+    res.json({ ...memoryView(store), ...(followed.length ? { followed } : {}) });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
   }
@@ -3450,6 +3537,7 @@ app.delete("/memory-notes.json", async (req: Request, res: Response) => {
   // ?episode=<box> forgets what a run did, the same way ?id= forgets a note.
   const episode = typeof req.query.episode === "string" ? req.query.episode : "";
   try {
+    let forgot = false;
     const store = await withStoreLock("memory", async () => {
       const store = loadMemoryStore(owner);
       if (episode && forgetEpisode(store, episode)) {
@@ -3460,9 +3548,18 @@ app.delete("/memory-notes.json", async (req: Request, res: Response) => {
         saveMemoryStore(store, owner);
         memoryHarvester.noteDeleted(id);
         res.locals.auditAction = "memory.forget";
+        forgot = true;
       }
       return store;
     });
+    // The organisation keeps its copy of a forgotten note; it just stops following.
+    if (forgot)
+      await followIntoOrgs(res, "memory", (who) => {
+        const org = loadMemoryStore();
+        if (!followNote(org, who, id, undefined)) return false;
+        saveMemoryStore(org);
+        return true;
+      });
     res.json(memoryView(store));
   } catch (e) {
     failWith(res, e);
