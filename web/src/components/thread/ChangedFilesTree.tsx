@@ -1,5 +1,7 @@
 import * as React from "react";
 import { ChevronRight, ChevronsDownUp, ChevronsUpDown, FileDiff, Folder, FolderOpen } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { FileIcon } from "@/lib/iconTheme";
 import { cn } from "@/lib/utils";
 
@@ -130,23 +132,38 @@ export function ChangedFilesTree({
   );
 }
 
-/** The standalone card: a header (count, totals, expand/collapse all, Open diff) over the tree. */
-export function ChangedFilesCard({ files, more = 0, totals: given, onOpen, onOpenDiff, className }: { files: ChangedEntry[]; /** Files beyond `files` that only the full diff shows. */ more?: number; /** Totals for every file, when `files` is only the first slice. */ totals?: Stat; onOpen?: (f: ChangedEntry) => void; onOpenDiff?: () => void; className?: string }) {
+/**
+ * The standalone card: a header (count, totals, expand/collapse all, Open diff) over the tree.
+ * Collapsed by default — the header is the summary (a run that touched 90 files must not push
+ * 90 rows into the conversation); clicking it unfolds the tree, which then opens every folder.
+ */
+export function ChangedFilesCard({ files, more = 0, totals: given, onOpen, onOpenDiff, defaultOpen = false, className }: { files: ChangedEntry[]; /** Files beyond `files` that only the full diff shows. */ more?: number; /** Totals for every file, when `files` is only the first slice. */ totals?: Stat; onOpen?: (f: ChangedEntry) => void; onOpenDiff?: () => void; /** Start with the tree showing (the header alone otherwise). */ defaultOpen?: boolean; className?: string }) {
+  const [open, setOpen] = React.useState(defaultOpen);
   const [allExpanded, setAllExpanded] = React.useState(true);
+  const still = useReducedMotion();
   const totals = given ?? totalsOf(files);
   const count = files.length + more;
   const hasDirs = files.some((f) => f.path.includes("/"));
   return (
     <div className={cn("bg-secondary dark:bg-input/20 @container/changed-files rounded-lg", className)}>
-      <div className="flex items-center justify-between gap-2 rounded-t-lg px-3 py-2">
-        <div className="text-foreground flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium">
-          <span>
-            {count.toLocaleString()} changed file{count === 1 ? "" : "s"}
+      <div className="flex items-center justify-between gap-2 rounded-t-lg py-1 pr-2 pl-1">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-label={open ? "Hide changed files" : "Show changed files"}
+          className="hover:bg-accent/60 text-foreground flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md py-1 pr-2 pl-2 text-left text-xs font-medium transition-colors"
+        >
+          <ChevronRight className={cn("text-muted-foreground/70 size-3.5 shrink-0 transition-transform", open && "rotate-90")} aria-hidden />
+          <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <span>
+              {count.toLocaleString()} changed file{count === 1 ? "" : "s"}
+            </span>
+            <DiffStat {...totals} className="text-xs leading-4" />
           </span>
-          <DiffStat {...totals} className="text-xs leading-4" />
-        </div>
+        </button>
         <div className="flex shrink-0 items-center gap-1">
-          {hasDirs && (
+          {open && hasDirs && (
             <button
               type="button"
               onClick={() => setAllExpanded((v) => !v)}
@@ -165,7 +182,20 @@ export function ChangedFilesCard({ files, more = 0, totals: given, onOpen, onOpe
           )}
         </div>
       </div>
-      <ChangedFilesTree files={files} allExpanded={allExpanded} onOpen={onOpen} />
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="tree"
+            initial={still ? { opacity: 0 } : { height: 0, opacity: 0 }}
+            animate={still ? { opacity: 1 } : { height: "auto", opacity: 1 }}
+            exit={still ? { opacity: 0 } : { height: 0, opacity: 0 }}
+            transition={{ duration: still ? 0.12 : 0.26, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
+          >
+            <ChangedFilesTree files={files} allExpanded={allExpanded} onOpen={onOpen} />
+          </motion.div>
+        )}
+      </AnimatePresence>
       {more > 0 && (
         <div className="px-3 pb-2">
           {onOpenDiff ? (

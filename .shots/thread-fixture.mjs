@@ -802,6 +802,18 @@ if (stream) {
   await shot("-echo");
   await page.waitForTimeout(2600);
   await shot("-landed");
+} else if (interact === "card") {
+  // The in-flow changed-files card: closed by default (header only), then unfolded.
+  const card = page.getByRole("button", { name: /^show changed files$/i });
+  await card.waitFor({ state: "visible" });
+  await card.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+  console.log("card rows while closed:", await page.locator("[aria-label='Conversation'] ul[aria-label='Changed files'] li").count());
+  await shot("-card-closed");
+  await card.click();
+  await page.waitForTimeout(700);
+  console.log("card rows when open:", await page.locator("[aria-label='Conversation'] ul[aria-label='Changed files'] li").count());
+  await shot("-card-open");
 } else if (interact === "file") {
   // Open the changes dock and click its first row: the per-file diff.
   await page.getByRole("button", { name: /show the changed files/i }).click();

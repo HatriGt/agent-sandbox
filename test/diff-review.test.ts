@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseUnifiedDiff, hunkToPatch, hunkId } from "../web/src/lib/diff.ts";
-import { buildHunkPatch, discardFileSh, discardHunkSh, splitRepoPath } from "../src/changes.ts";
+import { buildHunkPatch, discardFileSh, discardHunkSh } from "../src/changes.ts";
 
 const SAMPLE = [
   "diff --git a/src/a.ts b/src/a.ts",
@@ -53,18 +53,18 @@ test("buildHunkPatch: strips any client file header, prepends ours, restores str
   assert.equal(buildHunkPatch("f", "@@ -1 +1 @@\r\n-a\r\n+b\r\n"), "--- a/f\n+++ b/f\n@@ -1 +1 @@\n-a\n+b\n");
 });
 
-test("discard scripts: repo-relative paths, quoted, with the sentinel", () => {
-  assert.deepEqual(splitRepoPath("repo/src/x y.ts"), { top: "repo", inner: "src/x y.ts" });
+test("discard scripts: the owning repo is resolved in the box, paths quoted, with the sentinel", () => {
   const f = discardFileSh("repo/src/x y.ts");
-  assert.match(f, /cat-file -e HEAD:'src\/x y.ts'/);
-  assert.match(f, /git -C 'repo' reset -q -- 'src\/x y.ts' && git -C 'repo' checkout -- 'src\/x y.ts'/);
-  assert.match(f, /rm -f 'repo'\/'src\/x y.ts'/);
-  assert.match(f, /@@DISCARDED/);
+  assert.match(f, /cd '\/workspace' \|\| exit 1; repo_of\(\)/);
+  assert.match(f, /rel='repo\/src\/x y.ts'; if top=\$\(repo_of "\$rel"\)/);
+  assert.match(f, /git -C "\$top" cat-file -e "HEAD:\$inner"/);
+  assert.match(f, /git -C "\$top" reset -q -- "\$inner" && git -C "\$top" checkout -- "\$inner"/);
   // A loose file outside any repo is simply deleted.
-  assert.match(discardFileSh("report.md"), /else rm -f 'report.md' && echo @@DISCARDED/);
+  assert.match(f, /else rm -f "\$rel" && echo @@DISCARDED; fi$/);
   const h = discardHunkSh("repo/src/a.ts");
-  assert.match(h, /cd \/workspace\/'repo'/);
-  assert.match(h, /base64 -d \| git apply -R --recount --whitespace=nowarn -/);
+  assert.match(h, /top=\$\(repo_of "\$rel"\) \|\| \{ echo "@@UNTRACKED"; exit 0; \}/);
+  assert.match(h, /cd "\$top" \|\| exit 1/);
+  assert.match(h, /base64 -d \| git apply -R --recount --whitespace=nowarn -p"\$strip" -/);
   assert.match(h, /@@UNTRACKED/);
 });
 

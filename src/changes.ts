@@ -26,10 +26,25 @@ export interface ChangedFile {
   deletions: number;
 }
 
-const SCRIPT = `cd /workspace 2>/dev/null || exit 0
-for g in */.git; do
-  [ -d "$g" ] || continue
-  r=$(dirname "$g")
+/**
+ * Every git checkout under the workspace, at any depth the agent is likely to clone to (a repo
+ * the run started with sits at the top; one the agent cloned itself lands under `.work/`, `tmp/`,
+ * a scratch folder). Printed workspace-relative, parents before their nested repos. The
+ * workspace root itself is never a repo. `node_modules` is not descended into.
+ */
+const REPOS_SH = `find . -mindepth 2 -maxdepth 6 \\( -type d -name node_modules -prune \\) -o \\( -type d -name .git -print -prune \\) 2>/dev/null | sed 's|^\\./||; s|/\\.git$||' | sort`;
+
+/**
+ * The repo that owns a workspace-relative path: the nearest ancestor directory with a `.git`
+ * (so a file in a repo the agent cloned under `.work/` resolves to that clone, not to `.work`).
+ * Defines `repo_of`; prints nothing / returns 1 for a path outside every repo.
+ */
+const REPO_OF_SH = `repo_of() { d=$(dirname "$1"); while [ "$d" != "." ] && [ "$d" != "/" ] && [ -n "$d" ]; do if [ -d "$d/.git" ]; then echo "$d"; return 0; fi; d=$(dirname "$d"); done; return 1; }`;
+
+/** The one-exec change scan. `root` is overridable so the script runs against a temp dir in tests. */
+export function changesSh(root = "/workspace"): string {
+  return `cd ${shellQuote(root)} 2>/dev/null || exit 0
+${REPOS_SH} | while IFS= read -r r; do
   echo "@@repo $r"
   git -C "$r" diff --numstat HEAD 2>/dev/null
   git -C "$r" diff --name-status HEAD 2>/dev/null | sed 's/^/@@status /'
@@ -40,13 +55,14 @@ for g in */.git; do
   done
 done
 echo "@@loose"
-find . -maxdepth 3 -type f -not -path './*/.git/*' -not -name '.agent.*' -not -path './node_modules/*' -not -path './.attachments/*' 2>/dev/null | while IFS= read -r f; do
+# Files outside every repo. Pruned: any directory that IS a repo (its git speaks for it, above),
+# the controller's own /workspace/.asb (setup sentinel, install logs), attachments, node_modules.
+find . -mindepth 1 -maxdepth 3 \\( -type d \\( -name .git -o -name .asb -o -name node_modules -o -name .attachments -o -exec test -d '{}/.git' \\; \\) -prune \\) -o \\( -type f -not -name '.agent.*' -print \\) 2>/dev/null | while IFS= read -r f; do
   f=\${f#./}
-  top=\${f%%/*}
-  [ -d "$top/.git" ] && continue
   n=$(wc -l < "$f" 2>/dev/null || echo 0)
   echo "@@loosefile $n $f"
 done`;
+}
 
 export function parseChanges(out: string): ChangedFile[] {
   const files: ChangedFile[] = [];
@@ -108,7 +124,7 @@ export function parseChanges(out: string): ChangedFile[] {
 }
 
 export async function listChanges(cfg: Config, box: string): Promise<ChangedFile[]> {
-  const r = await exec(cfg, box, SCRIPT);
+  const r = await exec(cfg, box, changesSh());
   return parseChanges(r.stdout);
 }
 
@@ -121,11 +137,9 @@ export async function listChanges(cfg: Config, box: string): Promise<ChangedFile
  */
 export const FULL_DIFF_MAX_BYTES = 400_000;
 
-export function fullDiffSh(): string {
-  return `cd /workspace 2>/dev/null || exit 0
-for g in */.git; do
-  [ -d "$g" ] || continue
-  r=$(dirname "$g")
+export function fullDiffSh(root = "/workspace"): string {
+  return `cd ${shellQuote(root)} 2>/dev/null || exit 0
+${REPOS_SH} | while IFS= read -r r; do
   echo "@@repo $r"
   git -C "$r" add -A -N 2>/dev/null
   git -C "$r" diff HEAD 2>/dev/null | head -c ${FULL_DIFF_MAX_BYTES}
@@ -179,17 +193,19 @@ export interface FileDiff {
   original?: string;
 }
 
+/** The one-file diff script; `root` is overridable for tests. */
+export function readDiffSh(rel: string, root = "/workspace"): string {
+  return (
+    `cd ${shellQuote(root)} || exit 0; ${REPO_OF_SH}; rel=${shellQuote(rel)}; if top=$(repo_of "$rel"); then inner=\${rel#"$top"/}; ` +
+    `if git -C "$top" ls-files --error-unmatch "$inner" >/dev/null 2>&1; then git -C "$top" diff HEAD -- "$inner" | head -c 400000; ` +
+    `printf '\n@@ORIGINAL\n'; git -C "$top" show "HEAD:$inner" 2>/dev/null | head -c 400000; ` +
+    `else echo "@@UNTRACKED"; fi; else echo "@@UNTRACKED"; fi`
+  );
+}
+
 export async function readDiff(cfg: Config, box: string, path: string): Promise<FileDiff> {
   const rel = safeRelPath(path);
-  const top = rel.split("/")[0];
-  const inner = rel.slice(top.length + 1);
-  const q = shellQuote;
-  const sh =
-    `cd /workspace || exit 0; if [ -d ${q(top)}/.git ] && [ -n ${q(inner)} ]; then ` +
-    `if git -C ${q(top)} ls-files --error-unmatch ${q(inner)} >/dev/null 2>&1; then git -C ${q(top)} diff HEAD -- ${q(inner)} | head -c 400000; ` +
-    `printf '\n@@ORIGINAL\n'; git -C ${q(top)} show HEAD:${q(inner)} 2>/dev/null | head -c 400000; ` +
-    `else echo "@@UNTRACKED"; fi; else echo "@@UNTRACKED"; fi`;
-  const r = await exec(cfg, box, sh);
+  const r = await exec(cfg, box, readDiffSh(rel));
   const out = r.stdout;
   if (out.trim().startsWith("@@UNTRACKED")) return { path: rel, diff: "", untracked: true, binary: false };
   const cut = out.indexOf("\n@@ORIGINAL\n");
@@ -214,47 +230,49 @@ export async function readDiff(cfg: Config, box: string, path: string): Promise<
  */
 const DISCARD_OK = "@@DISCARDED";
 
-/** Split a workspace-relative path into the repo directory (first segment) and the path inside it. */
-export function splitRepoPath(rel: string): { top: string; inner: string } {
-  const top = rel.split("/")[0];
-  return { top, inner: rel.slice(top.length + 1) };
-}
-
-export function discardFileSh(rel: string): string {
-  const { top, inner } = splitRepoPath(rel);
-  const q = shellQuote;
+/**
+ * The repo owning `rel` is resolved IN the box (`repo_of`: nearest ancestor with a `.git`), so a
+ * file in a clone the agent made under `.work/` reverts through that clone's git, not through a
+ * non-existent `.work` repo. `root` is overridable for tests.
+ */
+export function discardFileSh(rel: string, root = "/workspace"): string {
   return (
-    `cd /workspace || exit 1; if [ -d ${q(top)}/.git ] && [ -n ${q(inner)} ]; then ` +
-    `if git -C ${q(top)} cat-file -e HEAD:${q(inner)} 2>/dev/null; then git -C ${q(top)} reset -q -- ${q(inner)} && git -C ${q(top)} checkout -- ${q(inner)} && echo ${DISCARD_OK}; ` +
-    `else git -C ${q(top)} rm -q --cached -f -- ${q(inner)} >/dev/null 2>&1; rm -f ${q(top)}/${q(inner)} && echo ${DISCARD_OK}; fi; ` +
-    `else rm -f ${q(rel)} && echo ${DISCARD_OK}; fi`
+    `cd ${shellQuote(root)} || exit 1; ${REPO_OF_SH}; rel=${shellQuote(rel)}; if top=$(repo_of "$rel"); then inner=\${rel#"$top"/}; ` +
+    `if git -C "$top" cat-file -e "HEAD:$inner" 2>/dev/null; then git -C "$top" reset -q -- "$inner" && git -C "$top" checkout -- "$inner" && echo ${DISCARD_OK}; ` +
+    `else git -C "$top" rm -q --cached -f -- "$inner" >/dev/null 2>&1; rm -f "$rel" && echo ${DISCARD_OK}; fi; ` +
+    `else rm -f "$rel" && echo ${DISCARD_OK}; fi`
   );
 }
 
 /**
  * Normalise a client hunk into a patch git can reverse-apply: drop any file header it carried
- * (`diff --git`, `index`, `---`, `+++`) and prepend our own for the in-repo path, so the client can
- * never point the patch at another file. Throws when the text has no `@@` hunk at all.
+ * (`diff --git`, `index`, `---`, `+++`) and prepend our own for the workspace-relative path, so the
+ * client can never point the patch at another file. The box strips the `a/` and the repo's own
+ * directories with `git apply -p<N>` (discardHunkSh). Throws when the text has no `@@` hunk at all.
  */
-export function buildHunkPatch(inner: string, hunk: string): string {
+export function buildHunkPatch(rel: string, hunk: string): string {
   const lines = hunk.replace(/\r/g, "").split("\n");
   const at = lines.findIndex((l) => /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(l));
   if (at < 0) throw new Error("hunk must start with an @@ header");
   // Only diff-shaped lines survive (context/add/del/meta/@@). A trailing empty element from the
   // final newline is dropped; an empty line INSIDE a hunk is a context line whose single leading
   // space was stripped in transit — restore it.
-  const body = lines.slice(at).filter((l, i) => i === 0 || /^[ +\-\\@]/.test(l) || l === "");
+  const body = lines.slice(at).filter((l, i) => i === 0 || /^[ +\-\@]/.test(l) || l === "");
   while (body.length && body[body.length - 1] === "") body.pop();
   const fixed = body.map((l) => (l === "" ? " " : l));
-  return `--- a/${inner}\n+++ b/${inner}\n${fixed.join("\n")}\n`;
+  return `--- a/${rel}\n+++ b/${rel}\n${fixed.join("\n")}\n`;
 }
 
-export function discardHunkSh(rel: string): string {
-  const { top, inner } = splitRepoPath(rel);
-  const q = shellQuote;
+/**
+ * Reverse-apply one hunk from stdin (base64) inside the owning repo. The patch names the file
+ * workspace-relative (`a/<repo dirs>/<inner>`); `-p` strips `a/` plus one component per repo
+ * directory, so the hunk lands on the repo-relative path whatever depth the clone sits at.
+ */
+export function discardHunkSh(rel: string, root = "/workspace"): string {
   return (
-    `cd /workspace/${q(top)} || exit 1; if git cat-file -e HEAD:${q(inner)} 2>/dev/null; then ` +
-    `base64 -d | git apply -R --recount --whitespace=nowarn - 2>&1 && echo ${DISCARD_OK}; else echo "@@UNTRACKED"; fi`
+    `cd ${shellQuote(root)} || exit 1; ${REPO_OF_SH}; rel=${shellQuote(rel)}; top=$(repo_of "$rel") || { echo "@@UNTRACKED"; exit 0; }; inner=\${rel#"$top"/}; ` +
+    `strip=$(( $(printf %s "$top" | tr -cd / | wc -c) + 2 )); cd "$top" || exit 1; if git cat-file -e "HEAD:$inner" 2>/dev/null; then ` +
+    `base64 -d | git apply -R --recount --whitespace=nowarn -p"$strip" - 2>&1 && echo ${DISCARD_OK}; else echo "@@UNTRACKED"; fi`
   );
 }
 
@@ -265,9 +283,8 @@ export function discardHunkSh(rel: string): string {
  */
 export async function discardChange(cfg: Config, box: string, path: string, hunk?: string): Promise<{ scope: "hunk" | "file" }> {
   const rel = safeRelPath(path);
-  const { top, inner } = splitRepoPath(rel);
-  if (hunk && inner) {
-    const patch = buildHunkPatch(inner, hunk);
+  if (hunk) {
+    const patch = buildHunkPatch(rel, hunk);
     const r = await exec(cfg, box, discardHunkSh(rel), { input: Buffer.from(patch, "utf8").toString("base64") });
     if (r.stdout.includes(DISCARD_OK)) return { scope: "hunk" };
     if (!r.stdout.includes("@@UNTRACKED")) {
