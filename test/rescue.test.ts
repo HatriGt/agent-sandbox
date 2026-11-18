@@ -175,3 +175,14 @@ test("a keep that arrives after the copy was taken is stamped on the existing co
   assert.equal(io.pulled.length, 1, "no second pull: only the meta changed");
   assert.equal((await readRescue(cfg, "pool-7-abc"))?.kept, true);
 });
+
+test("stampRescueKept marks an existing copy kept once, and says whether it did", async () => {
+  const { stampRescueKept } = await import("../src/rescue.ts");
+  const cfg = await tmpCfg();
+  const io = fakeIO({ 1: 10 });
+  await pullRescue(cfg, "pool-8-abc", 1, {}, io);
+  assert.equal(await stampRescueKept(cfg, "pool-8-abc"), true);
+  assert.equal((await readRescue(cfg, "pool-8-abc"))?.kept, true);
+  assert.equal(await stampRescueKept(cfg, "pool-8-abc"), false, "already stamped");
+  assert.equal(await stampRescueKept(cfg, "pool-9-none"), false, "no copy, nothing to stamp");
+});

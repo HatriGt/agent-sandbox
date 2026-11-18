@@ -282,6 +282,14 @@ export async function sweepRescues(cfg: Pick<Config, "dataDir">, now = Date.now(
   return gone;
 }
 
+/** A keep that arrived after the copy was taken: stamp it on the meta so the sweep spares the copy. */
+export async function stampRescueKept(cfg: Pick<Config, "dataDir">, box: string): Promise<boolean> {
+  const m = await readRescue(cfg, box);
+  if (!m || m.kept) return false;
+  await writeMeta(rescueDirOf(cfg, box), { ...m, kept: true });
+  return true;
+}
+
 /** The boxes a copy is kept for (a directory with a meta.json), for the fleet's away rows. */
 export async function rescueBoxes(cfg: Pick<Config, "dataDir">): Promise<Set<string>> {
   const root = rescueRoot(cfg);

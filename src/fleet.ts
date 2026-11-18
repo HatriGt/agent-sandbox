@@ -114,8 +114,13 @@ export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>,
     }
     const known = memory.get(b.name);
     if (known) {
-      // Keep the last-seen uptime as "ran for"; the host tag follows the sweep (a box is where it is listed).
-      out.push(asleep({ ...known, host: b.host ?? known.host }));
+      // Keep the last-seen uptime as "ran for"; the host tag follows the sweep (a box is where it is
+      // listed), and so does the keep: the host's marker is read every sweep, the memory may predate
+      // it (a box kept while asleep, or remembered from the run-memory store, which has no keep).
+      const view = asleep({ ...known, host: b.host ?? known.host });
+      if (b.kept) view.kept = true;
+      else delete view.kept;
+      out.push(view);
       continue;
     }
     // A stopped box's role cannot be read (no exec): held by someone, it is a sleeping thread; else dead capacity.

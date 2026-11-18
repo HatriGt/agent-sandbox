@@ -297,3 +297,16 @@ test("makeFleetReader: stale-while-revalidate answers from the last snapshot whi
   release!();
   assert.equal((await third).at, 20_000);
 });
+
+test("mergeWithMemory: the keep follows the sweep for a sleeping box, whatever the memory remembers", () => {
+  const mem = new Map<string, BoxView>();
+  mergeWithMemory([running("k")], mem);
+  // Kept while asleep: the host's marker says so this sweep, the memory predates it.
+  let out = mergeWithMemory([{ name: "k", role: "session", boxStatus: "Stopped", runState: "idle", kept: true }], mem);
+  assert.equal(out[0].kept, true, "a box kept while asleep reads as kept");
+  // Unkept while asleep: the memory must not keep saying kept.
+  mergeWithMemory([running("k", { kept: true })], mem);
+  out = mergeWithMemory([{ name: "k", role: "session", boxStatus: "Stopped", runState: "idle" }], mem);
+  assert.equal(out[0].kept, undefined, "an unkept box no longer reads as kept");
+  assert.ok(!("kept" in out[0]), "no dangling kept key");
+});

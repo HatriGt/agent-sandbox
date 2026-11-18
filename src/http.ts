@@ -45,7 +45,7 @@ import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-dis
 import { configureHostPool, makeHostPool, placeRun } from "./host-pool.js";
 import { createBox, claudeRootSource } from "./msb.js";
 import { markClaimed } from "./claims.js";
-import { RESCUE_MAX_MB, capturedTurn, listRescues, pullRescue, pushRescue, readRescue, rescueBoxes, summarize, sweepRescues } from "./rescue.js";
+import { RESCUE_MAX_MB, capturedTurn, listRescues, pullRescue, pushRescue, readRescue, rescueBoxes, stampRescueKept, summarize, sweepRescues } from "./rescue.js";
 import { KeptBoxError } from "./msb.js";
 import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadViews, upsertThread } from "./threads.js";
 import { closeSshMasters } from "./ssh.js";
@@ -702,6 +702,7 @@ const noteCaptured = (box: string, stdout: string): void => {
 /** Kept, by the last sweep's markers or the thread row (the row is on the controller, so it answers while the host is out of reach). */
 const isKeptBox = (box: string): boolean => lastKept.has(box) || getThread(db, box)?.kept === 1;
 let lastKept = new Set<string>();
+const keptStamped = new Set<string>();
 /**
  * A kept thread must have a copy off its box from the moment it is kept, not from the next turn
  * end: the keep is the user's word that this one must not be lost. Between turns the checkpoint is
@@ -1316,6 +1317,8 @@ const readFleet = makeFleetReader(
     const sweepAt = Date.now();
     const { boxes, kept, claims, titles, stale } = await sweepHosts(cfg);
     lastKept = kept;
+    // Copies taken before the box was kept (or before copies knew about keeps) get the stamp once.
+    for (const k of kept) if (!keptStamped.has(k)) { keptStamped.add(k); void stampRescueKept(cfg, k).then((did) => did && console.error(`[keep] ${k}: copy stamped kept`)).catch(() => {}); }
     // A box seen Running last sweep and Stopped now just fell asleep: re-stamp its claim so the sleep
     // TTL (and the "asleep for" figure) count from the nap rather than from when the run started.
     for (const b of boxes) {
