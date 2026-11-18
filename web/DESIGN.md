@@ -330,7 +330,11 @@ per theme) so the first paint is already the right theme.
 - `QueuedItem` — a follow-up sent while the agent was mid-turn: dashed bubble, "Queued · delivers when
   this turn finishes", cancel. The controller holds it and resumes the run the moment it ends.
 - `ObserverItem` — dashed card, "Side question · answered from the sandbox, not by the agent".
-- `WorkingIndicator` — three live-blue dots; label "Starting up" until the first output.
+- `WorkingIndicator` — three live-blue dots; label "Starting up" until the first output, then "Working"
+  in every quiet beat of a live run the trace does not voice itself: after a command returns, after a
+  paragraph ends, while the model decides its next step. A running run must never show a finished last
+  row and nothing else — the reader cannot tell "still thinking" from "stalled". A 400 ms grace keeps
+  back-to-back calls from blinking it; a trail or tool group with a step in flight replaces it.
 - **Composer (`SendBar`, toolbar in `composer/Toolbar.tsx`)** — one input, the agent is the primary destination and is *always*
   sendable: mid-turn messages queue ("Queue for agent", clock icon) instead of being refused. The
   secondary chip is **Side question**. `@` (or the @ button) opens `MentionMenu` — the workspace file

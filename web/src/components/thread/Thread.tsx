@@ -57,6 +57,7 @@ import { VizFullscreenGate } from "@/components/viz/viz-fullscreen";
 import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
 import { type CompactView, AnsweredQuestionItem, CompactItem, Density, ExpandAll, LifecycleItem, MemoryItem, QueuedItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
 import { ReasoningTrail, type TrailItem } from "./ReasoningTrail";
+import { liveActivity } from "./live-activity";
 import { PlanBoard, type PlanVariant } from "./PlanBoard";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
@@ -1088,6 +1089,22 @@ export function Thread({
   // pill morphs between stages, in priority order.
   const lastKind = groups[groups.length - 1]?.kind ?? "";
   const liveContext = React.useMemo(() => ({ registry: liveRegistry, working: runState === "running" }), [liveRegistry, runState]);
+  // The trace speaks for itself only while a step is in flight: a reasoning trail's header names
+  // the step, a tool group says "Working n/m steps" while a call runs, thought streams. Between
+  // steps — a command just returned, a paragraph just ended, the model deciding what comes next —
+  // the last row sits finished and nothing on screen says the agent is still at work. The pill
+  // covers that beat too, after a short grace so back-to-back calls do not blink it in and out.
+  const traceSpeaks = lastKind === "work" || lastKind === "think" || (lastKind === "tools" && liveActivity(events) !== null);
+  const betweenSteps = runState === "running" && !loadingTrace && !starting && !resuming && !sleeping && !traceSpeaks && events.length > 0;
+  const [gapSettled, setGapSettled] = React.useState(false);
+  React.useEffect(() => {
+    if (!betweenSteps) {
+      setGapSettled(false);
+      return;
+    }
+    const t = window.setTimeout(() => setGapSettled(true), 400);
+    return () => window.clearTimeout(t);
+  }, [betweenSteps, events]);
   const working: { label: string; detail?: string } | null = resuming
     ? { label: "Answer sent — the agent is resuming" }
     : sleeping
@@ -1097,9 +1114,8 @@ export function Thread({
             label: "Starting up",
             detail: box.agent === "omp" ? "installing oh-my-pi and getting your task ready — the first start takes about a minute" : "the sandbox is getting your task ready",
           }
-        // A live reasoning trail or tool group names what the agent is doing and the header keeps
-        // the clock; this pill only covers the beats before the trace starts speaking.
-        : runState === "running" && !loadingTrace && !["say", "think", "work", "tools"].includes(lastKind)
+        // Before the trace starts speaking, and in the quiet between its steps.
+        : runState === "running" && !loadingTrace && !traceSpeaks && (events.length === 0 || gapSettled)
           ? { label: events.length ? "Working" : "Starting up" }
           : pendingReplies.length > 0 && runState !== "running"
             ? { label: "Message sent", detail: "the agent is picking it up" }
