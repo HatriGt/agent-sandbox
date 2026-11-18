@@ -1496,13 +1496,15 @@ const readFleet = makeFleetReader(
             const id = h.spec.id;
             if (runMemoryRead.has(id) || hostPool.dormant(id)) return;
             try {
-              for (const [k, v] of await loadRunMetas(h.cfg)) {
+              const remembered = await loadRunMetas(h.cfg);
+              for (const [k, v] of remembered) {
                 const m: RunMeta = { ...v, host: id };
                 out.set(k, m);
                 // The mirror learns what the host remembers, so the next restart does not depend on the host answering.
-                void saveRunMetaLocal(cfg, m).catch(() => {});
+                void saveRunMetaLocal(cfg, m).catch((e) => console.error(`[fleet] run memory mirror of ${k}: ${String((e as Error).message ?? e).slice(0, 120)}`));
               }
               runMemoryRead.add(id);
+              console.error(`[fleet] run memory of ${id}: ${remembered.size} run(s) remembered on the host`);
             } catch (e) {
               console.error(`[fleet] run memory of ${id} not read yet: ${String((e as Error).message ?? e).slice(0, 120)}`);
             }

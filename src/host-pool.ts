@@ -269,6 +269,9 @@ export function dormant(h: HostRuntime): boolean {
   // "starting" too: a VM resuming (by `ready`, by the operator, or by the provider's proxy on an SSH
   // that reached it) does not answer SSH for a minute; a loop that tried would time out and call it
   // unreachable, and `readyForBox` would skip the wait a reply needs (seen live 2026-11-17: 172 s).
+  // No reading yet from a provider that can pause the VM (the first seconds after boot): treat the
+  // VM as dormant rather than SSH it on a guess, which on Freestyle's proxy resumes a paused VM.
+  if (!h.provider && providerFor(h.spec).metered && h.spec.freestyle?.apiKey) return true;
   const p = h.provider?.state;
   return !!h.pausing || h.sleep.asleep() || p === "paused" || p === "stopped" || p === "starting";
 }

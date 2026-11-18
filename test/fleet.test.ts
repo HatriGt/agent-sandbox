@@ -310,3 +310,29 @@ test("mergeWithMemory: the keep follows the sweep for a sleeping box, whatever t
   assert.equal(out[0].kept, undefined, "an unkept box no longer reads as kept");
   assert.ok(!("kept" in out[0]), "no dangling kept key");
 });
+
+test("makeFleetReader: a later load replaces what was remembered of a stopped box (the host's memory wins over the controller's seed); a running box's live reading is never replaced", async () => {
+  let loads = 0;
+  const store = {
+    load: async () => {
+      loads++;
+      // First load: the thread-table seed (the task head only). Second: the host's own memory, the full task.
+      const task = loads === 1 ? "create a deal" : "create a deal for the new client with the terms attached";
+      return new Map([
+        ["delegate-9-fs", { name: "delegate-9-fs", host: "freestyle-a", role: "session" as const, runState: "done" as const, task }],
+        ["live", { name: "live", host: "primary", role: "session" as const, runState: "done" as const, task: "stale words about a live box" }],
+      ]);
+    },
+    save: async () => {},
+    forget: async () => {},
+    incomplete: () => loads < 2,
+  };
+  const cfg = { idleTimeout: "15m", poolIdleTimeout: "6h", maxBoxes: 5, poolSize: 1 } as Config;
+  let t = 0;
+  const read = makeFleetReader(cfg, async () => ({ boxes: [running("live", { host: "primary", task: "what live is really doing" }), { ...running("delegate-9-fs", { host: "freestyle-a" }), boxStatus: "Stopped", task: undefined, runState: "idle" as const }], held: () => true }), { ttlMs: 1, now: () => (t += 10), store });
+  const first = await read();
+  assert.equal(first.boxes.find((b) => b.name === "delegate-9-fs")?.task, "create a deal");
+  const second = await read();
+  assert.equal(second.boxes.find((b) => b.name === "delegate-9-fs")?.task, "create a deal for the new client with the terms attached", "the fuller memory replaced the seed");
+  assert.equal(second.boxes.find((b) => b.name === "live")?.task, "what live is really doing", "a running box keeps its live reading");
+});

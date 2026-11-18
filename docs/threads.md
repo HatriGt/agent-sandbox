@@ -94,3 +94,10 @@ claim it with a new task" until the host next woke. Now `threadRunMetas` (src/th
 memory from the thread table at load, and a row whose task was never learned uses the head of the
 task stored at claim time (`boxes.task_head`), so a thread is named from the controller's own
 records; the host's answer, when it comes, still wins per box and fills the row's full task.
+
+Two more rules landed the same evening. A later load replaces what the fleet remembered of a
+stopped box (the host's own memory, arriving once the host is awake, wins over the thread-table
+seed; a running box's live reading is never replaced). And a metered host nobody has heard from yet
+(the first seconds after boot, before its provider answered) counts as dormant: neither the warm
+refill nor the run-memory read SSHes it on a guess, because on Freestyle's proxy that SSH resumes a
+paused VM (both VMs came up by themselves after the 2026-11-18 evening deploy).

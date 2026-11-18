@@ -217,7 +217,11 @@ export function makeFleetReader(
       if (opts.store && (!hydrated || opts.store.incomplete?.())) {
         try {
           for (const [name, meta] of await opts.store.load()) {
-            if (!memory.has(name)) memory.set(name, { boxStatus: "Stopped", runState: "idle", role: "session", ...meta } as BoxView);
+            // A later, fuller source (the host's own memory arriving after the controller's seed) replaces
+            // what was remembered of a box that is not running; a running box's live reading always wins.
+            const have = memory.get(name);
+            if (have && isRunning(have.boxStatus)) continue;
+            memory.set(name, { boxStatus: "Stopped", runState: "idle", role: "session", ...meta } as BoxView);
           }
           hydrated = true;
         } catch {

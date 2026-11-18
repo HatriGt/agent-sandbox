@@ -964,3 +964,29 @@ test("pause: the host is dormant and its SSH shut before the provider is asked; 
     registerSleepResolver(null);
   }
 });
+
+test("a metered host with no provider reading yet is dormant (nothing SSHes a VM on a guess at boot); the first reading settles it", async () => {
+  let answered = false;
+  const gate = new Promise<void>((r) => setTimeout(() => (answered = true, r()), 20));
+  const fake = {
+    metered: true,
+    state: async (): Promise<ProviderState> => {
+      await gate;
+      return { state: "running", at: 0 };
+    },
+    pause: async (): Promise<ProviderState> => ({ state: "paused", at: 0 }),
+    start: async (): Promise<ProviderState> => ({ state: "running", at: 0 }),
+  };
+  setProviderForTest("freestyle", fake);
+  try {
+    const pool = makeHostPool(cfg, openMemoryDb(), { now: () => 1_000_000 });
+    pool.upsert(vmSpec);
+    assert.equal(answered, false);
+    assert.equal(pool.dormant("fs-1"), true, "unknown yet reads as dormant");
+    assert.ok(!pool.warmCfgs().some((c) => c.hostId === "fs-1"), "no warm refill on a VM nobody has heard from");
+    await pool.refreshProvider("fs-1");
+    assert.equal(pool.dormant("fs-1"), false, "running once read");
+  } finally {
+    setProviderForTest("freestyle", null);
+  }
+});
