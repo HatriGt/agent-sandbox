@@ -189,9 +189,12 @@ row (`POST /hosts/snapshot.json {id}`): the id it returns, pasted into "Boot fro
 `ASB_FREESTYLE_SNAPSHOT` in the controller's env, makes the next provision on that account boot
 with msb and the images in place. Snapshots are per account.
 
-Proven on account B on 2026-11-19 (see the commit message): a VM provisioned through the adapter
-from the stock image answered SSH through its minted token, and was then deleted with its
-identity, leaving the account with its one host VM.
+Proven on account B on 2026-11-19 with `.shots/live/provision-proof.mjs` (run inside the
+controller container next to a copy of `dist/host-providers.js`; it reads the account's key from
+the hosts table, read-only): a VM provisioned through the adapter from the stock image answered
+`uname -n; id -un` through its minted token 8 s after the call started, the delete removed the
+identity and the VM, the account was back to its one paused `asb-host`, and the revoked token
+was refused by the proxy ("Permission denied"). The Free plan accepted the second VM.
 
 ## Second account (2026-11-18)
 
