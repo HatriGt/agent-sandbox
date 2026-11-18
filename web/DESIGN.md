@@ -381,18 +381,26 @@ holds through delegate pending, box booting, the URL moving to `/dashboard/box/<
 empty first snapshot; only the launch bubble is ever replaced, by real output.
 
 - **The launch bubble** (`thread/LaunchSteps.tsx`) is the agent's side of the conversation before
-  it has said anything: a label row (breathing live dot, the machine's name once known) over a card
-  surface listing the launch's stages as they happen — *Sending the task · Checking the task ·
+  it has said anything: a label row (breathing live dot, the machine's name once known, swapped in
+  with `Swap`) over a tonal `.surface` card (no line, no shadow, `rounded-tl-md` so it reads as the
+  reply's bubble) listing the launch's stages as they happen — *Sending the task · Checking the task ·
   Resolving repository access · Picking a host (or Waking the X host) · Cloning owner/name ·
   Claiming a warm sandbox / Booting a fresh sandbox · Installing dependencies · Starting the agent ·
   Agent started · Waiting for the first words*. Every row is a stage the controller reported the
   moment it began (`src/launch-progress.ts`, streamed on `/launch.sse` under an id the tab minted;
-  `hooks/useLaunch.ts`). Never a timer pretending to be progress. Done rows: a check and how long
-  they took; the active row: three breathing dots and a ticking count; past 45 s (90 s for a cold
-  boot, 150 s for a host wake) a quiet "taking longer than usual" line. A failed launch shows the
-  reason in the alarm colour. Rows enter with the shared 200 ms lift, `layout="position"`.
-- Once the transcript takes over, one receipt line sits under the task (`LaunchReceipt`): "Started
-  in 12s on a warm sandbox". Only the tab that pressed Send has the feed, so a reopened thread
+  `hooks/useLaunch.ts`). Never a timer pretending to be progress.
+- Its motion is the shared vocabulary, all time-driven: a row rises in (8px, 2px blur, 280 ms
+  ease-out-quint) and the others hold their place (`layout="position"`); one `bg-live/8` wash with
+  a `layoutId` glides from the finished row to the new one on a spring; the mark is an `IconSwap`
+  from three breathing dots to a check whose path draws itself (`pathLength`); a hairline rail
+  joins the marks and each segment takes ink (`foreground/30`) as its stage completes; the seconds
+  on the active row lift in one by one (`Swap`, popLayout) and only from the second second; a done
+  row's duration fades in after the check; the overrun note and the failure reason unfold with
+  `Collapse`. Done rows settle to muted ink at the same weight, so no word reflows. Under reduced
+  motion only the fades remain. Past 45 s (90 s for a cold boot, 150 s for a host wake) a quiet
+  "taking longer than usual" line; a failed launch shows the reason in the alarm colour.
+- Once the transcript takes over, one receipt line unfolds under the task (`LaunchReceipt`,
+  `Collapse` + a drawn check + `rule-draw` hairline): "Started in 12s on a warm sandbox". Only the tab that pressed Send has the feed, so a reopened thread
   shows no receipt and a refresh mid-boot shows the bubble with what the tab knows (the machine).
 - `BootingThread` is a static copy of `Thread`'s shell (same header geometry, `ChatContainer`
   column, `data-turn="task"` bubble, launch bubble). Change one, change the other. `ThreadSkeleton`
