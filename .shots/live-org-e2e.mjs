@@ -120,6 +120,46 @@ check(r.json?.notes?.some((n) => n.text === mineNote), "org now lists the copied
 r = await call("POST", "/orgs/copy.json", { body: { org }, cookie: A });
 check(r.status === 400, "copy with nothing picked is refused", r.status);
 
+// ---- 3b. the copies follow their source: A edits the originals, the org's copies change too
+const secret2 = `sk-e2e-secret-${ts}-9876543210`;
+r = await call("POST", "/mcp-servers.json", { body: { action: "upsert", server: { name: mineServer, type: "http", url: "https://example.com/mine-v2", headers: { Authorization: `Bearer ${secret2}` } } }, cookie: A });
+check(r.status === 200 && r.json.followed?.[0] === orgName, "editing the own server reports the org's copy followed", r.json?.followed);
+r = await call("GET", `/mcp-servers.json?org=${org}`, { cookie: A });
+const orgSrv = r.json?.servers?.find((s) => s.name === mineServer);
+check(orgSrv?.url === "https://example.com/mine-v2" && String(orgSrv?.headers?.Authorization ?? "").endsWith(secret2.slice(-3)), "org's server copy has the new url and header", { url: orgSrv?.url, auth: orgSrv?.headers?.Authorization });
+r = await call("POST", "/skills.json", { body: { action: "upsert", skill: { name: mineSkill, description: `E2E own skill ${ts} v2`, content: `# ${mineSkill}
+
+Say E2E-MINE-SKILL-${ts}-V2.
+`, enabled: false } }, cookie: A });
+check(r.status === 200 && r.json.followed?.[0] === orgName, "editing the own skill reports the org's copy followed", r.json?.followed);
+r = await call("GET", `/skills.json?org=${org}`, { cookie: A });
+const orgSkill = r.json?.skills?.find((s) => s.name === mineSkill);
+check(orgSkill?.content.includes("-V2") && orgSkill?.description.endsWith("v2") && orgSkill?.enabled === true && orgSkill?.from?.login === users.a.login, "org's skill copy has the new text, keeps its own switch, is stamped", { desc: orgSkill?.description, enabled: orgSkill?.enabled, from: orgSkill?.from });
+r = await call("POST", "/skills.json", { body: { action: "upsert", previousName: mineSkill, skill: { name: `${mineSkill}-renamed`, description: `E2E own skill ${ts} v3`, content: `# renamed
+
+Say E2E-MINE-SKILL-${ts}-V3.
+` } }, cookie: A });
+check(r.status === 200 && r.json.followed?.[0] === orgName, "renaming the own skill reports the org's copy followed", r.json?.followed);
+r = await call("GET", `/skills.json?org=${org}`, { cookie: A });
+check(!r.json?.skills?.some((s) => s.name === mineSkill) && r.json?.skills?.some((s) => s.name === `${mineSkill}-renamed` && s.content.includes("-V3")), "org's skill copy moved under the new name");
+r = await call("POST", "/memory-notes.json", { body: { id: mineNoteId, text: `${mineNote} (edited)`, why: "e2e follow" }, cookie: A });
+check(r.status === 200 && r.json.followed?.[0] === orgName, "editing the own note reports the org's copy followed", r.json?.followed);
+r = await call("GET", `/memory-notes.json?org=${org}`, { cookie: A });
+const orgNote = r.json?.notes?.find((n) => n.id === mineNoteId);
+check(orgNote?.text === `${mineNote} (edited)` && orgNote?.why === "e2e follow", "org's note copy has the new text and rationale", { text: orgNote?.text, why: orgNote?.why });
+// B (a member, not an admin) editing their own same-named skill reaches nothing.
+r = await call("POST", "/skills.json", { body: { action: "upsert", skill: { name: `${mineSkill}-renamed`, description: "B's own", content: "# b\n\nB's own skill.\n" } }, cookie: B });
+check(r.status === 200 && !r.json.followed, "a member's own save never touches the org", r.json?.followed);
+r = await call("GET", `/skills.json?org=${org}`, { cookie: A });
+check(r.json?.skills?.find((s) => s.name === `${mineSkill}-renamed`)?.content.includes("-V3"), "org's copy still A's version");
+await call("POST", "/skills.json", { body: { action: "remove", name: `${mineSkill}-renamed` }, cookie: B });
+// A removes the original: the org keeps its copy.
+r = await call("POST", "/skills.json", { body: { action: "remove", name: `${mineSkill}-renamed` }, cookie: A });
+check(r.status === 200, "own skill removed", r.status);
+r = await call("GET", `/skills.json?org=${org}`, { cookie: A });
+const orphan = r.json?.skills?.find((s) => s.name === `${mineSkill}-renamed`);
+check(!!orphan && !orphan.from, "org keeps the copy of a removed skill, no longer stamped", { from: orphan?.from });
+
 // ---- 4. what B is served
 r = await call("GET", "/mcp-servers.json", { cookie: B });
 const sharedServers = r.json?.shared?.find((g) => g.org.id === org);
@@ -183,8 +223,8 @@ if (!NO_RUN) {
   check(seen.includes(mineServer), "copied server reached the box's MCP config");
   // The watch log is redacted by the controller, which knows the real value and prints it as
   // `Bearer …<last 4>`; the browser mask (`Be…789`) would have come through untouched.
-  check(seen.includes(`Bearer \u2026${secret.slice(-4)}`) && !seen.includes(`Bearer ${secret.slice(0, 2)}\u2026${secret.slice(-3)}`), "copied server carries the real secret in the box (redacted in the log, not the browser mask)");
-  check(seen.includes(mineSkill), "copied skill directory reached the box");
+  check(seen.includes(`Bearer \u2026${secret2.slice(-4)}`) && !seen.includes(`Bearer ${secret2.slice(0, 2)}\u2026${secret2.slice(-3)}`), "copied server carries the real (followed) secret in the box (redacted in the log, not the browser mask)");
+  check(seen.includes(`${mineSkill}-renamed`), "copied (followed, renamed) skill directory reached the box");
   check(seen.includes(`E2E-MINE-MEMORY-${ts}`), "copied note reached the box's MEMORY.md");
   if (box) {
     const t = await call("POST", "/teardown.json", { body: { box }, cookie: B });

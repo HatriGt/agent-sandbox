@@ -192,6 +192,8 @@ export interface McpServersResponse {
   servers: McpServerView[];
   /** What each organisation the caller belongs to shares with them (read-only here; edited on the org page). */
   shared?: Array<{ org: OrgRef; servers: McpServerView[] }>;
+  /** After a save of your own server: the organisations whose copy of it ("From yours") followed. */
+  followed?: string[];
   config: { mcpServers: Record<string, unknown> };
   /** Globally installed npm packages the boxes are born with (name → version), once a box has reported. */
   baked?: Record<string, string>;
@@ -259,6 +261,8 @@ export interface SkillView {
 export interface SkillsResponse {
   skills: SkillView[];
   shared?: Array<{ org: OrgRef; skills: SkillView[] }>;
+  /** After a save of your own skill: the organisations whose copy of it ("From yours") followed. */
+  followed?: string[];
   /** After `action: "update"`: whether the repository had a newer version, and files it could not carry. */
   updated?: { name: string; changed: boolean; skipped: string[] };
 }
@@ -340,6 +344,8 @@ export interface MemoryNotesResponse {
   enabled: boolean;
   notes: MemoryNote[];
   shared?: Array<{ org: OrgRef; enabled: boolean; notes: MemoryNote[] }>;
+  /** After an edit of your own note: the organisations whose copy of it ("From yours") followed. */
+  followed?: string[];
   episodes?: MemoryEpisode[];
   receipts?: MemoryReceiptRow[];
 }
@@ -755,6 +761,12 @@ export interface UserRow {
 /* ───────────── organisations (src/orgs.ts) ───────────── */
 export type OrgRole = "owner" | "admin" | "member";
 /** An organisation as it tags a shared item: who shares it and what the caller may do there. */
+/** The save toast's second line when organisation copies of the saved item followed it. */
+export function followedLine(followed: string[] | undefined): string | undefined {
+  if (!followed?.length) return undefined;
+  const names = followed.length <= 3 ? followed.join(", ") : `${followed.slice(0, 2).join(", ")} and ${followed.length - 2} more`;
+  return `${names} ${followed.length === 1 ? "has" : "have"} the new version too`;
+}
 export interface OrgRef {
   id: string;
   name: string;

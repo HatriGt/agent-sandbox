@@ -5,10 +5,11 @@ import { openMemoryDb } from "../src/db.js";
 import { createPasswordUser, upsertGithubUser, updateProfile, deleteUser } from "../src/identity.js";
 import { makeSecretBox } from "../src/secretbox.js";
 import { loadBlob, registerSharedOwners, registerUserStoreBackend, saveBlob, sharedOwners, withOwner, ownerKey } from "../src/user-store.js";
-import { addMembers, createOrg, deleteOrg, leaveOrg, listMembers, mergeMcpStores, mergeMemoryStores, mergeSkillStores, orgRole, orgsOf, parseEmails, removeMember, setMemberRole, sharedOrgIds, transferOrg, ORG_LIMITS, searchUsersByLogin } from "../src/orgs.js";
+import { addMembers, createOrg, deleteOrg, followNote, followServer, followSkill, leaveOrg, listMembers, mergeMcpStores, mergeMemoryStores, mergeSkillStores, orgRole, orgsOf, parseEmails, removeMember, setMemberRole, sharedOrgIds, transferOrg, ORG_LIMITS, searchUsersByLogin } from "../src/orgs.js";
 import { loadMemoryStore, saveMemoryStore, addManualNote, emptyMemoryStore, selectMemory, markUsed } from "../src/memory-store.js";
 import type { McpStore } from "../src/mcp-store.js";
-import type { SkillStore } from "../src/skill-store.js";
+import type { SkillDef, SkillStore } from "../src/skill-store.js";
+import type { MemoryNote } from "../src/memory-store.js";
 
 const user = (db: ReturnType<typeof openMemoryDb>, login: string, email: string | null) => createPasswordUser(db, { login, name: login, email, password: "a-long-enough-password" });
 
@@ -181,4 +182,82 @@ test("merges: own entries win, disabled org entries stay out, org memory is read
   deleteOrg(db, org.id);
   assert.equal(loadBlob("mcp", org.id), null);
   assert.equal(ownerKey(), "operator");
+});
+
+const who = { user: "u1", login: "ann" };
+const skill = (name: string, content: string, extra: Partial<SkillDef> = {}): SkillDef => ({ name, description: `about ${name}`, content, enabled: true, addedAt: 1, updatedAt: 1, ...extra });
+
+test("followSkill: a stamped org copy follows its source's edits and renames, keeps the org's switch, survives the source's removal", () => {
+  const org: SkillStore = { skills: { review: { ...skill("review", "v1"), enabled: false, addedAt: 7, from: { user: "u1", login: "ann", name: "review", at: 1 } } } };
+  // Edited: content follows; the org's own enabled/addedAt stay.
+  assert.equal(followSkill(org, who, "review", skill("review", "v1"), skill("review", "v2", { updatedAt: 9 }), 50), true);
+  assert.equal(org.skills.review.content, "v2");
+  assert.equal(org.skills.review.enabled, false);
+  assert.equal(org.skills.review.addedAt, 7);
+  assert.deepEqual(org.skills.review.from, { user: "u1", login: "ann", name: "review", at: 50 });
+  // Renamed: the copy moves under the new name and the stamp follows.
+  assert.equal(followSkill(org, who, "review", skill("review", "v2"), skill("review-pr", "v2"), 60), true);
+  assert.equal(org.skills.review, undefined);
+  assert.equal(org.skills["review-pr"].from?.name, "review-pr");
+  // A rename onto a name the org uses for something else leaves the org alone.
+  org.skills.other = skill("other", "theirs");
+  assert.equal(followSkill(org, who, "review-pr", skill("review-pr", "v2"), skill("other", "v2")), false);
+  assert.equal(org.skills.other.content, "theirs");
+  assert.ok(org.skills["review-pr"]);
+  // Someone else's stamp is not this person's.
+  org.skills.theirs = { ...skill("theirs", "x"), from: { user: "u2", login: "bob", name: "theirs", at: 1 } };
+  assert.equal(followSkill(org, who, "theirs", skill("theirs", "x"), skill("theirs", "y")), false);
+  assert.equal(org.skills.theirs.content, "x");
+  // Removed at the source: the org keeps its copy, now its own.
+  assert.equal(followSkill(org, who, "review-pr", skill("review-pr", "v2"), undefined), true);
+  assert.equal(org.skills["review-pr"].content, "v2");
+  assert.equal(org.skills["review-pr"].from, undefined);
+  assert.equal(followSkill(org, who, "review-pr", skill("review-pr", "v3"), skill("review-pr", "v4")), false, "unstamped and different: not a copy any more");
+});
+
+test("followSkill: a copy made before stamps existed is claimed when it still equals the source's previous version", () => {
+  const files = [{ path: "scripts/run.mjs", content: "x" }];
+  const org: SkillStore = { skills: { deploy: { ...skill("deploy", "v1", { files }), addedAt: 3 }, edited: skill("edited", "org changed this") } };
+  assert.equal(followSkill(org, who, "deploy", skill("deploy", "v1", { files: [{ path: "scripts/run.mjs", content: "x" }] }), skill("deploy", "v2"), 5), true);
+  assert.equal(org.skills.deploy.content, "v2");
+  assert.equal(org.skills.deploy.from?.user, "u1");
+  assert.equal(org.skills.deploy.addedAt, 3);
+  // An org entry under the same name that diverged (or was never a copy) is not touched.
+  assert.equal(followSkill(org, who, "edited", skill("edited", "mine"), skill("edited", "mine v2")), false);
+  assert.equal(org.skills.edited.content, "org changed this");
+  assert.equal(followSkill(org, who, "nothere", skill("nothere", "a"), skill("nothere", "b")), false);
+});
+
+test("followServer: the org's copy takes the real env and headers, key order does not matter for the claim", () => {
+  const srv = (name: string, token: string, extra: Partial<McpStore["servers"][string]> = {}) => ({ name, type: "http" as const, url: "https://api.example", headers: { Authorization: `Bearer ${token}`, "X-Team": "a" }, enabled: true, addedAt: 1, ...extra });
+  const org: McpStore = { servers: { api: { ...srv("api", "old"), headers: { "X-Team": "a", Authorization: "Bearer old" }, enabled: false } } };
+  assert.equal(followServer(org, who, "api", srv("api", "old"), srv("api", "new"), 9), true, "same content in another key order is the same copy");
+  assert.equal(org.servers.api.headers?.Authorization, "Bearer new");
+  assert.equal(org.servers.api.enabled, false);
+  assert.deepEqual(org.servers.api.from, { user: "u1", login: "ann", name: "api", at: 9 });
+  assert.equal(followServer(org, who, "api", srv("api", "new"), undefined), true);
+  assert.equal(org.servers.api.from, undefined);
+  assert.equal(org.servers.api.headers?.Authorization, "Bearer new", "the org keeps the server it was given");
+});
+
+test("followNote: the id is the link; text, rationale, pin and the repo it is filed under follow; recall counters stay; forgetting detaches", () => {
+  const note = (over: Partial<MemoryNote>): MemoryNote => ({ id: "n1", kind: "rule", scope: "operator", status: "kept", text: "t1", at: 10, source: "box-1", ...over });
+  const org = emptyMemoryStore();
+  org.global.push({ ...note({ text: "t1", source: "you", at: 20, uses: 3, lastUsed: 15, from: { user: "u1", login: "ann", at: 20 } }) });
+  assert.equal(followNote(org, who, "n1", note({ text: "t2", why: "because", pinned: true, uses: 99, stale: { at: 1, box: "b", paths: [] } }), 30), true);
+  assert.equal(org.global.length, 1);
+  assert.deepEqual(org.global[0], { id: "n1", kind: "rule", scope: "operator", status: "kept", text: "t2", why: "because", pinned: true, at: 20, source: "you", from: { user: "u1", login: "ann", at: 30 }, uses: 3, lastUsed: 15 });
+  // Re-homed into a repo at the source: the org's copy moves too.
+  assert.equal(followNote(org, who, "n1", note({ id: "n1", kind: "fact" as MemoryNote["kind"], scope: "repo", repo: "acme/app", text: "t2" })), true);
+  assert.equal(org.global.length, 0);
+  assert.equal(org.repos["acme/app"][0].text, "t2");
+  // Another person's stamp, an unknown id: untouched.
+  org.global.push(note({ id: "n2", from: { user: "u2", login: "bob", at: 1 } }));
+  assert.equal(followNote(org, who, "n2", note({ id: "n2", text: "x" })), false);
+  assert.equal(org.global[0].text, "t1");
+  assert.equal(followNote(org, who, "nope", note({ id: "nope" })), false);
+  // Forgotten at the source: the org keeps it, unstamped.
+  assert.equal(followNote(org, who, "n1", undefined), true);
+  assert.equal(org.repos["acme/app"][0].from, undefined);
+  assert.equal(followNote(org, who, "n1", undefined), false);
 });

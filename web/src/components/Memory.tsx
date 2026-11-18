@@ -3,7 +3,7 @@ import { resolvedReduced } from "@/lib/motion-pref";
 import { AnimatePresence, motion } from "motion/react";
 import { Brain, Check, ChevronRight, Download, FolderGit2, History, Link2, Pencil, Pin, PinOff, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, User, X } from "lucide-react";
 import { toast } from "sonner";
-import { api, ApiError, type MemoryKind, type MemoryNote, type MemoryNotesResponse } from "@/lib/api";
+import { api, ApiError, followedLine, type MemoryKind, type MemoryNote, type MemoryNotesResponse } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { fmtAgo, friendlyName } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -72,8 +72,9 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
   const apply = React.useCallback<Apply>(
     async (p, ok) => {
       try {
-        cached.setData(await p);
-        if (ok) toast.success(ok);
+        const r = await p;
+        cached.setData(r);
+        if (ok) toast.success(ok, { description: followedLine(r.followed) });
         return true;
       } catch (e) {
         toast.error((e as Error).message);

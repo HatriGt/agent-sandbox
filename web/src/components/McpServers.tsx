@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Braces, Check, ClipboardPaste, Copy, List, Pencil, Plug, Plus, RotateCcw, Trash2, UserRound, WandSparkles, X, Zap } from "lucide-react";
 import { toast } from "sonner";
-import { api, type McpServersResponse, type McpServerView, type OrgRef } from "@/lib/api";
+import { api, followedLine, type McpServersResponse, type McpServerView, type OrgRef } from "@/lib/api";
 import { SharedBy } from "@/components/org/SharedBy";
 import { PickFromMine } from "@/components/org/PickFromMine";
 import { useCached } from "@/lib/cache";
@@ -78,7 +78,7 @@ export function McpServers({ scope }: { scope?: { org: OrgRef } } = {}) {
     async (body, ok) => {
       const r = await api.mcpMutate(body, org);
       cached.setData(r);
-      if (ok) toast.success(ok);
+      if (ok) toast.success(ok, { description: followedLine(r.followed) });
       return r;
     },
     [cached, org]

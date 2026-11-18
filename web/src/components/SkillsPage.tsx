@@ -3,7 +3,7 @@ import { ArrowLeft, Download, Plus, RefreshCw } from "lucide-react";
 import { AnimatePresence, type HTMLMotionProps, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
-import { api, type SkillUpdateCheck, type SkillView } from "@/lib/api";
+import { api, followedLine, type SkillUpdateCheck, type SkillView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -72,7 +72,7 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
     async (body, ok) => {
       const r = await api.skillMutate(body);
       cached.setData(r);
-      if (ok) toast.success(ok);
+      if (ok) toast.success(ok, { description: followedLine(r.followed) });
       return r;
     },
     [cached]
