@@ -11,7 +11,7 @@ import {
   GitPullRequest,
   Layers,
   Loader2,
-  ImagePlus,
+  Paperclip,
   Lock,
   Map,
   PencilLine,
@@ -50,7 +50,8 @@ import { prefetchWatch } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
 import { stateWord } from "@/components/MachineList";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
-import { Lightbox } from "@/components/ui/lightbox";
+import { ATTACH_HINT, ATTACH_LABEL, AttachmentChips, AttachmentPreview, DropVeil, dragHasFiles, useAttachments } from "@/components/composer/Attachments";
+import { attachmentNote, type Attachment } from "@/lib/attachments";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { Capacity } from "@/components/Capacity";
 import { Bar } from "@/components/thread/Skeletons";
@@ -105,12 +106,12 @@ const STARTERS: Starter[] = STARTER_DEFS.map((s) => ({ ...s, icon: STARTER_ICONS
 /**
  * A failed delegate unmounts and remounts the Hub (the booting pane swaps in the moment you submit),
  * so React state written after the failure lands on a dead instance. Everything the user would lose
- * — images, repos, verify clause, the error itself — is stashed here at module level and restored by
+ * — attachments, repos, verify clause, the error itself — is stashed here at module level and restored by
  * the next mount. One-shot, in-memory: a reload starts clean (the text draft alone survives, as before).
  */
 interface FailedSubmit {
   task: string;
-  images: { id: string; name: string; dataUrl: string }[];
+  attachments: Attachment[];
   picked: PickedRepo[];
   verify?: { mode: "command" | "criterion"; text: string };
   error: string;
@@ -408,15 +409,25 @@ export function Hub({
     });
   };
 
-  // Images pasted, dropped or picked go with the task: the controller stages them into the fresh
-  // sandbox before the agent starts, and the task names them for the Read tool.
-  const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string }[]>(() => stash?.images ?? []);
-  const [preview, setPreview] = React.useState<{ name: string; dataUrl: string } | null>(null);
+  // Attachments pasted, dropped or picked go with the task — pictures, PDFs, documents, a long
+  // passage pasted as text: the controller stages them into the fresh sandbox before the agent
+  // starts, and the task names them for the Read tool (composer/Attachments.tsx).
+  const att = useAttachments({
+    initial: stash?.attachments,
+    onInsertText: (text) => {
+      const el = document.getElementById("new-task") as HTMLTextAreaElement | null;
+      const caret = el?.selectionStart ?? task.length;
+      setTask((prev) => `${prev.slice(0, caret)}${text}${prev.slice(caret)}`);
+      requestAnimationFrame(() => {
+        el?.focus();
+        el?.setSelectionRange(caret + text.length, caret + text.length);
+      });
+    },
+  });
   // dragenter/dragleave fire for every child crossed, so a boolean flickers as the cursor moves
   // over the textarea and buttons. A depth counter only reaches zero when the drag truly leaves.
   const [dragOver, setDragOver] = React.useState(false);
   const dragDepth = React.useRef(0);
-  const hasImages = (dt: DataTransfer) => [...dt.items].some((i) => i.type.startsWith("image/"));
   const endDrag = () => {
     dragDepth.current = 0;
     setDragOver(false);
@@ -430,46 +441,23 @@ export function Hub({
     markHowtoDone();
     setHowto(false);
   };
-  // Files still being read when Enter lands would be silently dropped from the submit; count the
-  // in-flight reads so submit can hold until they land (they take milliseconds).
-  const [readsPending, setReadsPending] = React.useState(0);
-  const addImages = (list: Iterable<File>) => {
-    for (const f of list) {
-      if (!f.type.startsWith("image/")) continue;
-      if (f.size > 8 * 1024 * 1024) {
-        toast.error(`${f.name || "image"} is over 8 MB`);
-        continue;
-      }
-      const reader = new FileReader();
-      setReadsPending((n) => n + 1);
-      reader.onerror = () => setReadsPending((n) => n - 1);
-      reader.onload = () => {
-        setReadsPending((n) => n - 1);
-        const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg");
-        const stem = (f.name || "pasted").replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "-").slice(0, 40) || "image";
-        setImages((prev) => [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: `${stem}.${ext}`, dataUrl: String(reader.result) }]);
-      };
-      reader.readAsDataURL(f);
-    }
-  };
-
   const submit = async () => {
     const typed = task.trim();
-    if ((!typed && !images.length) || busy) return;
+    if ((!typed && !att.items.length) || busy) return;
     // Skills ride in the task as written (`/name`), the same as a thread follow-up (SendBar): the
     // agent is told to invoke each one, and every skill is synced into every sandbox.
     const t = typed;
-    if (readsPending > 0) {
-      // An image is still being read; submitting now would silently drop it. The read resolves in
+    if (att.pending > 0) {
+      // A file is still being read; submitting now would silently drop it. The read resolves in
       // milliseconds — ask for one more Enter rather than auto-firing with state that may have moved.
-      toast("One moment — still attaching your image", { icon: <ImagePlus className="size-4" /> });
+      toast("One moment — still attaching your file", { icon: <Paperclip className="size-4" /> });
       return;
     }
     voice.stop();
     const id = `pending-${Date.now()}`;
     setBusy(true);
     setError(null);
-    const attached = images;
+    const attached = att.items;
     // The launch's feed is opened BEFORE the request goes out: the controller names each stage
     // (host, clone, sandbox, agent) while this POST is still open, and the pane shows them live.
     const launchId = newLaunchId();
@@ -481,7 +469,7 @@ export function Hub({
         task: t,
         launchId,
         repos: picked.length ? picked.map((p) => ({ repo: p.repo, ref: p.ref || undefined })) : undefined,
-        attachments: attached.length ? attached.map((i) => ({ name: i.name, dataUrl: i.dataUrl })) : undefined,
+        attachments: attached.length ? attached.map((a) => ({ name: a.name, dataUrl: a.dataUrl, kind: a.kind, note: attachmentNote(a) })) : undefined,
         ...(provPick ? { model: provPick.id, provider: provPick.provider } : model.picked ? { model: model.picked } : {}),
         // The agent chip shows "partial" before the pick is sent, so choosing it IS the acknowledgement.
         ...(agent.picked ? { agent: agent.picked, ...(agent.current?.supervised === false ? { allowPartialSupervision: true } : {}) } : {}),
@@ -497,7 +485,7 @@ export function Hub({
         writeDraft("hub", "");
         finishHowto();
         setTask("");
-        setImages([]);
+        att.setItems([]);
         tags.reset();
         clearVerify();
         setAttempts(1);
@@ -509,7 +497,7 @@ export function Hub({
         // Stash everything for the remount that onFailed triggers; the toast covers the gap.
         failedSubmit = {
           task: t,
-          images: attached,
+          attachments: attached,
           picked,
           ...(verify && verifyActive ? { verify } : {}),
           error: res.question,
@@ -524,7 +512,7 @@ export function Hub({
       const msg = e instanceof Error ? e.message : String(e);
       failedSubmit = {
         task: t,
-        images: attached,
+        attachments: attached,
         picked,
         ...(verify && verifyActive ? { verify } : {}),
         error: msg,
@@ -626,12 +614,8 @@ export function Hub({
               (voice.state === "listening" || voice.state === "arming") && "mic-live"
             )}
             onPaste={(e) => {
-              const files = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter((f): f is File => !!f);
-              if (files.length) {
-                e.preventDefault();
-                addImages(files);
-                return;
-              }
+              // A file on the clipboard, or a long passage, becomes a chip (composer/Attachments.tsx).
+              if (att.onPaste(e)) return;
               // A lone GitHub / Sentry issue link into an empty composer: let the link land, fetch the
               // issue server-side (CSP: connect-src 'self'), and swap it for title + body if the
               // person has not typed over it meanwhile.
@@ -647,13 +631,13 @@ export function Hub({
               }
             }}
             onDragEnter={(e) => {
-              if (!hasImages(e.dataTransfer)) return;
+              if (!dragHasFiles(e.dataTransfer)) return;
               e.preventDefault();
               dragDepth.current += 1;
               setDragOver(true);
             }}
             onDragOver={(e) => {
-              if (hasImages(e.dataTransfer)) e.preventDefault();
+              if (dragHasFiles(e.dataTransfer)) e.preventDefault();
             }}
             onDragLeave={() => {
               if (dragDepth.current === 0) return;
@@ -663,55 +647,16 @@ export function Hub({
             onDrop={(e) => {
               e.preventDefault();
               endDrag();
-              addImages(e.dataTransfer.files);
+              att.addFiles(e.dataTransfer.files);
             }}
           >
             <label htmlFor="new-task" className="sr-only">
               Describe the task for a new machine
             </label>
-            {/* The drop target is the WHOLE composer, said in words: a dashed veil over everything,
-                pointer-events off so the drop still lands on the PromptInput underneath. */}
-            <AnimatePresence>
-              {dragOver && (
-                <motion.div
-                  key="drop"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: still ? 0.08 : 0.15 }}
-                  aria-hidden
-                  className="bg-card/90 border-live text-live pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl border-2 border-dashed backdrop-blur-[2px]"
-                >
-                  <span className="flex items-center gap-2 text-meta font-medium">
-                    <ImagePlus className="size-4" aria-hidden />
-                    Drop images to attach
-                  </span>
-                </motion.div>
-              )}
-            </AnimatePresence>
-            {images.length > 0 && (
+            <DropVeil show={dragOver} still={still} />
+            {att.items.length > 0 && (
               <div className="flex flex-wrap gap-2 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
-                <AnimatePresence initial={false}>
-                  {images.map((img) => (
-                    <motion.span
-                      key={img.id}
-                      layout={!still}
-                      initial={still ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
-                      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                      className="group relative block size-16 overflow-hidden rounded-md border"
-                      title={img.name}
-                    >
-                      <button type="button" onClick={() => setPreview(img)} aria-label={`Preview ${img.name}`} className="block size-full cursor-zoom-in">
-                        <img src={img.dataUrl} alt={img.name} className="size-full object-cover transition-transform duration-200 group-hover:scale-105" />
-                      </button>
-                      <button type="button" onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))} aria-label={`Remove ${img.name}`} className="bg-card/80 text-foreground hover:bg-card absolute top-1 right-1 grid size-5 cursor-pointer place-items-center rounded-full opacity-0 shadow-e1 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100">
-                        <X className="size-3" />
-                      </button>
-                    </motion.span>
-                  ))}
-                </AnimatePresence>
+                <AttachmentChips list={att} />
               </div>
             )}
             <PromptInputTextarea
@@ -785,7 +730,7 @@ export function Hub({
                         side="bottom"
                         items={[
                           { key: "repo", icon: <GitBranch />, label: picked.length ? "Add another repository" : "Attach a repository", hint: "Clone it into the sandbox before the agent starts", run: () => setShowRepo(true) },
-                          { key: "image", icon: <ImagePlus />, label: "Add an image", hint: "Or paste / drop one into the box", run: () => fileInput.current?.click() },
+                          { key: "file", icon: <Paperclip />, label: ATTACH_LABEL, hint: ATTACH_HINT, run: () => fileInput.current?.click() },
                         ]}
                       />
                       <SkillsMenu {...menus.props("skills")} side="bottom" selected={tags.skillNames} onPick={pickSkill} />
@@ -801,7 +746,7 @@ export function Hub({
                       <Button
                         size="icon"
                         onClick={submit}
-                        disabled={busy || (!task.trim() && !images.length) || !!(getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired)}
+                        disabled={busy || (!task.trim() && !att.items.length) || !!(getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired)}
                         aria-label="Start a machine with this task"
                         className="shrink-0 rounded-full"
                       >
@@ -835,7 +780,7 @@ export function Hub({
                   )}
                 </AnimatePresence>
               </div>
-              <input ref={fileInput} type="file" accept="image/*" multiple className="hidden" onChange={(e) => (addImages(e.target.files ?? []), (e.target.value = ""))} />
+              <input ref={fileInput} type="file" multiple className="hidden" onChange={(e) => (att.addFiles(e.target.files ?? []), (e.target.value = ""))} />
             </PromptInputActions>
           </PromptInput>
             {/* The hint is a caption under the composer: it read mid-sentence when squeezed into the action row. */}
@@ -848,7 +793,7 @@ export function Hub({
               </p>
             </Swap>
           </div>
-          <Lightbox src={preview?.dataUrl ?? null} name={preview?.name ?? ""} open={!!preview} onClose={() => setPreview(null)} />
+          <AttachmentPreview list={att} />
 
           {/* Starters: one-tap briefs. Chips lift a hair on hover (hover-raise) — the same idiom as
               the composer's send button — and the icon warms to say "this is what you'd get". */}

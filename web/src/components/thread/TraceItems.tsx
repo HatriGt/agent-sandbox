@@ -19,7 +19,9 @@ import { StreamingMarkdown } from "./StreamingMarkdown";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useCached } from "@/lib/cache";
-import { ATTACHMENT_RE, SessionReposContext, useSession } from "@/lib/session-context";
+import { ANY_ATTACHMENT_RE, ATTACHMENT_RE, SessionReposContext, useSession } from "@/lib/session-context";
+import { attachmentDisplayName, isPdfPath, isTextPath } from "@/lib/attachments";
+import { openBlobObject } from "@/components/composer/Attachments";
 import { SkillMark } from "@/lib/skillGlyph";
 import { parseCodeModeResult, parseMcpName } from "@/lib/mcp";
 import { McpItem } from "./McpItem";
@@ -1390,8 +1392,13 @@ export function YouItem({
   at?: number;
   noEnter?: boolean;
 }) {
-  // Image attachments ride in the message as in-box paths; show them as thumbnails, not as text.
+  // Attachments ride in the message as in-box paths: pictures as thumbnails, the rest (a PDF, a
+  // document, a pasted passage) as file cards — never as text.
   const attachments = React.useMemo(() => [...new Set(text.match(ATTACHMENT_RE) ?? [])], [text]);
+  const docs = React.useMemo(() => {
+    const pics = new Set(attachments);
+    return [...new Set(text.match(ANY_ATTACHMENT_RE) ?? [])].filter((p) => !pics.has(p));
+  }, [text, attachments]);
   const { body, skill: skillName, files } = React.useMemo(() => parseYouMessage(text), [text]);
   const openRef = React.useContext(CodeNavContext);
   const jumpQuote = React.useContext(QuoteJumpContext);
@@ -1431,6 +1438,15 @@ export function YouItem({
             <AttachmentImage key={p} path={p} />
           ))}
         </div>
+      )}
+      {docs.length > 0 && (
+        <ul className="flex max-w-[min(72%,60ch)] flex-wrap justify-end gap-1.5" aria-label="Attached documents">
+          {docs.map((p) => (
+            <li key={p} className="min-w-0">
+              <AttachmentDoc path={p} />
+            </li>
+          ))}
+        </ul>
       )}
       {files.length > 0 && (
         <ul className="flex max-w-[min(72%,60ch)] flex-wrap justify-end gap-1.5" aria-label="Attached files">
@@ -1599,6 +1615,62 @@ function AttachmentImage({ path }: { path: string }) {
       </button>
       <Lightbox src={src} name={name} open={open} onClose={() => setOpen(false)} />
     </>
+  );
+}
+
+/**
+ * A non-picture attachment in a sent bubble: a card with the type mark and the name (without the
+ * send stamp). A text opens in the workspace editor like any file chip; a PDF opens in a new tab
+ * (the browser's own viewer, from a blob — the artifact route itself is download-only); anything
+ * else downloads.
+ */
+function AttachmentDoc({ path }: { path: string }) {
+  const session = useSession();
+  const openRef = React.useContext(CodeNavContext);
+  const [busy, setBusy] = React.useState(false);
+  const name = attachmentDisplayName(path);
+  const pdf = isPdfPath(path);
+  const textual = !pdf && isTextPath(path);
+  const open = async () => {
+    if (textual && openRef) {
+      openRef({ path });
+      return;
+    }
+    if (!session || busy) return;
+    setBusy(true);
+    try {
+      const blob = await api.artifactBlob(session, path.replace(/^\/workspace\//, ""));
+      if (pdf) openBlobObject(new Blob([blob], { type: "application/pdf" }));
+      else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        a.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      }
+    } catch (e) {
+      toast.error(`Could not open ${name}`, { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const chip = (
+    <>
+      <FileMark path={path} />
+      <span className="truncate font-mono font-medium">{name}</span>
+      {pdf ? <ArrowUpRight className="text-muted-foreground size-3 shrink-0" aria-hidden /> : null}
+    </>
+  );
+  const canOpen = (textual && !!openRef) || !!session;
+  return canOpen ? (
+    <button type="button" onClick={open} disabled={busy} title={pdf ? `Open ${name} in a new tab` : textual ? `Open ${name}` : `Download ${name}`} className="bg-muted text-foreground hover:bg-accent inline-flex h-7 max-w-full cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro transition-colors disabled:opacity-60">
+      {chip}
+    </button>
+  ) : (
+    <span title={path} className="bg-muted text-foreground inline-flex h-7 max-w-full items-center gap-1.5 rounded-md px-2 text-micro">
+      {chip}
+    </span>
   );
 }
 

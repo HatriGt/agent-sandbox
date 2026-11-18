@@ -1,11 +1,12 @@
 import * as React from "react";
 import { pushSent, readDraft, readSent, writeDraft } from "@/lib/draft";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { ArrowUp, AtSign, Check as CheckIcon, Clock, ImagePlus, Loader2, MessageCircleQuestion, X } from "lucide-react";
+import { ArrowUp, AtSign, Check as CheckIcon, Clock, Loader2, MessageCircleQuestion, Paperclip } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { ATTACHMENTS_DIR } from "@/lib/session-context";
-import { Lightbox } from "@/components/ui/lightbox";
+import { attachmentNote, attachmentsTail } from "@/lib/attachments";
+import { ATTACH_LABEL, AttachmentChips, AttachmentPreview, DropVeil, dragHasFiles, useAttachments } from "@/components/composer/Attachments";
 import { toast } from "sonner";
 import { api, prewakeHint, type RunState } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -106,11 +107,22 @@ export function SendBar({
   // `/skill` menu: open while the message starts with `/` and something matches an enabled skill.
   const [slash, setSlash] = React.useState<SlashState | null>(null);
   const [slashMatches, setSlashMatches] = React.useState(0);
-  // Images pasted, dropped or picked: kept as data URLs for the preview, uploaded into the sandbox on
-  // send (/workspace/.attachments) and referenced in the message so the agent opens them with Read.
-  // `label` is what the chip is called; `note` is what the agent is told about the picture (a browser
-  // element's selector and markup). Neither is prose the person has to read or keep in their message.
-  const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string; size: number; label?: string; note?: string }[]>([]);
+  // Attachments pasted, dropped or picked — pictures, PDFs, documents, a long passage pasted as text:
+  // kept as data URLs for the chips, uploaded into the sandbox on send (/workspace/.attachments) and
+  // listed at the end of the message so the agent opens them with Read (composer/Attachments.tsx).
+  // A pasted passage put back as text lands where the caret is.
+  const att = useAttachments({
+    onInsertText: (text) => {
+      const t = textarea();
+      const caret = t?.selectionStart ?? value.length;
+      const next = `${value.slice(0, caret)}${text}${value.slice(caret)}`;
+      setValue(next);
+      requestAnimationFrame(() => {
+        t?.focus();
+        t?.setSelectionRange(caret + text.length, caret + text.length);
+      });
+    },
+  });
   // Passages quoted from the conversation ("Quote in reply"). Each sits in the text as a short
   // `❝start of it…❞` tag drawn as a pill, like a skill; on send the tag becomes the whole passage as
   // `> ` lines in its place. A click on the tag jumps back to the passage. Keyed by the tag's text.
@@ -121,47 +133,20 @@ export function SendBar({
   React.useEffect(() => {
     if (prevBox.current === boxName) return;
     prevBox.current = boxName;
-    setImages([]);
+    att.setItems([]);
     setQuotes([]);
     setError(null);
     setMention(null);
     setSlash(null);
-    setPreview(null);
+    att.setPreview(null);
     recall.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boxName]);
+  // dragenter/dragleave fire for every child crossed; a depth counter only reaches zero when the
+  // drag truly leaves the composer.
   const [dragOver, setDragOver] = React.useState(false);
-  const [preview, setPreview] = React.useState<{ name: string; dataUrl: string } | null>(null);
+  const dragDepth = React.useRef(0);
   const fileInput = React.useRef<HTMLInputElement>(null);
-  // Readers still decoding a just-pasted image: a send racing them would silently drop the image.
-  const readersInFlight = React.useRef(0);
-  const addImages = React.useCallback((list: Iterable<File>) => {
-    for (const f of list) {
-      if (!f.type.startsWith("image/")) continue;
-      if (f.size > 8 * 1024 * 1024) {
-        toast.error(`${f.name || "image"} is over 8 MB`);
-        continue;
-      }
-      const reader = new FileReader();
-      readersInFlight.current++;
-      reader.onerror = () => {
-        readersInFlight.current--;
-      };
-      reader.onload = () => {
-        readersInFlight.current--;
-        const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg");
-        const stem = (f.name || "pasted").replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "-").slice(0, 40) || "image";
-        setImages((prev) => [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: `${stem}.${ext}`, dataUrl: String(reader.result), size: f.size }]);
-      };
-      reader.readAsDataURL(f);
-    }
-  }, []);
-  const onPaste = (e: React.ClipboardEvent) => {
-    const files = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter((f): f is File => !!f);
-    if (files.length) {
-      e.preventDefault();
-      addImages(files);
-    }
-  };
   const textarea = () => document.getElementById("send-input") as HTMLTextAreaElement | null;
   // Skills and files are tags in the text itself, drawn as pills where they sit in the line.
   const tags = useInlineTags(value, setValue, textarea);
@@ -208,13 +193,14 @@ export function SendBar({
     // A seed that is only a picture leaves the words being written alone.
     if (seed.text || !seed.image) setValue((prev) => (seed.inline ? `${prev && !/\s$/.test(prev) ? `${prev} ` : prev}${seed.text} ` : seed.append && prev.trim() ? `${prev.trimEnd()}\n\n${seed.text}` : seed.text));
     const image = seed.image;
-    if (image) setImages((prev) => [...prev, { id: `${seed.n}-${prev.length}`, name: image.name, dataUrl: image.dataUrl, size: Math.round(image.dataUrl.length * 0.75), label: image.label, note: image.note }]);
+    if (image) att.setItems((prev) => [...prev, { id: `${seed.n}-${prev.length}`, name: image.name, kind: "image", mime: image.dataUrl.slice(5, image.dataUrl.indexOf(";")) || "image/png", dataUrl: image.dataUrl, size: Math.round(image.dataUrl.length * 0.75), label: image.label, note: image.note }]);
     requestAnimationFrame(() => {
       const t = textarea();
       if (!t) return;
       t.focus();
       t.setSelectionRange(t.value.length, t.value.length);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed]);
   const still = useReducedMotion();
   // A phone's keyboard has no Shift+Enter: there Enter is a new line and the arrow sends.
@@ -279,22 +265,22 @@ export function SendBar({
 
   const send = async () => {
     const text = value.trim();
-    if ((!text && !images.length) || sending) return;
-    if (readersInFlight.current > 0) {
-      // A pasted image is still decoding; sending now would drop it. Retry (via the ref, so the
-      // retry sees the state that includes the decoded image) once the reader lands.
+    if ((!text && !att.items.length) || sending) return;
+    if (att.pendingRef.current > 0) {
+      // A dropped file is still being read; sending now would drop it. Retry (via the ref, so the
+      // retry sees the state that includes the read file) once the reader lands.
       setTimeout(() => sendRef.current(), 60);
       return;
     }
     const compact = isCompactCommand(text);
-    if (compact && images.length) {
-      toast.error("Send /compact on its own", { description: "Images go with a normal message — remove them, or send them after the compaction." });
+    if (compact && att.items.length) {
+      toast.error("Send /compact on its own", { description: "Attachments go with a normal message — remove them, or send them after the compaction." });
       return;
     }
     voice.stop();
     setSending(true);
     setError(null);
-    const attachedImages = images;
+    const attached = att.items;
     const attachedQuotes = quotes;
     // The tags travel as written: the controller reads every `/skill` in the message, and each
     // `@path` is also spelled out as a full path so the agent opens the right file.
@@ -307,21 +293,19 @@ export function SendBar({
       .replace(/\n{3,}/g, "\n\n")
       .trim();
     try {
-      // Upload images first so the message can name their in-box paths.
-      let imagesTail = "";
-      if (attachedImages.length) {
+      // Upload the attachments first so the message can name their in-box paths.
+      if (attached.length) {
         const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
-        const paths: string[] = [];
-        for (const [i, img] of attachedImages.entries()) {
-          const rel = `${ATTACHMENTS_DIR}/${stamp}-${i + 1}-${img.name}`;
-          await api.writeFile(boxName, rel, img.dataUrl, "base64");
-          paths.push(`/workspace/${rel}${img.note ? `\n  ${img.note}` : ""}`);
+        const listed: { path: string; kind: (typeof attached)[number]["kind"]; note?: string }[] = [];
+        for (const [i, a] of attached.entries()) {
+          const rel = `${ATTACHMENTS_DIR}/${stamp}-${i + 1}-${a.name}`;
+          await api.writeFile(boxName, rel, a.dataUrl, "base64");
+          listed.push({ path: `/workspace/${rel}`, kind: a.kind, note: attachmentNote(a) });
         }
-        imagesTail = `Attached ${paths.length === 1 ? "image" : "images"} (open with the Read tool):\n${paths.map((p) => `- ${p}`).join("\n")}`;
-        message = `${message}${message ? "\n\n" : ""}${imagesTail}`;
+        message = `${message}${message ? "\n\n" : ""}${attachmentsTail(listed)}`;
       }
       setValue("");
-      setImages([]);
+      att.setItems([]);
       setQuotes([]);
       tags.reset();
       recall.current = null;
@@ -357,7 +341,7 @@ export function SendBar({
       // is gone and the state update below is a no-op — the words must still be there on return.
       writeDraft(boxName, text);
       setValue(text);
-      setImages(attachedImages);
+      att.setItems(attached);
       setQuotes(attachedQuotes);
       toast.error("Could not send", { description: msg });
       setSending(false);
@@ -411,48 +395,40 @@ export function SendBar({
           }}
           isLoading={sending}
           className={cn(
-            "bg-card composer-focus composer-depth border-line-strong rounded-2xl p-2",
+            "bg-card composer-focus composer-depth border-line-strong relative rounded-2xl p-2",
             sleeping && "border-sleep/50",
             dragOver && "border-live ring-live/40 ring-2",
             (voice.state === "listening" || voice.state === "arming") && "mic-live"
           )}
-          onPaste={onPaste}
-          onDragOver={(e) => {
-            if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) {
-              e.preventDefault();
-              setDragOver(true);
-            }
+          onPaste={att.onPaste}
+          onDragEnter={(e) => {
+            if (!dragHasFiles(e.dataTransfer)) return;
+            e.preventDefault();
+            dragDepth.current += 1;
+            setDragOver(true);
           }}
-          onDragLeave={() => setDragOver(false)}
+          onDragOver={(e) => {
+            if (dragHasFiles(e.dataTransfer)) e.preventDefault();
+          }}
+          onDragLeave={() => {
+            if (dragDepth.current === 0) return;
+            dragDepth.current -= 1;
+            if (dragDepth.current === 0) setDragOver(false);
+          }}
           onDrop={(e) => {
             e.preventDefault();
+            dragDepth.current = 0;
             setDragOver(false);
-            addImages(e.dataTransfer.files);
+            att.addFiles(e.dataTransfer.files);
           }}
         >
+          <DropVeil show={dragOver} still={still} />
           {top}
           {/* Chip rows stay mounted through their own exit: the last chip used to vanish with the row. */}
           <AnimatePresence initial={false}>
-          {images.length > 0 && (
-            <ChipRow key="images" still={still} className="flex flex-wrap gap-2 px-2 pt-1.5">
-              <AnimatePresence initial={false} mode="popLayout">
-              {images.map((img) => (
-                <motion.span key={img.id} {...chipMotion(still)} className="group relative block size-16 overflow-hidden rounded-md border" title={img.name}>
-                  <button type="button" onClick={() => setPreview(img)} aria-label={`Preview ${img.name}`} className="block size-full cursor-zoom-in">
-                    <img src={img.dataUrl} alt={img.name} className="size-full object-cover transition-transform duration-200 group-hover:scale-105" />
-                  </button>
-                  <span className="stamp absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-px text-[9px] text-white">{img.label ?? img.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))}
-                    aria-label={`Remove ${img.name}`}
-                    className="bg-card/80 text-foreground hover:bg-card absolute top-1 right-1 grid size-5 cursor-pointer place-items-center rounded-full opacity-0 shadow-e1 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
-                  >
-                    <X className="size-3" />
-                  </button>
-                </motion.span>
-              ))}
-              </AnimatePresence>
+          {att.items.length > 0 && (
+            <ChipRow key="attachments" still={still} className="flex flex-wrap gap-2 px-2 pt-1.5">
+              <AttachmentChips list={att} />
             </ChipRow>
           )}
           </AnimatePresence>
@@ -521,7 +497,7 @@ export function SendBar({
                 <>
                   <PlusMenu
                     {...menus.props("plus")}
-                    items={[{ key: "image", icon: <ImagePlus />, label: "Attach an image — or paste / drop one", run: () => fileInput.current?.click() }]}
+                    items={[{ key: "file", icon: <Paperclip />, label: `${ATTACH_LABEL} — or paste / drop one`, run: () => fileInput.current?.click() }]}
                   />
                   <SkillsMenu
                     {...menus.props("skills")}
@@ -571,11 +547,10 @@ export function SendBar({
                   <input
                     ref={fileInput}
                     type="file"
-                    accept="image/*"
                     multiple
                     className="hidden"
                     onChange={(e) => {
-                      addImages(e.target.files ?? []);
+                      att.addFiles(e.target.files ?? []);
                       e.target.value = "";
                     }}
                   />
@@ -589,7 +564,7 @@ export function SendBar({
               variant="primary"
               size="icon"
               onClick={send}
-              disabled={sending || (!value.trim() && !images.length)}
+              disabled={sending || (!value.trim() && !att.items.length)}
               aria-label={busy ? "Queue for the agent" : "Send to the agent"}
               className="no-press shrink-0 rounded-full transition-[opacity,scale,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out-quint)] disabled:opacity-35 enabled:hover:scale-105 enabled:active:scale-90 motion-reduce:enabled:hover:scale-100 motion-reduce:enabled:active:scale-100"
             >
@@ -611,7 +586,7 @@ export function SendBar({
             />
           </PromptInputActions>
         </PromptInput>
-        <Lightbox src={preview?.dataUrl ?? null} name={preview?.name ?? ""} open={!!preview} onClose={() => setPreview(null)} />
+        <AttachmentPreview list={att} />
 
         {/* The hint is a caption under the composer, never squeezed into the action row where it
             truncated mid-sentence. Errors take the same slot in the destructive tone. */}
@@ -621,17 +596,6 @@ export function SendBar({
       </div>
     </div>
   );
-}
-
-/** Attachment chips pop in from their own centre and shrink out; reduced motion keeps only the fade. */
-function chipMotion(still: boolean | null) {
-  return {
-    layout: !still,
-    initial: still ? { opacity: 0 } : { opacity: 0, scale: 0.85 },
-    animate: { opacity: 1, scale: 1 },
-    exit: still ? { opacity: 0 } : { opacity: 0, scale: 0.85 },
-    transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const },
-  };
 }
 
 /**

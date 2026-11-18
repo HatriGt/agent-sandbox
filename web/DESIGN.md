@@ -1717,3 +1717,38 @@ That record is what every control in this round reads:
 
 Verified in both schemes with `.shots/skills-update-fixture.mjs [--dark]` (every skills route
 mocked over Vite: library, after the check, the confirmation, after an update, the editor).
+
+## Round: a long paste is a file; PDFs and documents attach (2026-11-18)
+
+Was: only pictures could be attached, and a 300-line JSON pasted into the composer buried the
+question under it. Now both composers (the thread's SendBar and the Hub's new-task box) share one
+attachment model (`lib/attachments.ts`) and one set of chips (`composer/Attachments.tsx`):
+
+- **A long paste becomes a chip.** Past 1,500 characters or 30 lines, pasted text is taken out of
+  the box and shown as a **"Pasted text"** card (the way Claude and ChatGPT treat a long paste):
+  a 36×44 page glyph carrying the first lines at 5px (to say "this is your document", not to be
+  read), the title, and one facts line `JSON · 66 lines · 6 KB`. JSON is detected by parsing,
+  markdown by shape; the file is named `pasted-N.<ext>`. Short pastes land as typed.
+- **Any file attaches** — paste, drop or pick: PDFs, text and code, JSON, images, and anything
+  else up to 8 MB, eight per message. A dropped file's card keeps the file's own name; the box gets
+  a safe one. Pictures stay 64px tiles of themselves; every other kind is a card of the same height
+  (a `bg-muted` wash, no outline, × on hover and always on touch).
+- **The drop target is the whole composer**, said in words: a dashed `--live` veil, "Drop files to
+  attach", on both composers now (the thread's had none).
+- **Preview.** A card opens a dense dialog: a text scrolls whole, highlighted (no fold — the dialog
+  is the frame), plain past 60 KB; a PDF offers **Open in a new tab** (a blob URL — Chrome's own
+  viewer renders it under our CSP, verified with `.shots/pdf-csp-probe.mjs`; the `/artifact` route
+  itself stays download-only) and Download. The footer says where it goes ("Sent to the sandbox as
+  a file the agent opens with its Read tool"); a pasted chip has **Put back as text**, which
+  returns the passage to the caret and drops the chip.
+- **The message.** Every attachment is written to `/workspace/.attachments/<stamp>-<n>-<name>` and
+  the message ends with `Attached files (open with the Read tool):` (still `image(s)` when they
+  all are) — one path per line, a pasted passage annotated `text pasted into the message, N lines`.
+  The Hub's launch takes the same list server-side. The bubble folds the tail back into chips: a
+  picture as its thumbnail, a document as a file card (mark + name without the stamp) that opens a
+  text in the workspace editor, a PDF in a new tab, anything else as a download.
+- The + menu reads "Attach a file or image · PDF, text, image — or paste / drop one".
+
+Verified in both schemes with `node .shots/thread-fixture.mjs done <out> --interact=attach
+[--dark]` (veil, chips, the pasted preview, the echo and the landed line with cards) and
+`node .shots/hub-attach-shot.mjs [--dark] [--w=390]` (Hub chips, the + menu, the PDF preview).

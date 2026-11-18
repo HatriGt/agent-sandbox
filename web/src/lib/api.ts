@@ -1202,7 +1202,8 @@ export const api = {
   delegate: (input: {
     task: string;
     repos?: { repo: string; ref?: string }[];
-    attachments?: { name: string; dataUrl: string }[];
+    /** Staged into the fresh sandbox before the agent starts; `kind` picks the wording of the task's tail, `note` goes under the path. */
+    attachments?: { name: string; dataUrl: string; kind?: "image" | "pdf" | "text" | "file"; note?: string }[];
     model?: string;
     /** Coding agent for the new thread; omit to use the stored default. */
     agent?: AgentId;

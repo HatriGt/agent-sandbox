@@ -434,7 +434,7 @@ if (replay && !streamer) {
 // --interact=send: a finished run's stream held open, so a message sent from the composer can land
 // in the log a beat later (the echo → durable line swap) and the agent can answer it.
 let appendLog = null;
-if (interact === "send" || interact === "send-probe" || interact === "send-rich" || interact === "quote") {
+if (interact === "send" || interact === "send-probe" || interact === "send-rich" || interact === "quote" || interact === "attach") {
   streamer = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", "access-control-allow-origin": "*" });
     res.write("retry: 3000\n\n");
@@ -761,6 +761,47 @@ if (stream) {
   }
   await page.waitForTimeout(300);
   await shot("-multiline");
+} else if (interact === "attach") {
+  // A long JSON pasted into the composer becomes a "Pasted text" chip; a PDF dropped on it a file
+  // card; the pasted chip opens a preview; the send shows both as cards in the bubble.
+  await input().click();
+  await input().type("Why does the limiter return 429 for this payload?");
+  await page.evaluate(() => {
+    const el = document.getElementById("send-input");
+    const rows = Array.from({ length: 60 }, (_, i) => `  { "id": ${1000 + i}, "ip": "10.0.${i % 7}.${i}", "bucket": ${i % 6}, "hits": ${3 + (i * 7) % 11}, "limit": 10, "at": "2026-11-18T09:${String(i % 60).padStart(2, "0")}:00Z" }`);
+    const text = `{\n  "window": 60000,\n  "buckets": 6,\n  "events": [\n${rows.join(",\n")}\n  ]\n}\n`;
+    const dt = new DataTransfer();
+    dt.setData("text/plain", text);
+    el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    const root = document.getElementById("send-input").closest("[class*='composer-depth']");
+    const pdf = `%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF`;
+    const dt = new DataTransfer();
+    dt.items.add(new File([pdf.repeat(400)], "Rate limiting RFC (draft 3).pdf", { type: "application/pdf" }));
+    root.dispatchEvent(new DragEvent("dragenter", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForTimeout(250);
+  await shot("-dropveil");
+  await page.evaluate(() => {
+    const root = document.getElementById("send-input").closest("[class*='composer-depth']");
+    const dt = new DataTransfer();
+    dt.items.add(new File(["%PDF-1.4 probe".repeat(4000)], "Rate limiting RFC (draft 3).pdf", { type: "application/pdf" }));
+    root.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  await page.waitForTimeout(500);
+  await shot("-chips");
+  await page.getByRole("button", { name: /^Preview Pasted text/ }).click();
+  await page.waitForTimeout(500);
+  await shot("-preview");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(350);
+  await input().press("Enter");
+  await page.waitForTimeout(600);
+  await shot("-echo");
+  await page.waitForTimeout(2600);
+  await shot("-landed");
 } else if (interact === "file") {
   // Open the changes dock and click its first row: the per-file diff.
   await page.getByRole("button", { name: /show the changed files/i }).click();

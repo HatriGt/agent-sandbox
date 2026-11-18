@@ -222,7 +222,7 @@ export function PlusMenu({ items, ...shell }: Shell & { items: { key: string; ic
   if (items.length === 1)
     return <ToolButton icon={<Plus />} aria-label={items[0].label} title={items[0].label} onClick={(e) => (e.stopPropagation(), items[0].run())} />;
   return (
-    <ToolMenu {...shell} title="Add to the task" width="w-64" trigger={{ icon: <Plus />, "aria-label": "Add a repository or image", title: "Add a repository or image", menu: "plus" }}>
+    <ToolMenu {...shell} title="Add to the task" width="w-64" trigger={{ icon: <Plus />, "aria-label": "Add a repository or file", title: "Add a repository or file", menu: "plus" }}>
       <div role="menu" aria-label="Add">
         {items.map((it, i) => (
           <MenuRow

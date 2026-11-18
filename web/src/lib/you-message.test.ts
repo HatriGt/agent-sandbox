@@ -2,7 +2,13 @@
 // Run from web/:  npx --yes tsx --tsconfig tsconfig.json --test src/lib/you-message.test.ts
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { splitQuotes } from "./you-message";
+import { parseYouMessage, splitQuotes } from "./you-message";
+
+test("the attachments tail is machinery, whether it says image, images, file or files", () => {
+  assert.equal(parseYouMessage("why 429?\n\nAttached image (open with the Read tool):\n- /workspace/.attachments/1-a.png").body, "why 429?");
+  assert.equal(parseYouMessage("why 429?\n\nAttached files (open with the Read tool):\n- /workspace/.attachments/1-a.png\n- /workspace/.attachments/2-pasted-1.json\n  text pasted into the message, 66 lines").body, "why 429?");
+  assert.equal(parseYouMessage("Attached file (open with the Read tool):\n- /workspace/.attachments/1-r.pdf").body, "");
+});
 
 test("a quote paragraph between prose becomes one quote part, framing blank lines dropped", () => {
   assert.deepEqual(splitQuotes("Look at this:\n\n> the limiter keeps six\n> buckets\n\nwhy six?"), [

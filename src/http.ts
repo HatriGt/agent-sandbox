@@ -4948,16 +4948,25 @@ const delegateOnceInner = async (body0: Record<string, unknown>, principal: Prin
         /* inference is best-effort; a task-only run is the honest fallback */
       }
     }
-    // Images attached in the composer: named now so the task can reference them; staged by the flow.
-    const rawAtt = Array.isArray(body.attachments) ? (body.attachments as Array<{ name?: string; dataUrl?: string }>) : [];
+    // Files attached in the composer (pictures, PDFs, documents, a long paste): named now so the
+    // task can reference them; staged by the flow. The tail's wording mirrors web/src/lib/attachments.ts
+    // (`attachmentsTail`), which the bubble folds back into chips.
+    const rawAtt = Array.isArray(body.attachments) ? (body.attachments as Array<{ name?: string; dataUrl?: string; kind?: string; note?: string }>) : [];
     const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
     const attachments = rawAtt
       .filter((a) => typeof a.dataUrl === "string" && a.dataUrl.length < 11_000_000)
       .slice(0, 8)
-      .map((a, i) => ({ path: `.attachments/${stamp}-${i + 1}-${String(a.name ?? "image.png").replace(/[^\w.-]+/g, "-").slice(0, 60)}`, base64: a.dataUrl! }));
+      .map((a, i) => ({
+        path: `.attachments/${stamp}-${i + 1}-${String(a.name ?? "file").replace(/[^\w.-]+/g, "-").slice(0, 60)}`,
+        base64: a.dataUrl!,
+        kind: a.kind === "image" || /\.(png|jpe?g|gif|webp)$/i.test(String(a.name ?? "")) ? "image" : "file",
+        note: typeof a.note === "string" ? a.note.replace(/\s+/g, " ").trim().slice(0, 200) : "",
+      }));
     const baseTask = typeof body.task === "string" ? body.task : rawTask;
+    const allImages = attachments.every((a) => a.kind === "image");
+    const noun = allImages ? (attachments.length === 1 ? "image" : "images") : attachments.length === 1 ? "file" : "files";
     const task = attachments.length
-      ? `${baseTask}\n\nAttached ${attachments.length === 1 ? "image" : "images"} (open with the Read tool):\n${attachments.map((a) => `- /workspace/${a.path}`).join("\n")}`
+      ? `${baseTask}\n\nAttached ${noun} (open with the Read tool):\n${attachments.map((a) => `- /workspace/${a.path}${a.note ? `\n  ${a.note}` : ""}`).join("\n")}`
       : baseTask;
     if (ownership.isUser()) {
       ownership.assertCanRun();
