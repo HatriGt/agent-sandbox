@@ -108,9 +108,10 @@ export function guardDeps(deps: HandlerDeps, own: Ownership): HandlerDeps {
       own.assertCanRun();
       return deps.resume(cfg, session, message, secrets, interact, model);
     },
-    async teardown(cfg, session) {
+    async teardown(cfg, session, opts) {
       own.check(session);
-      await deps.teardown(cfg, session);
+      // `force` (a deliberate Destroy of a kept box) travels through; the MCP teardown tool never sends it.
+      await deps.teardown(cfg, session, opts);
       own.forget(session);
     },
     async watch(cfg, session, lines) {

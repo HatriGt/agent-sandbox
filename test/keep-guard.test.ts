@@ -14,3 +14,11 @@ test("removalVerdict: a kept box is refused, unreadable markers refuse, only for
   assert.equal(removalVerdict(null, "pool-1-kept"), "refuse-unknown");
   assert.equal(removalVerdict(kept, "pool-1-kept", true), "proceed", "a deliberate Destroy that names the keep proceeds");
 });
+
+test("every teardown wrapper passes the force flag through (a deliberate Destroy of a kept box must reach msb)", async () => {
+  const fs = await import("node:fs/promises");
+  const tenancy = await fs.readFile(new URL("../src/tenancy.ts", import.meta.url), "utf8");
+  assert.match(tenancy, /async teardown\(cfg, session, opts\)[\s\S]*?deps\.teardown\(cfg, session, opts\)/, "tenancy.ts wraps teardown and must forward opts");
+  const http = await fs.readFile(new URL("../src/http.ts", import.meta.url), "utf8");
+  assert.match(http, /deps\.teardown\(hcfg\(session\), session, \{ force: force === true \}\)/, "the route sends force only when the body says so");
+});
