@@ -3975,7 +3975,10 @@ app.post("/rescue/restore.json", async (req: Request, res: Response) => {
         });
         const outcome = hostCfg ? await startBoxIfStopped(hostCfg, session) : "absent";
         if (hostCfg && outcome === "running") {
-          const probe = await execInBox(hostCfg, session, "wc -c < /workspace/.agent.log 2>/dev/null || echo 0").catch(() => ({ stdout: "0" }));
+          // A probe that fails is NOT an empty transcript: nothing may be wiped on a guess.
+          const probe = await execInBox(hostCfg, session, "wc -c < /workspace/.agent.log 2>/dev/null || echo 0").catch((e) => {
+            throw new Error(`the machine is on ${lastHost} but did not answer (${String((e as Error).message ?? e).slice(0, 160)}); nothing was changed, try again`);
+          });
           const logBytes = Number(probe.stdout.trim().split("\n").pop()) || 0;
           await markClaimed(hostCfg, session).catch(() => {});
           const back = () => {
