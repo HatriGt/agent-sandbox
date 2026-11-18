@@ -18,8 +18,10 @@ export interface LaunchStep {
 
 export interface LaunchRow {
   key: string;
+  /** The controller's stage; absent on the rows this tab adds itself (send, connect, words). */
+  phase?: LaunchPhase;
   label: string;
-  /** The failure reason, on a failed row. */
+  /** The stage's subject (a repo, a host, the box) — or the reason, on a failed row. */
   detail?: string;
   state: "done" | "active" | "failed";
   /** When the row started, this tab's clock. */
@@ -47,10 +49,10 @@ export function launchRows(steps: LaunchStep[], o: { sentAt: number; machine?: s
   steps.forEach((s, i) => {
     const next = steps[i + 1];
     if (s.phase === "failed") {
-      rows.push({ key: `${i}:${s.phase}`, label: s.label, detail: s.detail, state: "failed", at: s.at });
+      rows.push({ key: `${i}:${s.phase}`, phase: s.phase, label: s.label, detail: s.detail, state: "failed", at: s.at });
       return;
     }
-    rows.push({ key: `${i}:${s.phase}`, label: s.label, state: next || s.phase === "started" ? "done" : "active", at: s.at, ...(next ? { took: Math.max(0, next.at - s.at) } : s.phase === "started" ? { took: 0 } : {}) });
+    rows.push({ key: `${i}:${s.phase}`, phase: s.phase, label: s.label, ...(s.detail ? { detail: s.detail } : {}), state: next || s.phase === "started" ? "done" : "active", at: s.at, ...(next ? { took: Math.max(0, next.at - s.at) } : s.phase === "started" ? { took: 0 } : {}) });
   });
   const last = steps[steps.length - 1];
   if (last?.phase === "started") {

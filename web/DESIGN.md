@@ -393,18 +393,28 @@ empty first snapshot; only the launch bubble is ever replaced, by real output.
   Agent started · Waiting for the first words*. Every row is a stage the controller reported the
   moment it began (`src/launch-progress.ts`, streamed on `/launch.sse` under an id the tab minted;
   `hooks/useLaunch.ts`). Never a timer pretending to be progress.
-- Its motion is the shared vocabulary, all time-driven: a row rises in (8px, 2px blur, 280 ms
-  ease-out-quint) and the others hold their place (`layout="position"`); one `bg-live/8` wash with
-  a `layoutId` glides from the finished row to the new one on a spring; the mark is an `IconSwap`
-  from three breathing dots to a check whose path draws itself (`pathLength`); a hairline rail
-  joins the marks and each segment takes ink (`foreground/30`) as its stage completes; the seconds
-  on the active row lift in one by one (`Swap`, popLayout) and only from the second second; a done
-  row's duration fades in after the check; the overrun note and the failure reason unfold with
-  `Collapse`. Done rows settle to muted ink at the same weight, so no word reflows. Under reduced
-  motion only the fades remain. Past 45 s (90 s for a cold boot, 150 s for a host wake) a quiet
-  "taking longer than usual" line; a failed launch shows the reason in the alarm colour.
+- Its motion is the shared vocabulary, all time-driven. The bubble springs in once (`card-spring`;
+  a launch id remembers it has entered, so the BootingThread → Thread remount never replays it).
+  A row rises in (8px, 2px blur, 280 ms ease-out-quint) and the others hold their place
+  (`layout="position"`); one `bg-live/8` wash with a `layoutId` glides to the current row on a
+  spring. **The mark is the power ring** (the waking card's `wake-orbit` / `wake-halo`): while a
+  stage runs a live comet arc orbits a breathing halo inside a 12%-ink ground ring; when it ends
+  the ring closes from twelve o'clock (`pathLength`, 450 ms) and a check draws inside it (300 ms,
+  after the ring); on failure the ring turns to the alarm colour around a cross. A row that was
+  already done when the bubble mounted does not redraw. **One ink rail** (`foreground/35` over a
+  10% ground) is measured from the rows' real positions after every commit and springs down to the
+  ring that is still open, never through a ring. The current label shimmers in ink (`shimmer-text`,
+  72% → 100% foreground, no colour); its state change is a `Swap`, never a cut. A stage's subject —
+  the repo, the host, the box — is a mono wash chip (`bg-foreground/6`) after the verb, so the
+  label reads "Cloning `acme/orders-api`". The seconds on the current row lift in one by one
+  (`Swap`, popLayout) and only from the second second; a done row's duration fades in after the
+  check; the overrun note and the failure reason unfold with `Collapse`. Done rows settle to muted
+  ink at the same weight, so no word reflows. Under reduced motion only the fades remain (static
+  arc, instant rail, plain ink label). Past 45 s (90 s for a cold boot, 150 s for a host wake) a
+  quiet "taking longer than usual" line; a failed launch shows the reason in the alarm colour.
 - Once the transcript takes over, one receipt line unfolds under the task (`LaunchReceipt`,
-  `Collapse` + a drawn check + `rule-draw` hairline): "Started in 12s on a warm sandbox". Only the tab that pressed Send has the feed, so a reopened thread
+  `Collapse` + a drawn check + `rule-draw` hairline, the seconds a `NumberTicker` counting up in
+  full ink): "Started in 12s on a warm sandbox". Only the tab that pressed Send has the feed, so a reopened thread
   shows no receipt and a refresh mid-boot shows the bubble with what the tab knows (the machine).
 - `BootingThread` is a static copy of `Thread`'s shell (same header geometry, `ChatContainer`
   column, `data-turn="task"` bubble, launch bubble). Change one, change the other. `ThreadSkeleton`
