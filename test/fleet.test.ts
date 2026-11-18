@@ -336,3 +336,17 @@ test("makeFleetReader: a later load replaces what was remembered of a stopped bo
   assert.equal(second.boxes.find((b) => b.name === "delegate-9-fs")?.task, "create a deal for the new client with the terms attached", "the fuller memory replaced the seed");
   assert.equal(second.boxes.find((b) => b.name === "live")?.task, "what live is really doing", "a running box keeps its live reading");
 });
+
+test("mergeWithMemory: a held box missing from a host that answered keeps its memory (not listed, not forgotten); an unheld one is dropped", () => {
+  const memory = new Map<string, BoxView>([
+    ["delegate-held", { ...running("delegate-held", { host: "freestyle-a", task: "the task" }), boxStatus: "Stopped" }],
+    ["delegate-loose", { ...running("delegate-loose", { host: "freestyle-a", task: "gone" }), boxStatus: "Stopped" }],
+  ]);
+  const out = mergeWithMemory([], memory, { stale: new Set(), held: (n) => n === "delegate-held" });
+  assert.deepEqual(out, []);
+  assert.deepEqual([...memory.keys()], ["delegate-held"]);
+  assert.equal(memory.get("delegate-held")?.task, "the task");
+  // The next listing that has it shows it asleep with its task, nothing re-learned.
+  const back = mergeWithMemory([{ ...running("delegate-held", { host: "freestyle-a" }), boxStatus: "Stopped", task: undefined, runState: "idle" as const }], memory, { held: () => true });
+  assert.equal(back[0]?.task, "the task");
+});

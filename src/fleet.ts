@@ -135,6 +135,12 @@ export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>,
       out.push(asleep(known));
       continue;
     }
+    // A box someone holds (a kept box, a claim, an owner, a live thread row) keeps its memory on its
+    // own word, not one sweep's: a listing cut short by a VM resuming or a pause landing used to
+    // forget the task of every thread it missed, on the controller and on the host. The box is not
+    // listed here (threadViews speaks for a thread whose box is really gone); the memory waits for
+    // the next listing that has it, and leaves when the thread is deleted.
+    if (opts.held?.(name)) continue;
     memory.delete(name);
   }
   return out;
