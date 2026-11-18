@@ -675,7 +675,7 @@ export function Thread({
   const destroy = async () => {
     setRemoving(true);
     try {
-      await api.teardown(box.name);
+      await api.teardown(box.name, { force: !!box.kept });
       toast.success(`${friendlyName(box.name)} destroyed`);
       onTornDown(box.name);
     } catch (e) {

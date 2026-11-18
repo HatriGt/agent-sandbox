@@ -1188,7 +1188,8 @@ export const api = {
       parse<{ files: string[]; total: number; truncated: boolean }>
     ),
 
-  teardown: (session: string) => post<{ ok: true }>("/teardown.json", { box: session }),
+  /** `force` is the thread's own Destroy on a KEPT machine (its dialog names the keep); the bulk clean-up never sends it. */
+  teardown: (session: string, opts: { force?: boolean } = {}) => post<{ ok: true }>("/teardown.json", { box: session, ...(opts.force ? { force: true } : {}) }),
 
   /** GitHub accounts (tokens stay on the VPS; only masked hints come back). */
   accounts: (signal?: AbortSignal) =>

@@ -83,7 +83,8 @@ export interface HandlerDeps {
   /** Continue the in-box session WITHOUT waiting for the next boundary (dashboard / queue / broker). */
   resumeDetached?(cfg: Config, session: string, message: string, secrets?: Record<string, string>, model?: string): Promise<void>;
   /** Stop + remove the box. */
-  teardown(cfg: Config, session: string): Promise<void>;
+  /** `force` destroys a KEPT box too (a deliberate Destroy that names the keep); without it a kept box is refused. */
+  teardown(cfg: Config, session: string, opts?: { force?: boolean }): Promise<void>;
   /** Warm pool status line. */
   /** `names: false` (users) reports counts only; the operator and admins see box names. */
   poolStatus(cfg: Config, opts?: { names?: boolean }): Promise<string>;

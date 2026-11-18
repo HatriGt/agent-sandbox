@@ -26,6 +26,8 @@ import { CKPT_DIR } from "./checkpoint.js";
 import { assertBoxName } from "./sync.js";
 
 export const RESCUE_MAX_MB = Math.max(1, Number(process.env.RESCUE_MAX_MB) || 512);
+/** A KEPT thread's copy may be much bigger: the user said this one must not be lost. */
+export const RESCUE_KEPT_MAX_MB = Math.max(RESCUE_MAX_MB, Number(process.env.RESCUE_KEPT_MAX_MB) || 4096);
 export const RESCUE_TTL_DAYS = Math.max(1, Number(process.env.RESCUE_TTL_DAYS) || 14);
 /** A pull or a push of a few hundred MB through a proxied SSH route needs minutes, not seconds. */
 const TRANSFER_TIMEOUT_MS = 15 * 60_000;
@@ -45,6 +47,8 @@ export interface RescueMeta {
   agent?: string;
   task?: string;
   title?: string;
+  /** The box was kept (pinned) when the copy was taken: the copy is never swept by age. */
+  kept?: boolean;
   /** Compressed bytes on the controller. */
   bytes: number;
   tar: string;
@@ -92,7 +96,7 @@ export async function readRescue(cfg: Pick<Config, "dataDir">, box: string): Pro
 }
 
 export function summarize(m: RescueMeta): RescueSummary {
-  return { box: m.box, turn: m.turn, at: m.at, bytes: m.bytes, agent: m.agent, task: m.task, title: m.title, ...(m.tooBig ? { tooBig: m.tooBig } : {}) };
+  return { box: m.box, turn: m.turn, at: m.at, bytes: m.bytes, agent: m.agent, task: m.task, title: m.title, ...(m.tooBig ? { tooBig: m.tooBig } : {}), ...(m.kept ? { kept: true } : {}) };
 }
 
 /** The in-box size probe for checkpoint t<n>: prints the byte size, or MISSING. */
@@ -176,14 +180,22 @@ const inFlight = new Map<string, Promise<RescueMeta | null>>();
  * Pull checkpoint t<turn> of `box` to the controller, replacing the box's older copy. Idempotent
  * per (box, turn): a copy of that turn already here is kept as is. One pull per box at a time.
  */
-export function pullRescue(cfg: Config, box: string, turn: number, meta: Partial<Pick<RescueMeta, "owner" | "hostId" | "agent" | "task" | "title">>, io: RescueIO = realRescueIO): Promise<RescueMeta | null> {
+export function pullRescue(cfg: Config, box: string, turn: number, meta: Partial<Pick<RescueMeta, "owner" | "hostId" | "agent" | "task" | "title" | "kept">>, io: RescueIO = realRescueIO): Promise<RescueMeta | null> {
   const key = box;
   const running = inFlight.get(key);
   if (running) return running;
   const flight = (async (): Promise<RescueMeta | null> => {
     const dir = rescueDirOf(cfg, box);
     const have = await readRescue(cfg, box);
-    if (have && have.turn === turn && !have.tooBig) return have;
+    if (have && have.turn === turn && !have.tooBig) {
+      // The copy is current; a keep that arrived since is stamped on it so the sweep spares it.
+      if (meta.kept && !have.kept) {
+        const m: RescueMeta = { ...have, kept: true };
+        await writeMeta(dir, m);
+        return m;
+      }
+      return have;
+    }
     const probe = await io.exec(cfg, box, sizeProbeSh(turn));
     const size = Number(probe.stdout.trim().split("\n").pop());
     if (!Number.isFinite(size)) {
@@ -191,12 +203,13 @@ export function pullRescue(cfg: Config, box: string, turn: number, meta: Partial
       return have;
     }
     await fs.mkdir(dir, { recursive: true });
-    const base: RescueMeta = { v: 1, box, owner: meta.owner ?? null, turn, at: Date.now(), hostId: meta.hostId, agent: meta.agent, task: meta.task?.slice(0, 500), title: meta.title, bytes: 0, tar: `t${turn}.tar.gz` };
-    if (size > RESCUE_MAX_MB * 1024 * 1024) {
+    const base: RescueMeta = { v: 1, box, owner: meta.owner ?? null, turn, at: Date.now(), hostId: meta.hostId, agent: meta.agent, task: meta.task?.slice(0, 500), title: meta.title, ...(meta.kept ? { kept: true } : {}), bytes: 0, tar: `t${turn}.tar.gz` };
+    const capMb = meta.kept ? RESCUE_KEPT_MAX_MB : RESCUE_MAX_MB;
+    if (size > capMb * 1024 * 1024) {
       // Too big to keep: say so in the meta (the thread shows it), keep an older copy if one exists.
       const m: RescueMeta = { ...base, tooBig: size, bytes: have?.bytes ?? 0, tar: have?.tar ?? base.tar, turn: have?.turn ?? turn };
       await writeMeta(dir, m);
-      console.error(`[rescue] ${box}: checkpoint t${turn} is ${Math.round(size / 1048576)} MB, over RESCUE_MAX_MB=${RESCUE_MAX_MB}; not copied`);
+      console.error(`[rescue] ${box}: checkpoint t${turn} is ${Math.round(size / 1048576)} MB, over ${meta.kept ? "RESCUE_KEPT_MAX_MB" : "RESCUE_MAX_MB"}=${capMb}; not copied${meta.kept ? " — THIS THREAD IS KEPT and has no fresh copy off its box" : ""}`);
       return m;
     }
     const file = path.join(dir, base.tar);
@@ -252,12 +265,14 @@ export async function dropRescue(cfg: Pick<Config, "dataDir">, box: string): Pro
 }
 
 /** Remove copies older than the TTL. Returns how many went. */
-export async function sweepRescues(cfg: Pick<Config, "dataDir">, now = Date.now(), ttlMs = RESCUE_TTL_DAYS * 86_400_000): Promise<number> {
+export async function sweepRescues(cfg: Pick<Config, "dataDir">, now = Date.now(), ttlMs = RESCUE_TTL_DAYS * 86_400_000, isKept?: (box: string) => boolean): Promise<number> {
   let gone = 0;
   const root = rescueRoot(cfg);
   const names = await fs.readdir(root).catch(() => [] as string[]);
   for (const name of names) {
     const m = await readRescue(cfg, name).catch(() => null);
+    // A kept thread's copy has no age: it is the user's word that this one must not be lost.
+    if (m?.kept || isKept?.(name)) continue;
     const at = m?.at ?? (await fs.stat(path.join(root, name)).then((s) => s.mtimeMs).catch(() => 0));
     if (now - at > ttlMs) {
       await fs.rm(path.join(root, name), { recursive: true, force: true }).catch(() => {});

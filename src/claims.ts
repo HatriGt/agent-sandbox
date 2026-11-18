@@ -73,6 +73,18 @@ export async function listKept(cfg: Config): Promise<Set<string>> {
   return new Set(out.split("\n").map((l) => l.trim()).filter((l) => l && l !== "*"));
 }
 
+/**
+ * May a box be removed, given the host's keep markers? A kept box is NEVER removed by an automatic
+ * path, and markers that could not be read mean "kept" (nobody can prove it is not). Only a
+ * deliberate Destroy that says `force` (the thread's own dialog, which names the keep) proceeds
+ * regardless. Pure, so the guarantee is testable.
+ */
+export function removalVerdict(kept: ReadonlySet<string> | null, box: string, force = false): "proceed" | "refuse-kept" | "refuse-unknown" {
+  if (force) return "proceed";
+  if (!kept) return "refuse-unknown";
+  return kept.has(box) ? "refuse-kept" : "proceed";
+}
+
 /* ── parked markers: a box stopped BY THE CONTROLLER because it is waiting on a question ──
  * The reaper cannot ask a stopped box whether a question is pending (exec would boot it), so the
  * park sweep records the fact host-side, like claims. A parked box costs disk only and is held to

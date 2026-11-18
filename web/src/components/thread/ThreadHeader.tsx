@@ -751,7 +751,15 @@ export function ThreadHeader({
       </Dialog>
 
       <Dialog open={confirm} onOpenChange={setConfirm}>
-        <DialogContent onOpenAutoFocus={(e) => (e.preventDefault(), cancelRef.current?.focus())} title={`Destroy ${friendlyName(box.name)}?`} description="Stops the sandbox and discards its workspace — files, checkouts and uncommitted work. The conversation is not recoverable afterwards.">
+        <DialogContent
+          onOpenAutoFocus={(e) => (e.preventDefault(), cancelRef.current?.focus())}
+          title={box.kept ? `Destroy the kept machine ${friendlyName(box.name)}?` : `Destroy ${friendlyName(box.name)}?`}
+          description={
+            box.kept
+              ? "You kept this machine. Destroying it removes the keep and discards its workspace, its copy and the conversation — nothing is recoverable afterwards."
+              : "Stops the sandbox and discards its workspace — files, checkouts and uncommitted work. The conversation is not recoverable afterwards."
+          }
+        >
           <div className="flex justify-end gap-2">
             <Button ref={cancelRef} variant="outline" size="sm" onClick={() => setConfirm(false)} disabled={removing}>
               Cancel

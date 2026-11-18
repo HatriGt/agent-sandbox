@@ -1777,3 +1777,8 @@ Verified in both schemes with `node .shots/thread-fixture.mjs done <out> --inter
   e.g. from before the table) and for the explicit "Check and bring it back" on an uncertain host.
 - Fixture: `node .shots/thread-fixture.mjs away <out> [--dark] [--restore-ms=N]`; references
   `.shots/thread-away-1440.png`, `-dark-dark-1440.png`, `-back-1440.png`.
+- **Destroying a kept machine says so.** The Destroy dialog on a kept thread is titled "Destroy
+  the kept machine …?" and says you kept it and that the keep, the copy and the conversation go
+  with it; it is the only control that sends `force` to `/teardown.json`. Everything else that
+  removes boxes is refused for a kept one (`docs/lifecycle.md`, "Keep means never lost").
+

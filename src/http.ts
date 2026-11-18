@@ -46,6 +46,7 @@ import { configureHostPool, makeHostPool, placeRun } from "./host-pool.js";
 import { createBox, claudeRootSource } from "./msb.js";
 import { markClaimed } from "./claims.js";
 import { RESCUE_MAX_MB, capturedTurn, listRescues, pullRescue, pushRescue, readRescue, rescueBoxes, summarize, sweepRescues } from "./rescue.js";
+import { KeptBoxError } from "./msb.js";
 import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadViews, upsertThread } from "./threads.js";
 import { closeSshMasters } from "./ssh.js";
 import { PRIMARY_HOST_ID, boxHostOf } from "./hosts.js";
@@ -693,8 +694,24 @@ const noteCaptured = (box: string, stdout: string): void => {
       agent: snap?.agent,
       task: snap?.task,
       title: titles[box],
+      kept: isKeptBox(box),
     });
   })().catch(() => {});
+};
+/** Kept, by the last sweep's markers or the thread row (the row is on the controller, so it answers while the host is out of reach). */
+const isKeptBox = (box: string): boolean => lastKept.has(box) || getThread(db, box)?.kept === 1;
+let lastKept = new Set<string>();
+/**
+ * A kept thread must have a copy off its box from the moment it is kept, not from the next turn
+ * end: the keep is the user's word that this one must not be lost. Between turns the checkpoint is
+ * captured (idempotent) and pulled; mid-turn the turn end does it.
+ */
+const ensureKeptCopy = async (box: string): Promise<void> => {
+  const have = await readRescue(cfg, box).catch(() => null);
+  if (have && !have.tooBig && have.kept) return;
+  const snap = await watchHub.read(box).catch(() => null);
+  if (snap?.runState === "running") return;
+  await withFinishing(box, () => captureTurnCheckpoint(box));
 };
 verifyRetrier = makeVerifyRetrier({ resume: resumeQuietly, log: (m) => console.error(m) });
 // Workflows ride the same quiet resume lane and the verify command lane (src/workflow-engine.ts).
@@ -1297,6 +1314,7 @@ const readFleet = makeFleetReader(
   async () => {
     const sweepAt = Date.now();
     const { boxes, kept, claims, titles, stale } = await sweepHosts(cfg);
+    lastKept = kept;
     // A box seen Running last sweep and Stopped now just fell asleep: re-stamp its claim so the sleep
     // TTL (and the "asleep for" figure) count from the nap rather than from when the run started.
     for (const b of boxes) {
@@ -3921,6 +3939,13 @@ app.post("/keep.json", async (req: Request, res: Response) => {
     }
     if (keep === false) await unmarkKept(hcfg(session), session);
     else await markKept(hcfg(session), session);
+    // The thread row carries the keep at once (the rescue sweep and the copy's cap read it), and a
+    // kept thread gets its copy off the box now, not at the next turn end.
+    upsertThread(db, { id: session, kept: keep !== false });
+    if (keep !== false) {
+      lastKept.add(session);
+      void ensureKeptCopy(session).catch((e) => console.error(`[keep] ${session}: copy after keep failed: ${String((e as Error).message ?? e).slice(0, 200)}`));
+    } else lastKept.delete(session);
     res.json({ ok: true, kept: keep !== false });
   } catch (e) {
     failWith(res, e);
@@ -4514,6 +4539,7 @@ app.post("/revert.json", async (req: Request, res: Response) => {
 app.post("/teardown.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = boxParam(req.body);
+  const { force } = (req.body ?? {}) as { force?: boolean };
   if (!isBoxName(session)) {
     res.status(400).json({ error: "session is required" });
     return;
@@ -4525,7 +4551,9 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
     // honest degradation), and the dedupe rule in archiveRun makes this a no-op when the sweep
     // already recorded the same finish.
     await archiveFinishedRun(session, { withFiles: false }).catch(() => {});
-    await deps.teardown(hcfg(session), session);
+    // A kept thread is destroyed only when the caller says `force` (the thread's own dialog, which
+    // names the keep); the bulk "destroy sleeping" never passes it, so it can never take a kept one.
+    await deps.teardown(hcfg(session), session, { force: force === true });
     readFleet.forget(session);
     watchHub.drop(session);
     inbox.clear(session);
@@ -4538,6 +4566,10 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
     void forgetTitle(hcfg(session), session).catch(() => {});
     res.json({ ok: true });
   } catch (e) {
+    if (e instanceof KeptBoxError) {
+      res.status(409).json({ error: e.message, kept: true });
+      return;
+    }
     failWith(res, e);
   }
 });
@@ -5817,7 +5849,7 @@ app.listen(cfg.httpPort, cfg.httpHost, () => {
   // (an unclaimed box idle/max-duration reaped can't trigger its own claim-based reseed).
   startPoolMaintainer(cfg, () => hostPool.warmCfgs());
   // Rescue copies older than their TTL go (src/rescue.ts); once now, then every six hours.
-  const sweepRescueCopies = () => void sweepRescues(cfg).then((n) => n && console.error(`[rescue] swept ${n} old ${n === 1 ? "copy" : "copies"}`)).catch(() => {});
+  const sweepRescueCopies = () => void sweepRescues(cfg, undefined, undefined, isKeptBox).then((n) => n && console.error(`[rescue] swept ${n} old ${n === 1 ? "copy" : "copies"}`)).catch(() => {});
   sweepRescueCopies();
   setInterval(sweepRescueCopies, 6 * 3600_000).unref();
   // Triggers: fire due schedules (the webhook and finish-edge sources call the dispatcher directly).

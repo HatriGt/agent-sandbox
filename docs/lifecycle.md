@@ -113,6 +113,25 @@ saved the thread that time. Four rules now hold:
 What a restore does not bring back: installed dependencies (excluded from the checkpoint; the agent
 reinstalls), and anything written after the last turn ended.
 
+### Keep means never lost (2026-11-18, fourth pass)
+
+A box the user kept (pinned) cannot be lost by anything the system does on its own:
+
+- **One removal rule at the choke points.** `removalVerdict` (src/claims.ts) runs inside
+  `forceRemoveBox` and `teardown` (src/msb.ts), so every reaper, pool trim, warm-up failure,
+  automation box policy, attempt loser and guard passes it: a kept box is refused, and keep
+  markers that could not be read refuse too (nobody can prove the box is unkept). Only a
+  teardown that says `force` proceeds; the API answers 409 `kept` otherwise.
+- **Only the thread's own Destroy sends `force`**, and its dialog names the keep ("You kept this
+  machine…"). The bulk "destroy sleeping" never sends it, so it can never take a kept one.
+- **The copy off the box is kept too.** Keeping a thread stamps its row and its rescue copy as
+  kept and takes the copy now if none exists (between turns; mid-turn the turn end does it). A
+  kept copy is never swept by age and may be up to `RESCUE_KEPT_MAX_MB` (4096) instead of 512.
+  So even a host that dies takes only the box: the thread comes back on another host.
+
+What this cannot cover: `msb rm` typed by hand on the host (the copy still brings the thread
+back), and file edits made between turns through the workspace editor after the last checkpoint.
+
 ### The thread is the durable unit (2026-11-18, third pass)
 
 Both incidents had one root: the fleet list *was* the box list. Now the controller keeps a

@@ -9,7 +9,7 @@ import { BAKED_MCP_PACKAGES, IMAGE_PINNED_PACKAGES } from "./package-watch.js";
 import { assertBoxName } from "./sync.js";
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
-import { listClaims, listKept, listParked, markClaimed, shouldKeepStopped, unmarkClaimed, unmarkKept, unmarkParked } from "./claims.js";
+import { listClaims, listKept, listParked, markClaimed, removalVerdict, shouldKeepStopped, unmarkClaimed, unmarkKept, unmarkParked } from "./claims.js";
 import { askParkTtlSec } from "./snapshot.js";
 import { guardNodeProgram } from "./guard.js";
 import { loadEffectiveMcpStore, toClaudeMcpConfig, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
@@ -686,7 +686,37 @@ async function allPoolBoxes(cfg: Config): Promise<Array<{ name: string; status: 
  * msb reports as Stopped/exited but still has a stale record for — the source of the "already
  * running" desync that leaves a claimed box that never actually runs.
  */
+/** Thrown by a deliberate teardown of a kept box without `force`; the API answers 409 with it. */
+export class KeptBoxError extends Error {
+  constructor(
+    public readonly box: string,
+    public readonly why: "kept" | "unknown"
+  ) {
+    super(
+      why === "kept"
+        ? `${box} is kept: it is never removed on its own. Unkeep it first, or destroy it from its thread, which says so.`
+        : `${box}: the host's keep markers could not be read, so the box cannot be proven unkept; nothing was removed`
+    );
+  }
+}
+
+/**
+ * The one check every removal passes: a kept box is never removed by an automatic path, and
+ * unreadable keep markers refuse too. Returns the error to throw (or log) instead of proceeding.
+ */
+async function removalRefusal(cfg: Config, box: string, force = false): Promise<KeptBoxError | null> {
+  const kept = await listKept(cfg).catch(() => null);
+  const v = removalVerdict(kept, box, force);
+  if (v === "proceed") return null;
+  const err = new KeptBoxError(box, v === "refuse-kept" ? "kept" : "unknown");
+  console.error(`[keep] refusing to remove ${box}: ${err.why === "kept" ? "it is kept (pinned)" : "the keep markers could not be read"}`);
+  return err;
+}
+
 export async function forceRemoveBox(cfg: Config, box: string): Promise<void> {
+  // A kept box is never force-removed, whatever the caller thinks it knows (reapers, warm-up
+  // failures, pool trims): the keep mark is the user's word that this thread must not be lost.
+  if (await removalRefusal(cfg, box)) return;
   await msb(cfg, ["stop", box], false);
   await msb(cfg, ["rm", "--force", box], false);
   // A parked box always carries an ask snapshot (parkWaitingBox creates one); box names are unique
@@ -3100,8 +3130,12 @@ export async function compactSnapshotUpper(cfg: Config, name: string): Promise<s
 /** Fill the guest's free space with zeros and release it, so the host can punch holes (above). */
 export const ZERO_FILL_SH = "dd if=/dev/zero of=/.zero bs=4M 2>/dev/null; sync; rm -f /.zero; sync; true";
 
-export async function teardown(cfg: Config, box: string, stagingDir?: string): Promise<void> {
+export async function teardown(cfg: Config, box: string, stagingDir?: string, opts: { force?: boolean } = {}): Promise<void> {
   assertBoxName(box);
+  // A deliberate Destroy of a kept box must say `force` (the thread's dialog names the keep);
+  // every other teardown (automation box policy, attempt losers, guards) is refused.
+  const refusal = await removalRefusal(cfg, box, opts.force);
+  if (refusal) throw refusal;
   await msb(cfg, ["stop", box], false);
   await msb(cfg, ["rm", "--force", box], false);
   // The box's rewind snapshot (if any) dies with it — snapshots are per-box, never shared.

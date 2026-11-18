@@ -139,3 +139,39 @@ test("dropRescue removes the copy; sweepRescues removes copies past the TTL and 
   await dropRescue(cfg, "pool-5-new");
   assert.equal(await readRescue(cfg, "pool-5-new"), null);
 });
+
+test("a KEPT thread's copy: never swept by age, flagged in its meta, and allowed past the ordinary size cap", async () => {
+  const cfg = await tmpCfg();
+  const io = fakeIO({ 1: 10, 2: 900 * 1024 * 1024 });
+  await pullRescue(cfg, "pool-6-kept", 1, { kept: true }, io);
+  await pullRescue(cfg, "pool-6-plain", 1, {}, io);
+  await pullRescue(cfg, "pool-6-marker", 1, {}, io);
+  for (const name of ["pool-6-kept", "pool-6-plain", "pool-6-marker"]) {
+    const dir = path.join(cfg.dataDir, "rescue", name);
+    const meta = JSON.parse(await fs.readFile(path.join(dir, "meta.json"), "utf8"));
+    meta.at = Date.now() - 20 * 86_400_000;
+    await fs.writeFile(path.join(dir, "meta.json"), JSON.stringify(meta));
+  }
+  // The meta's own flag spares one, the controller's keep predicate (thread row / host markers) spares another.
+  assert.equal(await sweepRescues(cfg, Date.now(), 14 * 86_400_000, (b) => b === "pool-6-marker"), 1);
+  assert.ok((await readRescue(cfg, "pool-6-kept"))?.kept, "the kept copy survives and says it is kept");
+  assert.ok(await readRescue(cfg, "pool-6-marker"), "a copy the controller says is kept survives");
+  assert.equal(await readRescue(cfg, "pool-6-plain"), null, "an unkept copy past the TTL goes");
+  // 900 MB: over RESCUE_MAX_MB (512) for a plain thread, within RESCUE_KEPT_MAX_MB for a kept one.
+  const plain = await pullRescue(cfg, "pool-6-plain", 2, {}, io);
+  assert.ok(plain?.tooBig, "a plain thread's big checkpoint is not copied");
+  const kept = await pullRescue(cfg, "pool-6-kept", 2, { kept: true }, io);
+  assert.equal(kept?.tooBig, undefined, "a kept thread's big checkpoint is copied");
+  assert.equal(kept?.turn, 2);
+});
+
+test("a keep that arrives after the copy was taken is stamped on the existing copy", async () => {
+  const cfg = await tmpCfg();
+  const io = fakeIO({ 1: 10 });
+  await pullRescue(cfg, "pool-7-abc", 1, {}, io);
+  assert.equal((await readRescue(cfg, "pool-7-abc"))?.kept, undefined);
+  const m = await pullRescue(cfg, "pool-7-abc", 1, { kept: true }, io);
+  assert.equal(m?.kept, true);
+  assert.equal(io.pulled.length, 1, "no second pull: only the meta changed");
+  assert.equal((await readRescue(cfg, "pool-7-abc"))?.kept, true);
+});

@@ -578,9 +578,9 @@ export const deps: HandlerDeps = {
     // Callers hold the per-box checkpoint lock (see `resume` above) — never take it here.
     await resumeAgentTask(cfg, session, message, undefined, secrets, creds, model);
   },
-  async teardown(cfg, session) {
+  async teardown(cfg, session, opts: { force?: boolean } = {}) {
     cfg = await cfgForBoxReady(cfg, session, `teardown ${session}`);
-    await msbTeardown(cfg, session, stagingPathFor(cfg, session));
+    await msbTeardown(cfg, session, stagingPathFor(cfg, session), opts);
     hostPool()?.forgetBox(session);
     // Destroyed on purpose: the copy kept against an accident goes with it.
     void dropRescue(cfg, session);
