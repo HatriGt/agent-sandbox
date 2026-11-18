@@ -1,12 +1,13 @@
 import * as React from "react";
-import { Check, Copy, FolderTree } from "lucide-react";
-import type { SkillView } from "@/lib/api";
+import { ArrowUpRight, Check, Copy, FolderTree, Github, RefreshCw } from "lucide-react";
+import type { SkillSource, SkillView } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import type { SkillFile } from "@/lib/skillImport";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { byteLength, fmtKb, MAX_CONTENT } from "./model";
+import { byteLength, editedSinceImport, fmtKb, MAX_CONTENT, repoLabel, repoUrl } from "./model";
 
 /**
  * How the agent sees it: the two ways the skill fires, where it lands in the sandbox, what it
@@ -19,9 +20,12 @@ export function SkillInspector({
   content,
   files,
   saved,
+  source,
   enabled,
   onToggle,
   toggling,
+  onGetLatest,
+  updating,
   className,
 }: {
   name: string;
@@ -29,9 +33,14 @@ export function SkillInspector({
   content: string;
   files: SkillFile[];
   saved?: SkillView;
+  /** The repository an import came from — the saved skill's, or the draft's before its first save. */
+  source?: SkillSource;
   enabled: boolean;
   onToggle?: (next: boolean) => void;
   toggling?: boolean;
+  /** Pull the repository's current version (saved, imported skills only). */
+  onGetLatest?: () => void;
+  updating?: boolean;
   className?: string;
 }) {
   const slug = name || "your-skill";
@@ -72,6 +81,46 @@ export function SkillInspector({
             </span>
             <Switch checked={enabled} onCheckedChange={onToggle} disabled={toggling} aria-label={enabled ? "Turn off" : "Turn on"} />
           </label>
+        </Section>
+      )}
+
+      {source && (
+        <Section
+          title="Source"
+          trailing={
+            <a href={repoUrl(source)} target="_blank" rel="noreferrer noopener" className="text-muted-foreground hover:text-foreground flex items-center gap-0.5 text-micro transition-colors">
+              Open on GitHub
+              <ArrowUpRight className="size-3" aria-hidden />
+            </a>
+          }
+        >
+          <div className="bg-card rounded-lg border px-3 py-2.5">
+            <div className="text-foreground stamp flex min-w-0 items-center gap-1.5 text-micro">
+              <Github className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">{repoLabel(source)}</span>
+              <span className="text-faint shrink-0">@ {source.branch}</span>
+            </div>
+            {source.path && <div className="text-muted-foreground stamp mt-1 truncate pl-[18px] text-micro">{source.path}</div>}
+            <dl className="text-micro mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+              <dt className="text-muted-foreground">{saved ? "Imported" : "Found"}</dt>
+              <dd className="text-foreground tabular text-right" title={new Date(source.importedAt).toLocaleString()}>
+                {fmtAgo(Math.floor(source.importedAt / 1000))}
+              </dd>
+              {saved && editedSinceImport(saved) && (
+                <>
+                  <dt className="text-muted-foreground">Since then</dt>
+                  <dd className="text-foreground text-right">Edited here</dd>
+                </>
+              )}
+            </dl>
+            {onGetLatest && (
+              <Button size="xs" variant="outline" onClick={onGetLatest} loading={updating} className="mt-2.5 w-full">
+                <RefreshCw />
+                Get latest
+              </Button>
+            )}
+            {!saved && <p className="text-faint mt-2 text-micro leading-snug">Saved with the skill, so a newer version can be fetched later.</p>}
+          </div>
         </Section>
       )}
 

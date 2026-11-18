@@ -228,6 +228,19 @@ export interface McpProbe {
   tools?: string[];
 }
 
+/** Where an imported skill came from — kept so "Get latest" can pull the repository's current version. */
+export interface SkillSource {
+  kind: "github";
+  owner: string;
+  repo: string;
+  branch: string;
+  /** Folder path (entry "dir") or markdown file path (entry "file") inside the repository. */
+  path: string;
+  entry: "dir" | "file";
+  /** Upstream content at import; a different one upstream means a newer version exists. */
+  fingerprint: string;
+  importedAt: number;
+}
 /** A skill: a reusable playbook synced into every sandbox as ~/.claude/skills/<name>/SKILL.md. */
 export interface SkillView {
   name: string;
@@ -235,6 +248,8 @@ export interface SkillView {
   content: string;
   /** Supporting files beside SKILL.md (scripts, docs) — absent for single-file skills. */
   files?: { path: string; content: string }[];
+  /** The repository it was imported from; absent for skills written, pasted or seeded here. */
+  source?: SkillSource;
   enabled: boolean;
   addedAt: number;
   updatedAt: number;
@@ -242,6 +257,14 @@ export interface SkillView {
 export interface SkillsResponse {
   skills: SkillView[];
   shared?: Array<{ org: OrgRef; skills: SkillView[] }>;
+  /** After `action: "update"`: whether the repository had a newer version, and files it could not carry. */
+  updated?: { name: string; changed: boolean; skipped: string[] };
+}
+/** One imported skill's standing against its repository (`api.skillUpdates`). */
+export interface SkillUpdateCheck {
+  available: boolean;
+  latest: string | null;
+  error?: string;
 }
 
 /** What a memory note is (src/memory-store.ts): taste, standing instruction, repo knowledge, a choice, a correction, a how-to. */
@@ -1204,6 +1227,8 @@ export const api = {
   mcpTest: (name: string, org?: string) => post<McpProbe>("/mcp-servers/test.json", scoped({ name }, org)),
   skills: (signal?: AbortSignal, org?: string) => fetch(url("/skills.json", q(org)), { headers: authHeaders, signal }).then(parse<SkillsResponse>),
   skillMutate: (body: Record<string, unknown>, org?: string) => post<SkillsResponse>("/skills.json", scoped(body, org)),
+  /** Compare imported skills (all, or the named ones) against their repositories — one tree read per repository. */
+  skillUpdates: (names?: string[], org?: string) => post<{ updates: Record<string, SkillUpdateCheck> }>("/skills.json", scoped({ action: "check-updates", ...(names ? { names } : {}) }, org)),
   /** Memory across runs: the owner's notes. Not /memory.json, which is the VM's RAM. */
   memoryNotes: (signal?: AbortSignal, org?: string) => fetch(url("/memory-notes.json", q(org)), { headers: authHeaders, signal }).then(parse<MemoryNotesResponse>),
   /* organisations */

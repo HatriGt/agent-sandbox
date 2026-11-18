@@ -274,9 +274,10 @@ function GitHubStep({ existing, onClose, onImported, onEditOne, preset, mutate }
       if (f.kind === "dir") {
         const r = await fetchRepoSkill(found.ref, found.branch, f.path);
         if (r.skipped.length) toast.info(`/${f.name}: ${r.skipped.length} file${r.skipped.length === 1 ? "" : "s"} skipped`, { description: r.skipped.slice(0, 5).join(", ") });
-        return { ...parseSkillMd(r.skillMd, f.name), files: r.files };
+        return { ...parseSkillMd(r.skillMd, f.name), files: r.files, source: r.source };
       }
-      return parseSkillMd(await fetchRepoFile(found.ref, found.branch, f.path), f.name);
+      const r = await fetchRepoFile(found.ref, found.branch, f.path);
+      return { ...parseSkillMd(r.text, f.name), source: r.source };
     },
     [found]
   );

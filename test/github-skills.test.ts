@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toSkillName, listRepoSkills, fetchRepoFile, fetchRepoSkillDir } from "../src/github-skills.js";
+import { toSkillName, listRepoSkills, fetchRepoFile, fetchRepoSkillDir, gitBlobSha, upstreamFingerprint, checkSkillSources, fetchSkillUpdate } from "../src/github-skills.js";
+import type { SkillDef, SkillSource } from "../src/skill-store.js";
 
 /** Run fn with global fetch stubbed: handler(url, headers) -> JSON-serialisable body. */
 async function withFetch<T>(handler: (url: string, headers: Record<string, string>) => unknown, fn: () => Promise<T>): Promise<T> {
@@ -124,5 +125,104 @@ test("fetchRepoSkillDir demands a SKILL.md in the folder", async () => {
         () => fetchRepoSkillDir("o", "r", "main", "skills")
       ),
     /No SKILL\.md/
+  );
+});
+
+/* ───────────────────────────── provenance + updates ───────────────────────────── */
+
+const DEAL_DIR = "library/skills/sap/create-deal";
+const dealBlobs = (url: string) => {
+  if (url.includes("/git/blobs/s1")) return { content: Buffer.from("---\nname: create-deal\ndescription: Use for deals.\n---\nbody v1").toString("base64"), encoding: "base64" };
+  if (url.includes("/git/blobs/s2x")) return { content: Buffer.from("console.log(2)").toString("base64"), encoding: "base64" };
+  if (url.includes("/git/blobs/s2")) return { content: Buffer.from("console.log(1)").toString("base64"), encoding: "base64" };
+  if (url.includes("/git/blobs/s3")) return { content: Buffer.from("# api").toString("base64"), encoding: "base64" };
+  return null;
+};
+/** TREE with the script's blob changed upstream — what a new commit to the skill folder looks like. */
+const TREE_V2 = { tree: TREE.tree.map((t) => (t.sha === "s2" ? { ...t, sha: "s2x" } : t)) };
+
+test("gitBlobSha matches git's blob hash", () => {
+  assert.equal(gitBlobSha("hello\n"), "ce013625030ba8dba906f756967f9e9ca394464a");
+});
+
+test("upstreamFingerprint: a folder digest moves when any file inside changes; a file is its blob sha; gone is null", () => {
+  const dir = { path: DEAL_DIR, entry: "dir" as const };
+  const v1 = upstreamFingerprint(TREE.tree, dir);
+  const v2 = upstreamFingerprint(TREE_V2.tree, dir);
+  assert.ok(v1 && v2 && v1 !== v2);
+  assert.equal(upstreamFingerprint(TREE.tree, dir), v1);
+  assert.equal(upstreamFingerprint(TREE.tree, { path: "skills/loose-note.md", entry: "file" }), "s5");
+  assert.equal(upstreamFingerprint(TREE.tree, { path: "skills", entry: "dir" }), null, "no SKILL.md under skills/");
+  assert.equal(upstreamFingerprint(TREE.tree, { path: "nope.md", entry: "file" }), null);
+});
+
+test("fetchRepoSkillDir records where the import came from, with the folder's fingerprint", async () => {
+  const r = await withFetch(
+    (url) => (url.includes("/git/trees/") ? TREE : (dealBlobs(url) ?? { default_branch: "main" })),
+    () => fetchRepoSkillDir("o", "r", "main", DEAL_DIR)
+  );
+  assert.equal(r.source.kind, "github");
+  assert.deepEqual([r.source.owner, r.source.repo, r.source.branch, r.source.path, r.source.entry], ["o", "r", "main", DEAL_DIR, "dir"]);
+  assert.equal(r.source.fingerprint, upstreamFingerprint(TREE.tree, { path: DEAL_DIR, entry: "dir" }));
+});
+
+const imported = (name: string, source: Partial<SkillSource>): SkillDef => ({
+  name,
+  description: "d",
+  content: "c",
+  enabled: true,
+  addedAt: 1,
+  updatedAt: 1,
+  source: { kind: "github", owner: "o", repo: "r", branch: "main", path: DEAL_DIR, entry: "dir", fingerprint: upstreamFingerprint(TREE.tree, { path: DEAL_DIR, entry: "dir" })!, importedAt: 1, ...source },
+});
+
+test("checkSkillSources reads one tree per repository and reports which skills moved on", async () => {
+  const trees: string[] = [];
+  const skills = [
+    imported("create-deal", {}),
+    imported("solo", { path: "library/skills/sap/solo", fingerprint: upstreamFingerprint(TREE_V2.tree, { path: "library/skills/sap/solo", entry: "dir" })! }),
+    imported("gone", { path: "skills/vanished.md", entry: "file", fingerprint: "s9" }),
+    { ...imported("local", {}), source: undefined },
+  ];
+  const r = await withFetch(
+    (url) => {
+      if (url.includes("/git/trees/")) trees.push(url);
+      return url.includes("/git/trees/") ? TREE_V2 : { default_branch: "main" };
+    },
+    () => checkSkillSources(skills, async () => undefined)
+  );
+  assert.equal(trees.length, 1, "three imported skills from one repository: one tree read");
+  assert.equal(r["create-deal"].available, true);
+  assert.equal(r["solo"].available, false, "unchanged upstream");
+  assert.deepEqual(r["gone"], { available: false, latest: null });
+  assert.equal("local" in r, false, "a skill without a source is not checked");
+});
+
+test("fetchSkillUpdate: null when the repository still holds the imported version, the parsed new version otherwise", async () => {
+  const same = await withFetch(
+    (url) => (url.includes("/git/trees/") ? TREE : (dealBlobs(url) ?? { default_branch: "main" })),
+    () => fetchSkillUpdate(imported("create-deal", {}).source!)
+  );
+  assert.equal(same, null);
+  const next = await withFetch(
+    (url) => (url.includes("/git/trees/") ? TREE_V2 : (dealBlobs(url) ?? { default_branch: "main" })),
+    () => fetchSkillUpdate(imported("create-deal", {}).source!)
+  );
+  assert.ok(next);
+  assert.equal(next.description, "Use for deals.");
+  assert.equal(next.content, "body v1");
+  assert.equal(next.files.find((f) => f.path === "scripts/run.mjs")?.content, "console.log(2)");
+  assert.equal(next.source.fingerprint, upstreamFingerprint(TREE_V2.tree, { path: DEAL_DIR, entry: "dir" }));
+  assert.notEqual(next.source.fingerprint, imported("create-deal", {}).source!.fingerprint);
+});
+
+test("fetchSkillUpdate says so when the skill folder left the repository", async () => {
+  await assert.rejects(
+    () =>
+      withFetch(
+        (url) => (url.includes("/git/trees/") ? { tree: [] } : { default_branch: "main" }),
+        () => fetchSkillUpdate(imported("create-deal", {}).source!)
+      ),
+    /no longer in o\/r on main/
   );
 });

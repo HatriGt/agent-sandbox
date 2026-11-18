@@ -14,9 +14,10 @@
  * traffic is capped at GitHub's ~60 req/hr budget per server IP — the reason the list call is
  * a single recursive tree request rather than a walk.
  */
+import { createHash } from "node:crypto";
 import type { Config } from "./config.js";
 import { candidateAccounts, loadStore } from "./gh-token-store.js";
-import { SKILL_LIMITS, validateSkillFilePath, type SkillFile } from "./skill-store.js";
+import { parseSkillMd, SKILL_LIMITS, slugifySkillName, validateSkillFilePath, type SkillDef, type SkillFile, type SkillSource } from "./skill-store.js";
 
 /** Something importable found in a repo: a skill folder (SKILL.md + files) or a loose markdown file. */
 export interface RepoSkillEntry {
@@ -35,17 +36,7 @@ const OWNER_RE = /^[\w.-]{1,100}$/;
 const BRANCH_RE = /^[\w.\-/]{1,250}$/;
 
 /** Slugify a filename or folder into a valid skill name. Mirrors the client's toSkillName. */
-export function toSkillName(raw: string): string {
-  return (
-    raw
-      .toLowerCase()
-      .replace(/\.(md|markdown|txt)$/i, "")
-      .replace(/skill$/i, "")
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 50) || "imported-skill"
-  );
-}
+export const toSkillName = slugifySkillName;
 
 /**
  * Reject anything that isn't a plain owner/repo/branch/path. The proxy only ever builds URLs on
@@ -161,6 +152,98 @@ export async function listRepoSkills(
   return { branch: ref, entries };
 }
 
+/* ───────────────────────────── provenance ───────────────────────────── */
+
+/** The git blob sha of a text, as GitHub's tree API would report it for that file. */
+export function gitBlobSha(text: string): string {
+  const body = Buffer.from(text, "utf8");
+  return createHash("sha1").update(`blob ${body.length}\0`).update(body).digest("hex");
+}
+
+/**
+ * The fingerprint of a skill at a point in the repository's history: a loose file is its blob
+ * sha; a folder is a digest of every blob inside it (path + sha, sorted), so a change to any
+ * supporting file counts as a new version. Null when the folder or file is gone upstream.
+ */
+export function upstreamFingerprint(blobs: TreeBlob[], src: Pick<SkillSource, "path" | "entry">): string | null {
+  if (src.entry === "file") return blobs.find((t) => t.path === src.path)?.sha ?? null;
+  const inside = blobs.filter((t) => (src.path ? t.path.startsWith(`${src.path}/`) : true));
+  if (!inside.some((t) => /^skill\.md$/i.test(src.path ? t.path.slice(src.path.length + 1) : t.path))) return null;
+  const h = createHash("sha256");
+  for (const t of [...inside].sort((a, b) => a.path.localeCompare(b.path))) h.update(`${t.path} ${t.sha}\n`);
+  return h.digest("hex");
+}
+
+/** The source record a fresh import carries (importedAt is restamped by the store on save). */
+function sourceOf(owner: string, repo: string, branch: string, path: string, entry: SkillSource["entry"], fingerprint: string): SkillSource {
+  return { kind: "github", owner, repo, branch, path, entry, fingerprint, importedAt: Date.now() };
+}
+
+export interface SkillUpdateCheck {
+  /** True when the repository holds a different version than the one imported. */
+  available: boolean;
+  /** The upstream fingerprint now; null when the skill is gone from the repository. */
+  latest: string | null;
+  /** Why the check could not run (rate limit, repo gone, no access) — the skill is left alone. */
+  error?: string;
+}
+
+/**
+ * Compare every imported skill against its repository, one tree read per repository+branch (the
+ * anonymous budget is ~60 requests an hour per server IP, so a library of twenty skills from
+ * anthropics/skills costs one request, not twenty). Skills without a source are skipped.
+ */
+export async function checkSkillSources(skills: SkillDef[], tokenFor: (owner: string, repo: string) => Promise<string | undefined>): Promise<Record<string, SkillUpdateCheck>> {
+  const out: Record<string, SkillUpdateCheck> = {};
+  const groups = new Map<string, SkillDef[]>();
+  for (const s of skills) {
+    if (!s.source) continue;
+    const key = `${s.source.owner}/${s.source.repo}@${s.source.branch}`;
+    groups.set(key, [...(groups.get(key) ?? []), s]);
+  }
+  await Promise.all(
+    [...groups.values()].map(async (group) => {
+      const src = group[0].source!;
+      try {
+        assertRef(src.owner, src.repo, src.branch);
+        const { blobs } = await repoTree(src.owner, src.repo, src.branch, await tokenFor(src.owner, src.repo));
+        for (const s of group) {
+          const latest = upstreamFingerprint(blobs, s.source!);
+          out[s.name] = { available: latest !== null && latest !== s.source!.fingerprint, latest };
+        }
+      } catch (e) {
+        for (const s of group) out[s.name] = { available: false, latest: null, error: (e as Error).message };
+      }
+    })
+  );
+  return out;
+}
+
+/**
+ * Pull the current version of an imported skill: SKILL.md (parsed the way the dashboard's import
+ * parses it) plus supporting files for a folder, and the new fingerprint. `null` when the
+ * repository still holds exactly the imported version, so the caller changes nothing.
+ */
+export async function fetchSkillUpdate(
+  src: SkillSource,
+  token?: string
+): Promise<{ description: string; content: string; files: SkillFile[]; skipped: string[]; source: SkillSource } | null> {
+  assertRef(src.owner, src.repo, src.branch);
+  const { blobs } = await repoTree(src.owner, src.repo, src.branch, token);
+  const latest = upstreamFingerprint(blobs, src);
+  if (latest === null) throw new Error(`${src.path || "The skill"} is no longer in ${src.owner}/${src.repo} on ${src.branch}.`);
+  if (latest === src.fingerprint) return null;
+  const next = { ...src, fingerprint: latest, importedAt: Date.now() };
+  if (src.entry === "file") {
+    const text = await fetchRepoFile(src.owner, src.repo, src.branch, src.path, token);
+    const parsed = parseSkillMd(text, src.path.split("/").pop() ?? src.path);
+    return { description: parsed.description, content: parsed.content, files: [], skipped: [], source: next };
+  }
+  const r = await fetchRepoSkillDir(src.owner, src.repo, src.branch, src.path, token);
+  const parsed = parseSkillMd(r.skillMd, src.path.split("/").pop() ?? src.repo);
+  return { description: parsed.description, content: parsed.content, files: r.files, skipped: r.skipped, source: next };
+}
+
 /** Fetch one file's raw text (single-file imports). */
 export async function fetchRepoFile(owner: string, repo: string, branch: string, path: string, token?: string): Promise<string> {
   assertRef(owner, repo, branch);
@@ -174,6 +257,12 @@ export async function fetchRepoFile(owner: string, repo: string, branch: string,
   const text = await r.text();
   if (text.length > 512_000) throw new Error(`${path} is too large to import.`);
   return text;
+}
+
+/** A loose-file import with its provenance: the text plus the source record to store beside the skill. */
+export async function fetchRepoFileWithSource(owner: string, repo: string, branch: string, path: string, token?: string): Promise<{ text: string; source: SkillSource }> {
+  const text = await fetchRepoFile(owner, repo, branch, path, token);
+  return { text, source: sourceOf(owner, repo, branch, path, "file", gitBlobSha(text)) };
 }
 
 /** One blob's text via the git blobs API — works for private repos with the same token. */
@@ -194,13 +283,14 @@ export async function fetchRepoSkillDir(
   branch: string,
   dirPath: string,
   token?: string
-): Promise<{ skillMd: string; files: SkillFile[]; skipped: string[] }> {
+): Promise<{ skillMd: string; files: SkillFile[]; skipped: string[]; source: SkillSource }> {
   assertRef(owner, repo, branch);
   if (dirPath) assertPath(dirPath, false);
   const { blobs } = await repoTree(owner, repo, branch, token);
   const inside = blobs.filter((t) => (dirPath ? t.path.startsWith(`${dirPath}/`) : true));
   const skillMd = inside.find((t) => /^skill\.md$/i.test(t.path.slice(dirPath ? dirPath.length + 1 : 0)));
   if (!skillMd) throw new Error(`No SKILL.md under ${dirPath || "the repository root"}.`);
+  const source = sourceOf(owner, repo, branch, dirPath, "dir", upstreamFingerprint(blobs, { path: dirPath, entry: "dir" })!);
 
   const rel = (p: string) => (dirPath ? p.slice(dirPath.length + 1) : p);
   const skipped: string[] = [];
@@ -240,7 +330,7 @@ export async function fetchRepoSkillDir(
     })
   );
   files.sort((a, b) => a.path.localeCompare(b.path));
-  return { skillMd: await fetchRepoBlob(owner, repo, skillMd.sha, token), files, skipped };
+  return { skillMd: await fetchRepoBlob(owner, repo, skillMd.sha, token), files, skipped, source };
 }
 
 /**

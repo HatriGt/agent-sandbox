@@ -56,7 +56,11 @@ Repo attach from the composer, auto-attach when the task names a known repo, mul
 ### Skills
 Per-user playbooks (`src/skill-store.ts`), synced into every box at `~/.claude/skills/<name>/SKILL.md`
 before each run and each turn, invoked with `/name` from chat or picked up by the agent when the
-description matches. Managed on a dedicated page; importable from a file or a public GitHub repo.
+description matches. Managed on a dedicated page; importable from a file or a GitHub repo (private too,
+through a connected account). A GitHub import keeps its source (repo, branch, path, a fingerprint of the
+upstream blobs) so the page can check every imported skill against its repository in one tree read per
+repo and pull the newer version on a click (`check-updates` / `update` on `POST /skills.json`,
+`src/github-skills.ts`); edits made since the import are replaced only after a confirmation.
 
 ### The console
 Two-pane operator console with a live thread, fleet view, workspace/editor pane (CodeMirror 6, merge

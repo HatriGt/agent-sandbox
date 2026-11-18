@@ -1664,3 +1664,29 @@ Also in this round: the State column on Box hosts says "awake · sleeps in 4m" (
 own clock, `sleepsAt`) once the sleep-after is within 15 minutes, so the operator sees the pause
 coming; a resuming VM says "starting" even though the pool counts it as dormant. Verified in both
 schemes with `.shots/hosts-fixture.mjs --panel`.
+
+## Round: imported skills can get the latest version (2026-11-18)
+
+A skill pulled from a GitHub repository now remembers where it came from (`SkillView.source`:
+owner/repo, branch, folder or file, a fingerprint of the upstream blobs, when it was imported).
+That record is what every control in this round reads:
+
+- **Source column.** An imported skill names its repository (GitHub mark + `owner/repo` in the
+  mono stamp) where a starter shows its badge and your own say "Yours". After "Check for updates"
+  a second line under the repository, **"newer upstream"** with an amber dot, says the repository
+  has moved on — amber because it is a fact, not a request (the unsaved-file rule). It is stacked,
+  not inline: the column is 7 rem and a chip beside the repository was clipped on the first shot.
+- **Row control.** A refresh glyph (`RefreshCw`) joins Edit and the switch in the actions cell,
+  only on imported rows; it takes ink once a newer version is known. One click compares and, when
+  the repository changed, replaces the stored version and toasts; when nothing changed it says so.
+  A skill edited here since the import asks once ("Replace your edits?") before anything moves.
+- **"Check for updates"** is a ghost button in the page header, shown only when something was
+  imported; it compares every imported skill in one request (one tree read per repository).
+- **Editor.** The header carries the repository badge; the inspector gains a **Source** tonal
+  card (repository @ branch, path, imported when, "Edited here" when so, Open on GitHub, Get
+  latest). Getting the latest from the editor swaps the document in place and moves the baseline.
+- A fourth source filter chip, **Imported**, appears beside Starter and Yours when more than one
+  origin is present.
+
+Verified in both schemes with `.shots/skills-update-fixture.mjs [--dark]` (every skills route
+mocked over Vite: library, after the check, the confirmation, after an update, the editor).

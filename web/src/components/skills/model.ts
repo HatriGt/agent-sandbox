@@ -1,8 +1,8 @@
-import type { SkillsResponse } from "@/lib/api";
+import type { SkillSource, SkillsResponse, SkillView } from "@/lib/api";
 import type { SkillFile } from "@/lib/skillImport";
 
 /** What the editor works on: a saved skill's fields, or an import/template not yet saved. */
-export type Draft = { name: string; description: string; content: string; files?: SkillFile[] };
+export type Draft = { name: string; description: string; content: string; files?: SkillFile[]; source?: SkillSource };
 
 /** The page's one mutation channel: POST, replace the cached list, toast. */
 export type Mutate = (body: Record<string, unknown>, ok?: string) => Promise<SkillsResponse>;
@@ -51,11 +51,31 @@ export function fmtBundle(fileCount: number, totalBytes: number): string {
 /** The skills the controller seeds into a new store (src/starter-skills.ts). */
 export const STARTER_NAMES: Record<string, true> = { "fix-issue": true, "write-tests": true, "upgrade-deps": true, "code-review": true, "security-review": true, "write-pr-description": true };
 
-export type SkillSource = "starter" | "custom";
+export type SkillOrigin = "starter" | "github" | "custom";
 
-/** Where a skill came from. The store keeps no provenance, so: a starter name is a starter; the rest is yours. */
-export function sourceOf(name: string): SkillSource {
-  return STARTER_NAMES[name] ? "starter" : "custom";
+/**
+ * Where a skill came from: imported from a repository (the store keeps the source, so it can be
+ * updated), seeded as a starter (by name), or written here.
+ */
+export function sourceOf(s: Pick<SkillView, "name" | "source">): SkillOrigin {
+  if (s.source) return "github";
+  return STARTER_NAMES[s.name] ? "starter" : "custom";
+}
+
+/** "owner/repo" — how an imported skill names where it came from. */
+export function repoLabel(src: SkillSource): string {
+  return `${src.owner}/${src.repo}`;
+}
+
+/** The GitHub page for the imported folder or file, on the branch the import follows. */
+export function repoUrl(src: SkillSource): string {
+  const kind = src.entry === "file" ? "blob" : "tree";
+  return `https://github.com/${src.owner}/${src.repo}/${kind}/${encodeURIComponent(src.branch)}${src.path ? `/${src.path}` : ""}`;
+}
+
+/** Edited on the dashboard after the import — "Get latest" would replace those edits, so it asks first. */
+export function editedSinceImport(s: Pick<SkillView, "updatedAt" | "source">): boolean {
+  return !!s.source && s.updatedAt > s.source.importedAt;
 }
 
 export const TEMPLATES: (Draft & { blurb: string; steps: number })[] = [

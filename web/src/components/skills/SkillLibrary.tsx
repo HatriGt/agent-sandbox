@@ -1,7 +1,7 @@
 import * as React from "react";
-import { ArrowUpRight, Download, Files, PenLine, Plus, Sparkles, Zap } from "lucide-react";
+import { ArrowUpRight, Download, Files, Github, PenLine, Plus, Sparkles, Zap } from "lucide-react";
 import { toast } from "sonner";
-import type { SkillView } from "@/lib/api";
+import type { SkillSource, SkillView } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { SkillMark } from "@/lib/skillGlyph";
 import { cn } from "@/lib/utils";
@@ -11,14 +11,15 @@ import { Switch } from "@/components/ui/switch";
 import { StaggerItem } from "@/components/ui/swap";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DataTable, MetaLine, StatusDot, type Column } from "@/components/ui/data-table";
-import { byteLength, type Draft, fmtKb, type Mutate, type SkillSource, sourceOf, TEMPLATES } from "./model";
+import { GetLatestButton, useGetLatest } from "./GetLatest";
+import { byteLength, type Draft, fmtKb, type Mutate, repoLabel, type SkillOrigin, sourceOf, TEMPLATES } from "./model";
 
 /* ───────────────────────────── table ───────────────────────────── */
 
 /** SKILL.md plus every attached file, in bytes. */
 const sizeOf = (s: SkillView) => byteLength(s.content) + (s.files ?? []).reduce((n, f) => n + byteLength(f.content), 0);
 
-const columnsFor = (owner: string): Column<SkillView>[] => [
+const columnsFor = (owner: string, updates: Record<string, boolean>): Column<SkillView>[] => [
   {
     id: "name",
     header: "Name",
@@ -39,8 +40,8 @@ const columnsFor = (owner: string): Column<SkillView>[] => [
     header: "Source",
     width: "w-28",
     hideBelow: "md",
-    sort: (s) => sourceOf(s.name),
-    cell: (s) => (sourceOf(s.name) === "starter" ? <SourceBadge source="starter" /> : <span className="truncate">{owner}</span>),
+    sort: (s) => `${updates[s.name] ? 0 : 1} ${sourceOf(s)}`,
+    cell: (s) => (s.source ? <RepoBadge source={s.source} newer={!!updates[s.name]} /> : sourceOf(s) === "starter" ? <SourceBadge source="starter" /> : <span className="truncate">{owner}</span>),
   },
   {
     id: "scope",
@@ -83,31 +84,35 @@ const columnsFor = (owner: string): Column<SkillView>[] => [
  * The library as a table: `/name` with its glyph and "when" line, source, scope, files + weight,
  * last edit. The row opens the editor; the trailing cell holds Edit and the on/off switch.
  */
-const PERSONAL = columnsFor("Yours");
+const NO_UPDATES: Record<string, boolean> = {};
 
-export function SkillTable({ skills, loading, onOpen, onMutate, toolbar, empty, readOnly, owner }: { skills: SkillView[]; loading?: boolean; onOpen: (s: SkillView) => void; onMutate: Mutate; toolbar?: React.ReactNode; empty?: React.ReactNode; readOnly?: boolean; /** Who a custom skill belongs to in the Source column; "Yours" by default. */ owner?: string }) {
-  const columns = React.useMemo(() => (owner ? columnsFor(owner) : PERSONAL), [owner]);
+export function SkillTable({ skills, loading, onOpen, onMutate, toolbar, empty, readOnly, owner, updates = NO_UPDATES }: { skills: SkillView[]; loading?: boolean; onOpen: (s: SkillView) => void; onMutate: Mutate; toolbar?: React.ReactNode; empty?: React.ReactNode; readOnly?: boolean; /** Who a custom skill belongs to in the Source column; "Yours" by default. */ owner?: string; /** Imported skills whose repository holds a newer version (after a check); marked in the Source column. */ updates?: Record<string, boolean> }) {
+  const columns = React.useMemo(() => columnsFor(owner ?? "Yours", updates), [owner, updates]);
+  const latest = useGetLatest(onMutate);
   return (
-    <DataTable
-      aria-label="Skills"
-      rows={skills}
-      columns={columns}
-      rowKey={(s) => s.name}
-      onRowClick={onOpen}
-      rowLabel={(s) => `Edit skill ${s.name}`}
-      loading={loading}
-      search={{ placeholder: "Search skills", text: (s) => `${s.name} ${s.description}` }}
-      toolbar={toolbar}
-      actions={readOnly ? undefined : (s) => <SkillActions skill={s} onOpen={() => onOpen(s)} onMutate={onMutate} />}
-      empty={empty}
-      minWidth="min-w-[40rem]"
-      stickyHeader
-      containerClassName="max-h-[min(32rem,70dvh)]"
-    />
+    <>
+      <DataTable
+        aria-label="Skills"
+        rows={skills}
+        columns={columns}
+        rowKey={(s) => s.name}
+        onRowClick={onOpen}
+        rowLabel={(s) => `Edit skill ${s.name}`}
+        loading={loading}
+        search={{ placeholder: "Search skills", text: (s) => `${s.name} ${s.description}${s.source ? ` ${repoLabel(s.source)}` : ""}` }}
+        toolbar={toolbar}
+        actions={readOnly ? undefined : (s) => <SkillActions skill={s} onOpen={() => onOpen(s)} onMutate={onMutate} newer={!!updates[s.name]} updating={latest.busy === s.name} onGetLatest={() => void latest.run(s)} />}
+        empty={empty}
+        minWidth="min-w-[40rem]"
+        stickyHeader
+        containerClassName="max-h-[min(32rem,70dvh)]"
+      />
+      {latest.dialog}
+    </>
   );
 }
 
-function SkillActions({ skill: s, onOpen, onMutate }: { skill: SkillView; onOpen: () => void; onMutate: Mutate }) {
+function SkillActions({ skill: s, onOpen, onMutate, newer, updating, onGetLatest }: { skill: SkillView; onOpen: () => void; onMutate: Mutate; newer?: boolean; updating?: boolean; onGetLatest: () => void }) {
   const [busy, setBusy] = React.useState(false);
   const toggle = (next: boolean) => {
     setBusy(true);
@@ -117,6 +122,7 @@ function SkillActions({ skill: s, onOpen, onMutate }: { skill: SkillView; onOpen
   };
   return (
     <span className="inline-flex items-center gap-1.5">
+      <GetLatestButton skill={s} available={newer} busy={updating} onClick={onGetLatest} />
       <Tooltip>
         <TooltipTrigger asChild>
           <Button size="icon-xs" variant="ghost" onClick={onOpen} aria-label={`Edit ${s.name}`}>
@@ -152,12 +158,33 @@ export function SkillTile({ name, enabled = true, className }: { name: string; e
 }
 
 /** Where the skill came from: `starter` (seeded by the controller) is marked; your own are quiet. */
-export function SourceBadge({ source, className }: { source: SkillSource; className?: string }) {
-  if (source === "custom") return null;
+export function SourceBadge({ source, className }: { source: SkillOrigin; className?: string }) {
+  if (source !== "starter") return null;
   return (
     <span className={cn("text-muted-foreground bg-muted inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-px text-micro", className)} title="Seeded with your account — edit or delete freely">
       <Sparkles className="size-2.5" aria-hidden />
       starter
+    </span>
+  );
+}
+
+/**
+ * An imported skill names its repository. `newer` (set after "Check for updates") is a fact in
+ * amber, the way an unsaved file is: the repository has moved on since this copy was taken.
+ */
+export function RepoBadge({ source, newer, className }: { source: SkillSource; newer?: boolean; className?: string }) {
+  return (
+    <span className={cn("inline-flex min-w-0 flex-col gap-0.5", className)} title={`${repoLabel(source)} on ${source.branch}${source.path ? ` · ${source.path}` : ""} — imported ${fmtAgo(Math.floor(source.importedAt / 1000))}`}>
+      <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1">
+        <Github className="size-3 shrink-0" aria-hidden />
+        <span className="stamp truncate text-micro">{repoLabel(source)}</span>
+      </span>
+      {newer && (
+        <span className="text-warn-text inline-flex items-center gap-1 pl-4 text-micro font-medium">
+          <span className="bg-warn size-1.5 shrink-0 rounded-full" aria-hidden />
+          newer upstream
+        </span>
+      )}
     </span>
   );
 }

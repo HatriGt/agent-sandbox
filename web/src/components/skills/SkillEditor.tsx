@@ -18,8 +18,9 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CodeEditor } from "@/components/CodeEditor";
 import { byteLength, type Draft, fmtKb, MAX_CONTENT, type Mutate, NAME_RE, slugify, sourceOf } from "./model";
+import { useGetLatest } from "./GetLatest";
 import { SkillInspector } from "./SkillInspector";
-import { SourceBadge } from "./SkillLibrary";
+import { RepoBadge, SourceBadge } from "./SkillLibrary";
 import { SkillFileTree, type TreeActions } from "./SkillFileTree";
 
 /**
@@ -138,7 +139,9 @@ export function SkillEditor({
         {
           action: "upsert",
           previousName: initial?.name,
-          skill: { name: trimmedName, description: description.trim(), content, files: files.length ? files : undefined, enabled: initial?.enabled ?? true },
+          // A fresh import carries where it came from; an ordinary save of a saved skill sends no
+          // source and the controller keeps the stored one.
+          skill: { name: trimmedName, description: description.trim(), content, files: files.length ? files : undefined, enabled: initial?.enabled ?? true, ...(!initial && draft?.source ? { source: draft.source } : {}) },
         },
         initial ? undefined : `/${trimmedName} is live — every sandbox gets it on its next turn`
       );
@@ -154,7 +157,21 @@ export function SkillEditor({
       saving.current = false;
       setBusy(false);
     }
-  }, [valid, dirty, onMutate, initial, trimmedName, description, content, files, onSaved]);
+  }, [valid, dirty, onMutate, initial, draft, trimmedName, description, content, files, onSaved]);
+
+  // "Get latest" from the inspector: the fetched version replaces what is on screen, and the
+  // baseline moves with it so the editor reads as clean.
+  const applyLatest = React.useCallback(
+    (s: SkillView) => {
+      setDescription(s.description);
+      setContent(s.content);
+      setFiles(s.files ?? []);
+      setActive("SKILL.md");
+      onSaved(s);
+    },
+    [onSaved]
+  );
+  const latest = useGetLatest(onMutate, applyLatest);
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -245,7 +262,19 @@ export function SkillEditor({
     />
   );
   const inspector = (
-    <SkillInspector name={trimmedName} description={description} content={content} files={files} saved={initial} enabled={initial?.enabled ?? true} onToggle={initial ? toggle : undefined} toggling={toggling} />
+    <SkillInspector
+      name={trimmedName}
+      description={description}
+      content={content}
+      files={files}
+      saved={initial}
+      source={initial?.source ?? draft?.source}
+      enabled={initial?.enabled ?? true}
+      onToggle={initial ? toggle : undefined}
+      toggling={toggling}
+      onGetLatest={initial?.source ? () => void latest.run(initial, { unsavedEdits: dirty }) : undefined}
+      updating={!!latest.busy}
+    />
   );
 
   return (
@@ -277,7 +306,7 @@ export function SkillEditor({
             <SkillMark name={trimmedName || "skill"} size={13} />
           </span>
           <span className={cn("truncate text-body font-medium", trimmedName ? "stamp text-foreground text-[13px]" : "text-muted-foreground")}>{title}</span>
-          {initial && <SourceBadge source={sourceOf(initial.name)} className="hidden sm:inline-flex" />}
+          {initial && (initial.source ? <RepoBadge source={initial.source} className="hidden sm:inline-flex" /> : <SourceBadge source={sourceOf(initial)} className="hidden sm:inline-flex" />)}
         </button>
 
         <SaveState dirty={dirty && !!initial} savedFlash={savedFlash} isNew={!initial} />
@@ -499,6 +528,7 @@ export function SkillEditor({
       </Sheet>
 
       {/* ── Confirmations ────────────────────────────────────────────────── */}
+      {latest.dialog}
       <Dialog open={confirmClose} onOpenChange={(v) => !v && setConfirmClose(false)}>
         <DialogContent title="Unsaved changes" description={initial ? `/${initial.name} has edits that are not saved.` : "This skill has not been created yet."} className="w-[min(26rem,calc(100vw-2rem))]">
           <div className="flex flex-wrap justify-end gap-2">

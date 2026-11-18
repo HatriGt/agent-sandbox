@@ -107,8 +107,8 @@ import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
 import { makeRepoLister, fetchGithubRepos, matchRepos, inferRepos, attachRepoToBox } from "./repos.js";
 import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServers, toEditableConfig, replaceFromJson, mergeSecrets, type McpServer as McpServerDef } from "./mcp-store.js";
-import { loadSkillStore, saveSkillStore, normalizeSkill, viewSkills, type SkillDef } from "./skill-store.js";
-import { listRepoSkills, fetchRepoFile, fetchRepoSkillDir, resolveSkillRepoToken } from "./github-skills.js";
+import { loadSkillStore, saveSkillStore, normalizeSkill, viewSkills, editedSinceImport, type SkillDef } from "./skill-store.js";
+import { listRepoSkills, fetchRepoFileWithSource, fetchRepoSkillDir, resolveSkillRepoToken, checkSkillSources, fetchSkillUpdate } from "./github-skills.js";
 import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor, isPlumbingError } from "./redact.js";
 import { isSecretKey, probeMcpServer, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
@@ -3114,22 +3114,66 @@ app.post("/skills.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const body = (req.body ?? {}) as Record<string, unknown>;
   const action = body.action;
-  if (!["upsert", "remove", "toggle"].includes(String(action))) {
+  if (!["upsert", "remove", "toggle", "check-updates", "update"].includes(String(action))) {
     res.status(400).json({ error: "unknown action" });
     return;
   }
   try {
+    // Read-only: compare every imported skill (or the named ones) against its repository.
+    if (action === "check-updates") {
+      const store = await loadSkillStore(cfg);
+      const names = Array.isArray(body.names) ? new Set((body.names as unknown[]).map(String)) : null;
+      const candidates = Object.values(store.skills).filter((s) => s.source && (!names || names.has(s.name)));
+      res.json({ updates: await checkSkillSources(candidates, (o, r) => resolveSkillRepoToken(cfg, o, r)) });
+      return;
+    }
+    // Pull the latest version of an imported skill. Edits made here since the import are only
+    // replaced with `force` — the dashboard asks first. The GitHub reads happen outside the store
+    // lock; the swap inside it re-reads the entry so a concurrent remove or rename is respected.
+    let updated: { name: string; changed: boolean; skipped: string[] } | undefined;
+    if (action === "update") {
+      const name = String(body.name ?? "");
+      const current = (await loadSkillStore(cfg)).skills[name];
+      if (!current) throw new Error(`No skill named "${name}".`);
+      if (!current.source) throw new Error(`/${name} was not imported from a repository, so there is no newer version to fetch.`);
+      if (editedSinceImport(current) && body.force !== true) {
+        res.status(409).json({ error: `/${name} was edited here after it was imported — getting the latest version replaces those edits.`, edited: true });
+        return;
+      }
+      const token = await resolveSkillRepoToken(cfg, current.source.owner, current.source.repo);
+      const latest = await fetchSkillUpdate(current.source, token);
+      updated = { name, changed: !!latest, skipped: latest?.skipped ?? [] };
+      if (!latest) {
+        res.json({ skills: viewSkills(await loadSkillStore(cfg)), updated });
+        return;
+      }
+      const store = await withStoreLock("skills", async () => {
+        const store = await loadSkillStore(cfg);
+        const s = store.skills[name];
+        if (!s) throw new Error(`/${name} was removed while its update was fetched.`);
+        // normalizeSkill restamps importedAt = updatedAt = now, so the entry reads as unedited.
+        store.skills[name] = normalizeSkill({ ...s, description: latest.description, content: latest.content, files: latest.files, source: latest.source });
+        await saveSkillStore(cfg, store);
+        return store;
+      });
+      res.json({ skills: viewSkills(store), updated });
+      return;
+    }
     const store = await withStoreLock("skills", async () => {
       const store = await loadSkillStore(cfg);
       if (action === "upsert") {
         const s = normalizeSkill(body.skill as Partial<SkillDef> & { name: string });
         // Rename: the entry moves under the new name and the old one goes.
         const previous = typeof body.previousName === "string" ? body.previousName : "";
+        const before = store.skills[previous && previous !== s.name ? previous : s.name];
         if (previous && previous !== s.name && store.skills[previous]) {
           s.addedAt = store.skills[previous].addedAt;
           delete store.skills[previous];
         }
         if (store.skills[s.name]) s.addedAt = store.skills[s.name].addedAt;
+        // An ordinary save sends no source: the import provenance stays, and the save's later
+        // updatedAt is what marks the skill as edited since import. `source: null` detaches it.
+        if (!("source" in (body.skill as object)) && before?.source) s.source = before.source;
         store.skills[s.name] = s;
       } else if (action === "remove") {
         delete store.skills[String(body.name ?? "")];
@@ -3312,7 +3356,7 @@ app.post("/skill-repo.json", async (req: Request, res: Response) => {
       const r = await listRepoSkills(owner, repo, str("branch") || undefined, str("subpath") || undefined, token);
       res.json({ ...r, authed: !!token });
     } else if (body.action === "fetch") {
-      res.json({ text: await fetchRepoFile(owner, repo, str("branch"), str("path"), token) });
+      res.json(await fetchRepoFileWithSource(owner, repo, str("branch"), str("path"), token));
     } else if (body.action === "fetch-skill") {
       res.json(await fetchRepoSkillDir(owner, repo, str("branch"), str("path"), token));
     } else {

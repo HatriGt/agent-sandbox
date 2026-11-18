@@ -24,6 +24,26 @@ export interface SkillFile {
   content: string;
 }
 
+/**
+ * Where an imported skill came from, kept so the dashboard can pull the latest version later
+ * (src/github-skills.ts checkSkillSources / fetchSkillUpdate). Absent for skills written here,
+ * pasted, uploaded from disk or seeded as starters — there is nothing upstream to compare against.
+ */
+export interface SkillSource {
+  kind: "github";
+  owner: string;
+  repo: string;
+  /** The branch the import read; updates follow the same branch. */
+  branch: string;
+  /** Folder path (entry "dir") or markdown file path (entry "file") inside the repository. */
+  path: string;
+  entry: "dir" | "file";
+  /** Upstream content at import: the blob sha of a loose file, or a digest of a folder's blob shas. */
+  fingerprint: string;
+  /** When this version was pulled in. A later `updatedAt` means it was edited here since. */
+  importedAt: number;
+}
+
 export interface SkillDef {
   /** kebab-case identifier: the folder name in the box and the `/name` chat trigger. */
   name: string;
@@ -33,6 +53,8 @@ export interface SkillDef {
   content: string;
   /** Supporting files beside SKILL.md. Absent/empty for a plain single-file skill. */
   files?: SkillFile[];
+  /** The repository it was imported from, when it was. Lets "Get latest" find the newer version. */
+  source?: SkillSource;
   enabled: boolean;
   addedAt: number;
   updatedAt: number;
@@ -146,9 +168,97 @@ export function normalizeSkill(input: Partial<SkillDef> & { name: string }, now 
     updatedAt: now,
   };
   if (files.length) def.files = files;
+  // A source arriving with the skill is a fresh import (or re-import): it is stamped now, so
+  // `updatedAt > importedAt` reliably means "edited here since".
+  const source = normalizeSkillSource(name, input.source);
+  if (source) def.source = { ...source, importedAt: now };
   if (skillByteSize({ content, files }) > SKILL_LIMITS.maxSkillBytes)
     throw new Error(`Skill "${name}" is over ${Math.floor(SKILL_LIMITS.maxSkillBytes / 1_000_000)} MB in total.`);
   return def;
+}
+
+const SOURCE_OWNER_RE = /^[\w.-]{1,100}$/;
+const SOURCE_BRANCH_RE = /^[\w.\-/]{1,250}$/;
+const SOURCE_FINGERPRINT_RE = /^[0-9a-f]{40,64}$/;
+
+/** Validate a skill's import source. Undefined when none was given; throws on a malformed one. */
+export function normalizeSkillSource(skillName: string, input: unknown): SkillSource | undefined {
+  if (input == null) return undefined;
+  const s = input as Partial<SkillSource>;
+  const bad = (what: string) => new Error(`Skill "${skillName}": the import source has an invalid ${what}.`);
+  if (typeof s !== "object" || s.kind !== "github") throw bad("kind");
+  if (typeof s.owner !== "string" || !SOURCE_OWNER_RE.test(s.owner)) throw bad("owner");
+  if (typeof s.repo !== "string" || !SOURCE_OWNER_RE.test(s.repo)) throw bad("repository");
+  if (typeof s.branch !== "string" || !SOURCE_BRANCH_RE.test(s.branch)) throw bad("branch");
+  if (s.entry !== "dir" && s.entry !== "file") throw bad("entry");
+  const path = typeof s.path === "string" ? s.path.replace(/^\/+|\/+$/g, "") : null;
+  if (path === null || path.length > 400 || path.includes("..") || /[\0\\]/.test(path) || (s.entry === "file" && !path)) throw bad("path");
+  if (typeof s.fingerprint !== "string" || !SOURCE_FINGERPRINT_RE.test(s.fingerprint)) throw bad("fingerprint");
+  const importedAt = typeof s.importedAt === "number" && Number.isFinite(s.importedAt) ? s.importedAt : Date.now();
+  return { kind: "github", owner: s.owner, repo: s.repo, branch: s.branch, path, entry: s.entry, fingerprint: s.fingerprint, importedAt };
+}
+
+/** True when the skill was edited on the dashboard after its last import — "Get latest" would replace those edits. */
+export function editedSinceImport(s: Pick<SkillDef, "updatedAt" | "source">): boolean {
+  return !!s.source && s.updatedAt > s.source.importedAt;
+}
+
+/**
+ * Parse a SKILL.md the way the dashboard's import does (web/src/lib/skillImport.ts parseSkillMd):
+ * frontmatter name/description when present, else the first heading and paragraph. Used when the
+ * controller re-pulls an imported skill, so an update lands exactly as a fresh import would.
+ */
+export function parseSkillMd(text: string, fallbackName: string): { name: string; description: string; content: string } {
+  const src = text.replace(/\r\n/g, "\n").trim();
+  let name = "";
+  let description = "";
+  let body = src;
+  const fm = /^---\n([\s\S]*?)\n---\n?/.exec(src);
+  if (fm) {
+    body = src.slice(fm[0].length).trim();
+    const lines = fm[1].split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const m = /^(name|description)\s*:\s*(.*)$/.exec(lines[i]);
+      if (!m) continue;
+      let v = m[2].trim();
+      if (/^[>|][-+]?$/.test(v)) {
+        const block: string[] = [];
+        while (i + 1 < lines.length && (/^\s+\S/.test(lines[i + 1]) || !lines[i + 1].trim())) block.push(lines[++i].trim());
+        v = (v.startsWith(">") ? block.join(" ").replace(/\s+/g, " ") : block.join("\n")).trim();
+      }
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+        try {
+          v = v.startsWith('"') ? (JSON.parse(v) as string) : v.slice(1, -1);
+        } catch {
+          v = v.slice(1, -1);
+        }
+      }
+      if (m[1] === "name") name = v;
+      else description = v;
+    }
+  }
+  if (!name || !NAME_RE.test(name)) {
+    const h = /^#\s+(.+)$/m.exec(body);
+    name = slugifySkillName(name || h?.[1] || fallbackName);
+  }
+  if (!description) {
+    const firstPara = body.split("\n").find((l) => l.trim() && !l.startsWith("#") && !l.startsWith("```"));
+    description = (firstPara ?? `Imported skill ${name}.`).trim().slice(0, SKILL_LIMITS.maxDescription);
+  }
+  return { name, description, content: body || src };
+}
+
+/** Slugify a filename or folder into a valid skill name. Mirrors the dashboard's toSkillName. */
+export function slugifySkillName(raw: string): string {
+  return (
+    raw
+      .toLowerCase()
+      .replace(/\.(md|markdown|txt)$/i, "")
+      .replace(/skill$/i, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 50) || "imported-skill"
+  );
 }
 
 /** Validate + normalise the supporting files of one skill. Throws a human message on bad input. */

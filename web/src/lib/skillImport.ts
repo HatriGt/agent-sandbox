@@ -6,7 +6,7 @@
  * the page runs under `connect-src 'self'`, which is what stops an injected script exfiltrating the
  * bearer token, so the import feature routes around that policy instead of widening it.
  */
-import { api } from "./api";
+import { api, type SkillSource } from "./api";
 
 export interface SkillFile {
   path: string;
@@ -19,6 +19,8 @@ export interface ParsedSkill {
   content: string;
   /** Supporting files beside SKILL.md when the import was a whole skill folder. */
   files?: SkillFile[];
+  /** The repository and version it came from, for a GitHub import — what "Get latest" compares against. */
+  source?: SkillSource;
 }
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,49}$/;
@@ -133,10 +135,9 @@ export async function listRepoSkills(ref: RepoRef): Promise<{ branch: string; en
   return api.skillRepo<{ branch: string; entries: RepoSkillEntry[]; authed: boolean }>({ action: "list", owner: ref.owner, repo: ref.repo, branch: ref.branch, subpath: ref.subpath });
 }
 
-/** Fetch one file's raw text from the repo. */
-export async function fetchRepoFile(ref: RepoRef, branch: string, path: string): Promise<string> {
-  const { text } = await api.skillRepo<{ text: string }>({ action: "fetch", owner: ref.owner, repo: ref.repo, branch, path });
-  return text;
+/** Fetch one file's raw text from the repo, with the source record that lets it be updated later. */
+export async function fetchRepoFile(ref: RepoRef, branch: string, path: string): Promise<{ text: string; source: SkillSource }> {
+  return api.skillRepo<{ text: string; source: SkillSource }>({ action: "fetch", owner: ref.owner, repo: ref.repo, branch, path });
 }
 
 /** Fetch a whole skill folder: SKILL.md plus every supporting file (skipping what can't come). */
@@ -144,8 +145,8 @@ export async function fetchRepoSkill(
   ref: RepoRef,
   branch: string,
   dirPath: string
-): Promise<{ skillMd: string; files: SkillFile[]; skipped: string[] }> {
-  return api.skillRepo<{ skillMd: string; files: SkillFile[]; skipped: string[] }>({
+): Promise<{ skillMd: string; files: SkillFile[]; skipped: string[]; source: SkillSource }> {
+  return api.skillRepo<{ skillMd: string; files: SkillFile[]; skipped: string[]; source: SkillSource }>({
     action: "fetch-skill",
     owner: ref.owner,
     repo: ref.repo,

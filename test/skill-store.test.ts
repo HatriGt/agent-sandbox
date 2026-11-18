@@ -17,6 +17,9 @@ import {
   validateSkillFilePath,
   ustarSplit,
   buildSkillsTarBase64,
+  normalizeSkillSource,
+  editedSinceImport,
+  parseSkillMd,
   type SkillStore,
 } from "../src/skill-store.ts";
 
@@ -140,4 +143,38 @@ test("parseSkillStore heals a description that is only a YAML block indicator", 
   assert.equal(store.skills.fine.description, "Use when deploying.");
   assert.match(toSkillMd(store.skills["atom-qa-curl"]), /^---\nname: atom-qa-curl\ndescription: "Run authenticated curls/);
   assert.equal(healDescription({ description: "|", content: "```\ncode\n```\n" }), "|");
+});
+
+/* ───────────────────────────── import provenance ───────────────────────────── */
+
+const SOURCE = { kind: "github" as const, owner: "anthropics", repo: "skills", branch: "main", path: "skills/pdf", entry: "dir" as const, fingerprint: "a".repeat(64), importedAt: 5 };
+
+test("normalizeSkill keeps a valid import source and restamps importedAt to the save", () => {
+  const s = normalizeSkill({ name: "pdf", description: "d", content: "c", source: SOURCE }, 1000);
+  assert.deepEqual(s.source, { ...SOURCE, importedAt: 1000 });
+  assert.equal(editedSinceImport(s), false);
+  assert.equal(editedSinceImport({ ...s, updatedAt: 1001 }), true, "a later save means edited here");
+  assert.equal(editedSinceImport({ updatedAt: 9, source: undefined }), false);
+  assert.equal("source" in normalizeSkill({ name: "pdf", description: "d", content: "c" }, 1000), false);
+});
+
+test("normalizeSkillSource rejects anything but a plain GitHub reference", () => {
+  assert.equal(normalizeSkillSource("x", undefined), undefined);
+  assert.throws(() => normalizeSkillSource("x", { ...SOURCE, kind: "gitlab" }), /kind/);
+  assert.throws(() => normalizeSkillSource("x", { ...SOURCE, owner: "../etc" }), /owner/);
+  assert.throws(() => normalizeSkillSource("x", { ...SOURCE, branch: "a branch" }), /branch/);
+  assert.throws(() => normalizeSkillSource("x", { ...SOURCE, path: "../../x" }), /path/);
+  assert.throws(() => normalizeSkillSource("x", { ...SOURCE, entry: "file", path: "" }), /path/);
+  assert.throws(() => normalizeSkillSource("x", { ...SOURCE, fingerprint: "not-hex" }), /fingerprint/);
+  assert.equal(normalizeSkillSource("x", { ...SOURCE, path: "/skills/pdf/" })?.path, "skills/pdf");
+  assert.equal(normalizeSkillSource("x", { ...SOURCE, path: "" })?.path, "", "a repository-root skill folder");
+});
+
+test("parseSkillMd reads frontmatter like the dashboard import, falling back to heading and first paragraph", () => {
+  const fm = parseSkillMd('---\nname: review-pr\ndescription: "Use when: reviewing."\n---\n\n# Steps\n1. read', "x.md");
+  assert.deepEqual(fm, { name: "review-pr", description: "Use when: reviewing.", content: "# Steps\n1. read" });
+  const folded = parseSkillMd("---\nname: deals\ndescription: >-\n  Use for\n  deals.\n---\nbody", "x");
+  assert.equal(folded.description, "Use for deals.");
+  const bare = parseSkillMd("# Fix CI\n\nUse when the pipeline is red.\n\nSteps…", "Fix CI.md");
+  assert.deepEqual([bare.name, bare.description], ["fix-ci", "Use when the pipeline is red."]);
 });

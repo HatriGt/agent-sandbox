@@ -1,14 +1,15 @@
 import * as React from "react";
-import { ArrowLeft, Download, Plus } from "lucide-react";
+import { ArrowLeft, Download, Plus, RefreshCw } from "lucide-react";
 import { AnimatePresence, type HTMLMotionProps, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
-import { api, type SkillView } from "@/lib/api";
+import { api, type SkillUpdateCheck, type SkillView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { FilterChip } from "@/components/ui/filter-chip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ImportDialog } from "@/components/skills/ImportDialog";
 import { type Draft, type Mutate, sourceOf } from "@/components/skills/model";
 import { SkillEditor } from "@/components/skills/SkillEditor";
@@ -24,7 +25,7 @@ import { fmtAgo } from "@/lib/format";
  * `n` starts a new skill while the list has focus.
  */
 
-type Filter = "all" | "on" | "off" | "starter" | "custom";
+type Filter = "all" | "on" | "off" | "starter" | "github" | "custom";
 type Editing = { initial?: SkillView; draft?: Draft; key: number };
 
 export function SkillsPage({ onBack }: { onBack: () => void }) {
@@ -36,6 +37,36 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
   const [importing, setImporting] = React.useState<{ repo?: string } | null>(null);
   const seq = React.useRef(0);
   const open = React.useCallback((e: Omit<Editing, "key">) => setEditing({ ...e, key: ++seq.current }), []);
+
+  // "Check for updates": what each imported skill's repository holds now. A row is marked while
+  // the repository's version differs from the stored one, so getting the latest clears it by itself.
+  const [checks, setChecks] = React.useState<Record<string, SkillUpdateCheck>>({});
+  const [checking, setChecking] = React.useState(false);
+  const imported = React.useMemo(() => (skills ?? []).filter((s) => s.source), [skills]);
+  const updates = React.useMemo(() => {
+    const out: Record<string, boolean> = {};
+    for (const s of imported) {
+      const c = checks[s.name];
+      if (c?.available && c.latest && c.latest !== s.source!.fingerprint) out[s.name] = true;
+    }
+    return out;
+  }, [imported, checks]);
+  const checkUpdates = async () => {
+    setChecking(true);
+    try {
+      const { updates: r } = await api.skillUpdates();
+      setChecks(r);
+      const names = imported.filter((s) => r[s.name]?.available && r[s.name].latest !== s.source!.fingerprint).map((s) => `/${s.name}`);
+      const failed = Object.values(r).filter((c) => c.error);
+      if (names.length) toast.success(`${names.length} skill${names.length === 1 ? " has" : "s have"} a newer version`, { description: `${names.slice(0, 6).join(", ")}${names.length > 6 ? "…" : ""} — use the row's refresh to get it.` });
+      else if (failed.length === Object.keys(r).length && failed.length) toast.error("Could not check for updates", { description: failed[0].error });
+      else toast.info("All imported skills are the latest", { description: failed.length ? `${failed.length} could not be checked: ${failed[0].error}` : undefined });
+    } catch (e) {
+      toast.error("Could not check for updates", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setChecking(false);
+    }
+  };
 
   const mutate = React.useCallback<Mutate>(
     async (body, ok) => {
@@ -64,18 +95,18 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
   }, [editing, importing, newSkill]);
 
   const counts = React.useMemo(() => {
-    const c = { all: 0, on: 0, off: 0, starter: 0, custom: 0 };
+    const c = { all: 0, on: 0, off: 0, starter: 0, github: 0, custom: 0 };
     for (const s of skills ?? []) {
       c.all++;
       c[s.enabled ? "on" : "off"]++;
-      c[sourceOf(s.name)]++;
+      c[sourceOf(s)]++;
     }
     return c;
   }, [skills]);
   const visible = (skills ?? []).filter((s) => {
     if (filter === "on" && !s.enabled) return false;
     if (filter === "off" && s.enabled) return false;
-    if ((filter === "starter" || filter === "custom") && sourceOf(s.name) !== filter) return false;
+    if ((filter === "starter" || filter === "github" || filter === "custom") && sourceOf(s) !== filter) return false;
     return true;
   });
   const existing = React.useMemo(() => Object.fromEntries((skills ?? []).map((s) => [s.name, true as const])), [skills]);
@@ -128,6 +159,19 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
+                  {imported.length > 0 && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button size="sm" variant="ghost" onClick={() => void checkUpdates()} loading={checking} aria-label="Check imported skills for updates">
+                          <RefreshCw />
+                          <span className="hidden sm:inline">Check for updates</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        Compare {imported.length === 1 ? "the imported skill" : `${imported.length} imported skills`} with {imported.length === 1 ? "its" : "their"} repositories
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
                   <Button size="sm" variant="outline" onClick={() => setImporting({})}>
                     <Download />
                     Import
@@ -156,15 +200,17 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
                       loading={skills === null}
                       onOpen={(s) => open({ initial: s })}
                       onMutate={mutate}
+                      updates={updates}
                       toolbar={
                         <div role="radiogroup" aria-label="Filter skills" className="flex flex-wrap items-center gap-1">
                           <FilterChip group="skills" active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
                           <FilterChip group="skills" active={filter === "on"} onClick={() => setFilter("on")} label="On" count={counts.on} />
                           <FilterChip group="skills" active={filter === "off"} onClick={() => setFilter("off")} label="Off" count={counts.off} />
-                          {counts.starter > 0 && counts.custom > 0 && (
+                          {[counts.starter, counts.github, counts.custom].filter((n) => n > 0).length > 1 && (
                             <>
-                              <FilterChip group="skills" active={filter === "starter"} onClick={() => setFilter("starter")} label="Starter" count={counts.starter} />
-                              <FilterChip group="skills" active={filter === "custom"} onClick={() => setFilter("custom")} label="Yours" count={counts.custom} />
+                              {counts.starter > 0 && <FilterChip group="skills" active={filter === "starter"} onClick={() => setFilter("starter")} label="Starter" count={counts.starter} />}
+                              {counts.github > 0 && <FilterChip group="skills" active={filter === "github"} onClick={() => setFilter("github")} label="Imported" count={counts.github} />}
+                              {counts.custom > 0 && <FilterChip group="skills" active={filter === "custom"} onClick={() => setFilter("custom")} label="Yours" count={counts.custom} />}
                             </>
                           )}
                         </div>
@@ -182,7 +228,7 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
                   )}
                   {skills && skills.length > 0 && skills.length <= 6 && !filtered && <TemplateStrip existing={existing} onPick={(d) => open({ draft: d })} onNew={newSkill} />}
                   {cached.data?.shared?.map((g) => (
-                    <SharedBy key={g.org.id} org={g.org} kind="skills" items={g.skills.map((s) => ({ key: s.name, name: `/${s.name}`, detail: s.description, kind: sourceOf(s.name) === "starter" ? "starter" : undefined, on: s.enabled }))} />
+                    <SharedBy key={g.org.id} org={g.org} kind="skills" items={g.skills.map((s) => ({ key: s.name, name: `/${s.name}`, detail: s.description, kind: sourceOf(s) === "starter" ? "starter" : undefined, on: s.enabled }))} />
                   ))}
                 </div>
 
