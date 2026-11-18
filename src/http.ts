@@ -47,7 +47,7 @@ import { createBox, claudeRootSource } from "./msb.js";
 import { markClaimed } from "./claims.js";
 import { RESCUE_MAX_MB, capturedTurn, listRescues, pullRescue, pushRescue, readRescue, rescueBoxes, stampRescueKept, summarize, sweepRescues } from "./rescue.js";
 import { KeptBoxError } from "./msb.js";
-import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadViews, upsertThread } from "./threads.js";
+import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread } from "./threads.js";
 import { closeSshMasters } from "./ssh.js";
 import { PRIMARY_HOST_ID, boxHostOf } from "./hosts.js";
 import { sweepHosts } from "./host-sweep.js";
@@ -81,7 +81,7 @@ import {
   upsertProvider,
   viewOf,
 } from "./providers.js";
-import { requestSessions, boxParam, createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
+import { requestSessions, boxParam, createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError, taskHeadOf } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
 import { seedStarterSkills } from "./starter-skills.js";
 import { parseMcpStore } from "./mcp-store.js";
@@ -1483,6 +1483,13 @@ const readFleet = makeFleetReader(
       // sweep instead of being written off.
       load: async () => {
         const out = new Map<string, RunMeta>();
+        // The thread table first (src/threads.ts): what the controller itself last knew of every live
+        // thread, so a restart while a host is paused does not strip its sleeping threads to "No task yet".
+        try {
+          for (const [k, v] of threadRunMetas(listThreads(db), (id) => taskHeadOf(db, id))) out.set(k, v);
+        } catch (e) {
+          console.error(`[fleet] thread memory not read: ${String((e as Error).message ?? e).slice(0, 120)}`);
+        }
         for (const [k, v] of await loadRunMetasLocal(cfg).catch(() => new Map<string, RunMeta>())) out.set(k, v);
         await Promise.all(
           hostPool.active().map(async (h) => {

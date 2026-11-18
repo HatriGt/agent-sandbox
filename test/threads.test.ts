@@ -11,7 +11,7 @@ import path from "node:path";
 import { openMemoryDb } from "../src/db.ts";
 import { mergeWithMemory } from "../src/fleet.ts";
 import type { BoxView } from "../src/monitor.ts";
-import { getThread, listThreads, markThreadDeleted, planSync, readTranscript, syncSh, syncTranscript, threadFromBox, threadViews, upsertThread } from "../src/threads.ts";
+import { getThread, listThreads, markThreadDeleted, planSync, readTranscript, syncSh, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread } from "../src/threads.ts";
 
 const box = (name: string, extra: Partial<BoxView> = {}): BoxView => ({ name, role: "session", boxStatus: "Running", runState: "running", task: "fix the pool", ...extra });
 
@@ -127,4 +127,29 @@ test("syncTranscript: follows a growing log, takes the whole file after a trunca
   assert.equal(await readTranscript(cfg, "t"), log);
   assert.equal(await readTranscript(cfg, "nope"), null);
   await fs.rm(dataDir, { recursive: true, force: true });
+});
+
+test("threadRunMetas: live rows seed the fleet's memory; a row with no task uses the claim-time head; deleted and empty rows are skipped", () => {
+  const db = openMemoryDb();
+  const now = 1_700_000_000_000;
+  upsertThread(db, { id: "delegate-1-a", owner: "u1", title: "Create a deal", host: "freestyle-a", runState: "idle", boxStatus: "stopped" }, now);
+  upsertThread(db, { id: "delegate-1-b", owner: "u1", task: "full task text", question: "which env?", repos: [{ owner: "o", name: "r" }] as never, runState: "waiting", exitCode: null, host: "freestyle-a", boxStatus: "stopped" }, now);
+  upsertThread(db, { id: "delegate-1-c", owner: "u1", task: "gone", runState: "done", boxStatus: "stopped" }, now);
+  markThreadDeleted(db, "delegate-1-c", now + 1);
+  upsertThread(db, { id: "delegate-1-d", owner: "u1", runState: "idle", boxStatus: "stopped" }, now);
+  const heads: Record<string, string> = { "delegate-1-a": "create a deal for ..." };
+  const m = threadRunMetas(listThreads(db), (id) => heads[id] ?? null);
+  assert.deepEqual([...m.keys()].sort(), ["delegate-1-a", "delegate-1-b"]);
+  assert.equal(m.get("delegate-1-a")?.task, "create a deal for ...");
+  assert.equal(m.get("delegate-1-a")?.host, "freestyle-a");
+  const b = m.get("delegate-1-b")!;
+  assert.equal(b.task, "full task text");
+  assert.equal(b.question, "which env?");
+  assert.equal(b.runState, "waiting");
+  assert.deepEqual(b.repos, [{ owner: "o", name: "r" }]);
+  // Merged with a sweep that lists the box stopped: the thread keeps its task instead of reading "No task yet".
+  const sweep: BoxView[] = [{ name: "delegate-1-a", boxStatus: "Stopped", role: "session", runState: "idle", host: "freestyle-a" } as BoxView];
+  const merged = mergeWithMemory(sweep, new Map(m.entries()) as never, { held: () => true });
+  assert.equal(merged[0]?.task, "create a deal for ...");
+  assert.equal(merged[0]?.boxStatus, "Stopped");
 });

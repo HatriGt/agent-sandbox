@@ -551,7 +551,8 @@ one from the inside. All of them are best-effort and never throw into the sweep 
   "Running without 2 MCP servers: btp-mcp-server (no disk space), ...". The MCP settings page shows
   each npx server as *baked in*, *installed each run* or *left out of the last run*
   (`/mcp-servers.json` `provision`).
-- **Canary** (`src/canary.ts`, `CANARY_INTERVAL_MS`, default hourly). One real task
+- **Canary** (`src/canary.ts`, `CANARY_INTERVAL_MS`, off by default since 2026-11-18; set an
+  interval to schedule it). One real task
   ("Reply with exactly the word CANARY-OK") through `delegateOnce` as the operator, judged by its
   log, its box torn down; the fleet sweep skips `[canary]` boxes for notifications, history and
   memory. A failure alerts at once (then per 6h), the pass after a failure says "recovered". State

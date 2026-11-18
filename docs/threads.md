@@ -83,3 +83,14 @@ conversation with the same files, which is the "next day, continue the change" c
 - Copies above `RESCUE_MAX_MB` (512) are not kept; such a thread shows in History only once its
   box is gone.
 - Only Claude Code threads can be brought back today (the session files are agent-specific).
+
+## The thread table seeds the fleet's memory (2026-11-18, evening)
+
+A sleeping box cannot be asked what it was doing, so the fleet shows it from memory: the
+controller's own run-memory mirror first, then each host's `~/.agent-sandbox/runs`, read once per
+host and only while the host is awake (an SSH to a paused Freestyle VM resumes it). After a restart
+while a host was paused, every sleeping thread on it that predated the mirror read as "No task yet —
+claim it with a new task" until the host next woke. Now `threadRunMetas` (src/threads.ts) seeds that
+memory from the thread table at load, and a row whose task was never learned uses the head of the
+task stored at claim time (`boxes.task_head`), so a thread is named from the controller's own
+records; the host's answer, when it comes, still wins per box and fills the row's full task.

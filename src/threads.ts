@@ -24,6 +24,7 @@ import path from "node:path";
 import type { Config } from "./config.js";
 import type { Db } from "./db.js";
 import type { BoxView, RepoRef, RunState } from "./monitor.js";
+import type { RunMeta } from "./run-memory.js";
 import { assertBoxName } from "./sync.js";
 
 /** The agent's transcript inside a box (src/msb.ts AGENT_LOG). */
@@ -145,6 +146,40 @@ export function threadFromBox(b: BoxView, owner: string | null, extra: { title?:
     boxStatus: running ? "running" : "stopped",
     boxSeenAt: now,
   };
+}
+
+/**
+ * What the thread table remembers of each live thread, in the fleet's run-memory shape (src/run-memory.ts).
+ * Seeds the fleet's memory at load: a sleeping thread on a host that is paused or unreachable when the
+ * controller starts keeps its task, question and last run state without the host being asked (asking
+ * would wake a paused VM). A row whose task was never learned falls back to the head stored at claim
+ * time (`taskHead`), so the dashboard names the thread instead of "No task yet". Pure.
+ */
+export function threadRunMetas(rows: ThreadRow[], taskHead: (id: string) => string | null | undefined = () => null): Map<string, RunMeta> {
+  const out = new Map<string, RunMeta>();
+  for (const r of rows) {
+    if (r.deleted_at) continue;
+    const task = r.task ?? taskHead(r.id) ?? undefined;
+    if (!task && !r.question) continue;
+    let repos: RepoRef[] | undefined;
+    try {
+      repos = r.repos_json ? (JSON.parse(r.repos_json) as RepoRef[]) : undefined;
+    } catch {
+      repos = undefined;
+    }
+    out.set(r.id, {
+      name: r.id,
+      host: r.host ?? undefined,
+      role: r.role,
+      runState: r.run_state,
+      exitCode: r.exit_code ?? undefined,
+      task,
+      question: r.question ?? undefined,
+      repos,
+      uptime: undefined,
+    });
+  }
+  return out;
 }
 
 /**

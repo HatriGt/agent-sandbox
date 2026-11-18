@@ -309,6 +309,12 @@ export function forgetBox(db: Db, name: string): void {
   db.prepare(`DELETE FROM boxes WHERE name = ?`).run(name);
 }
 
+/** The first 200 characters of the task a box was claimed with (recordBoxOwner); null when none was recorded. */
+export function taskHeadOf(db: Db, name: string): string | null {
+  const row = db.prepare(`SELECT task_head FROM boxes WHERE name = ?`).get(name) as { task_head: string | null } | undefined;
+  return row?.task_head ?? null;
+}
+
 export function ownerOf(db: Db, name: string): string | null | undefined {
   const row = db.prepare(`SELECT owner_id FROM boxes WHERE name = ?`).get(name) as { owner_id: string | null } | undefined;
   return row ? row.owner_id : undefined; // undefined = no record at all

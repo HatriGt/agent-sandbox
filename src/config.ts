@@ -37,7 +37,7 @@ export interface Config {
   claudeImage: string;
   /** The microsandbox home on the VPS (sandboxes/, snapshots/): host-disk watch, orphan sweep, compaction. */
   msbHome: string;
-  /** Canary cadence (ms): one tiny real task through the live delegate path per interval. 0 = off. */
+  /** Canary cadence (ms): one tiny real task through the live delegate path per interval. 0 = off (the default since 2026-11-18: a scheduled canary woke the box hosts for a run nobody asked for; "Run now" on the Sandboxes page still works). */
   canaryIntervalMs: number;
   /** Host-disk alert threshold, percent used of the filesystem under msbHome. */
   hostDiskAlertPct: number;
@@ -258,7 +258,7 @@ export function loadConfig(): Config {
     snapshot: process.env.MSB_SNAPSHOT || "",
     claudeImage: image.claudeImage,
     msbHome: (process.env.MSB_HOME || "/root/.microsandbox").replace(/\/+$/, ""),
-    canaryIntervalMs: Math.max(0, Number(process.env.CANARY_INTERVAL_MS ?? "3600000") || 0),
+    canaryIntervalMs: Math.max(0, Number(process.env.CANARY_INTERVAL_MS ?? "0") || 0),
     hostDiskAlertPct: Math.min(100, Math.max(1, Number(process.env.HOST_DISK_ALERT_PCT ?? "85") || 85)),
     hostSleepAfterMs: Math.max(0, Number(process.env.HOST_SLEEP_AFTER_MS ?? "0") || 0),
     claudeCodeVersion: image.claudeCodeVersion,
