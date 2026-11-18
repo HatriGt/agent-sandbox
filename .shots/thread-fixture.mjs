@@ -412,7 +412,7 @@ if (replay && !streamer) {
 // --interact=send: a finished run's stream held open, so a message sent from the composer can land
 // in the log a beat later (the echo → durable line swap) and the agent can answer it.
 let appendLog = null;
-if (interact === "send" || interact === "send-probe" || interact === "send-rich") {
+if (interact === "send" || interact === "send-probe" || interact === "send-rich" || interact === "quote") {
   streamer = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", "access-control-allow-origin": "*" });
     res.write("retry: 3000\n\n");
@@ -876,6 +876,54 @@ if (stream) {
   await page.locator(".you-bubble").last().hover();
   await page.waitForTimeout(400);
   await shot("-rich");
+} else if (interact === "quote") {
+  // "Quote in reply": select a passage of the agent's prose, quote it, add a word, send. The pill
+  // must survive the send: in the echo, then in the durable log line, and the export menu must list
+  // the Markdown and JSON downloads.
+  const passage = page.locator("[aria-label='Conversation'] .prose-agent p").filter({ hasText: /six 10-second buckets/ }).last();
+  await passage.waitFor({ state: "visible", timeout: 5000 });
+  await passage.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  // A real drag, so the toolbar's pointerdown/up bookkeeping sees a selection the way a person makes one.
+  const box = await passage.boundingBox();
+  console.log("passage box:", JSON.stringify(box));
+  await page.mouse.move(box.x + 2, box.y + 8);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.6, box.y + 8, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  console.log("selection:", JSON.stringify(await page.evaluate(() => getSelection()?.toString().slice(0, 60))), "fine-pointer:", await page.evaluate(() => matchMedia("(min-width: 48rem) and (hover: hover) and (pointer: fine)").matches), "toolbar:", await page.locator("[data-selection-toolbar]").count());
+  await shot("-selected");
+  await page.getByRole("button", { name: "Quote in reply" }).click();
+  await page.waitForTimeout(300);
+  await input().type("why six buckets and not ten?");
+  await page.waitForTimeout(200);
+  await shot("-composed");
+  console.log("composer:", JSON.stringify(await input().inputValue()));
+  await input().press("Enter");
+  await page.waitForTimeout(500);
+  await shot("-echo");
+  await page.waitForTimeout(2400);
+  const bubble = page.locator(".you-bubble").last();
+  console.log("landed bubble text:", JSON.stringify(await bubble.innerText()));
+  console.log("quote pills in last bubble:", await bubble.locator("[aria-label='Go to the quoted passage']").count());
+  await bubble.hover();
+  await page.waitForTimeout(300);
+  await shot("-landed");
+  await bubble.locator("[aria-label='Go to the quoted passage']").first().click();
+  await page.waitForTimeout(900);
+  await shot("-jumped");
+  await page.getByRole("button", { name: "More" }).or(page.locator("button[aria-label='More actions']")).first().click();
+  await page.waitForTimeout(400);
+  await shot("-menu");
+  const dl = page.waitForEvent("download", { timeout: 5000 });
+  await page.getByRole("menuitem", { name: /Export transcript/ }).click();
+  const d = await dl;
+  const saved = `${outPrefix}-export.md`;
+  await d.saveAs(saved);
+  console.log("downloaded:", d.suggestedFilename(), "->", saved);
+  await page.waitForTimeout(500);
+  await shot("-exported");
 } else if (interact === "send" || interact === "send-probe") {
   // Send, watch the echo, let the log line land, then send the SAME words again.
   const probe = async (label, ms) => {

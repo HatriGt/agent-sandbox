@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Check, Copy, FileText, FolderTree, Globe, HardDrive, Info, Link2, ListTree, Loader2, MemoryStick, MessageCircleQuestion, MessageSquareText, Moon, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Copy, Download, FileText, FolderTree, Globe, HardDrive, Info, Link2, ListTree, Loader2, MemoryStick, MessageCircleQuestion, MessageSquareText, Moon, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
 import { Swap } from "@/components/ui/swap";
 import { IconSwap } from "@/components/ui/icon-swap";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -11,6 +11,7 @@ import { menuMotion } from "./MentionMenu";
 import { toast } from "sonner";
 import type { BoxView } from "@/lib/api";
 import type { TraceEvent } from "@/lib/trace";
+import type { TranscriptFormat } from "@/lib/transcript";
 import { liveActivity } from "./live-activity";
 import { fmtAgo, friendlyName, isFailedExit, roleLabel } from "@/lib/format";
 import { deadlineLabel, deadlineShort, fmtDuration, fmtUsage, type Deadline, type DisplayState } from "@/lib/lifecycle";
@@ -79,6 +80,7 @@ export function ThreadHeader({
   onAttach,
   onDestroy,
   onCopyTranscript,
+  onExportTranscript,
   onNewFromThis,
   events,
 }: {
@@ -135,6 +137,8 @@ export function ThreadHeader({
   onAttach: (fullName: string) => void;
   onDestroy: () => Promise<void>;
   onCopyTranscript: () => Promise<string>;
+  /** Save the conversation as a file: Markdown for people and agents, JSON with every event. */
+  onExportTranscript: (format: TranscriptFormat) => void;
   onNewFromThis: () => void;
   /** The trace, for the pill's live activity label ("Working · Editing retry.ts"). */
   events?: TraceEvent[];
@@ -658,6 +662,16 @@ export function ThreadHeader({
               {copied ? <Check className="text-ok" /> : <FileText />}
               Copy transcript
               <MenuHint>Markdown</MenuHint>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onExportTranscript("md")}>
+              <Download />
+              Export transcript
+              <MenuHint>.md · for another agent</MenuHint>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onExportTranscript("json")}>
+              <Download />
+              Export every event
+              <MenuHint>.json · tools and results</MenuHint>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={onNewFromThis} disabled={!box.task}>
               <RotateCw />

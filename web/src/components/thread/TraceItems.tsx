@@ -1,8 +1,10 @@
 import * as React from "react";
 import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Clock, Copy, FileSearch, FileText, KeyRound, Loader2, Pencil, Play, Shrink, Terminal, Undo2 } from "lucide-react";
 import { fmtK } from "@/lib/context-health";
-import { parseYouMessage } from "@/lib/you-message";
-import { inlineTokens, splitTokens } from "@/lib/inline-tokens";
+import { parseYouMessage, splitQuotes } from "@/lib/you-message";
+import { quoteLabel } from "@/lib/quote-jump";
+import { QuoteJumpContext } from "./QuoteJumpContext";
+import { inlineTokens, splitTokens, type InlineToken } from "@/lib/inline-tokens";
 import { FileMark } from "@/lib/fileIcon";
 import { CodeNavContext } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -1350,6 +1352,9 @@ export function WorkingIndicator({ label = "Working", detail }: { label?: string
   );
 }
 
+/** What a sent bubble draws, in order: prose, a tag chip (`/skill`, `@file`) or a quoted passage's pill. */
+type YouPart = { text: string } | { token: InlineToken; text: string } | { quote: string };
+
 /** A message this long folds: a pasted log must not push the reply it got off the screen. */
 const YOU_FOLD_LINES = 14;
 const YOU_FOLD_CHARS = 1400;
@@ -1389,11 +1394,14 @@ export function YouItem({
   const attachments = React.useMemo(() => [...new Set(text.match(ATTACHMENT_RE) ?? [])], [text]);
   const { body, skill: skillName, files } = React.useMemo(() => parseYouMessage(text), [text]);
   const openRef = React.useContext(CodeNavContext);
-  // Tags written in the message (`/skill`, `@file`) are drawn as chips where they sit in the line.
+  const jumpQuote = React.useContext(QuoteJumpContext);
+  // Tags written in the message (`/skill`, `@file`) are drawn as chips where they sit in the line,
+  // and each passage quoted from the conversation (sent as `> ` lines) folds back into the pill the
+  // composer showed for it.
   const skillList = useCached("skills", (signal) => api.skills(signal));
   const parts = React.useMemo(() => {
     const names = new Set((skillList.data?.skills ?? []).map((s) => s.name));
-    return splitTokens(body, inlineTokens(body, names));
+    return splitQuotes(body).flatMap((p): YouPart[] => ("quote" in p ? [p] : splitTokens(p.text, inlineTokens(p.text, names))));
   }, [body, skillList.data]);
   const long = body.length > YOU_FOLD_CHARS || body.split("\n").length > YOU_FOLD_LINES;
   const [open, setOpen] = React.useState(false);
@@ -1496,6 +1504,19 @@ export function YouItem({
                 </span>
               )}
               {parts.map((part, i) => {
+                if ("quote" in part) {
+                  const label = `❝${quoteLabel(part.quote)}❞`;
+                  const block = cn(YOU_TAG, "bg-foreground/8 my-1 flex w-fit max-w-full font-sans text-micro [&>span]:truncate");
+                  return jumpQuote ? (
+                    <button key={i} type="button" onClick={() => jumpQuote({ id: `you-${i}`, text: part.quote })} title={part.quote} aria-label="Go to the quoted passage" className={cn(block, "hover:bg-foreground/14 cursor-pointer transition-colors")}>
+                      <span>{label}</span>
+                    </button>
+                  ) : (
+                    <span key={i} title={part.quote} className={block}>
+                      <span>{label}</span>
+                    </span>
+                  );
+                }
                 if (!("token" in part)) return part.text;
                 const t = part.token;
                 if (t.kind === "skill")

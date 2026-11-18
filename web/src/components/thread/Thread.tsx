@@ -20,7 +20,7 @@ import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
 import { currentDiskTier, currentMemoryTier, deadlineLabel, deadlineOf, displayState, fmtDuration, offerableTiers, tierGib, usageLevel } from "@/lib/lifecycle";
 import { MemoryBumpCard } from "./MemoryCard";
 import { useMemoryToasts } from "./MemoryToast";
-import { runStats, toMarkdown } from "@/lib/transcript";
+import { downloadText, runStats, toJson, toMarkdown, transcriptFilename, type TranscriptFormat } from "@/lib/transcript";
 import { contextBreakdown, contextHealthOf } from "@/lib/context-health";
 import type { ContextStatus } from "./ContextRing";
 import { useAutoCompactMode } from "@/hooks/useAutoCompactMode";
@@ -39,6 +39,7 @@ import { RunInspector } from "./RunInspector";
 import { SideChat } from "./SideChat";
 import { asQuote, useSideChat } from "@/lib/sidechat";
 import { jumpToQuote, type QuoteRef } from "@/lib/quote-jump";
+import { QuoteJumpContext } from "./QuoteJumpContext";
 import { SelectionToolbar } from "./SelectionToolbar";
 import { SchedulePill } from "./SchedulePill";
 import { ScheduledCard } from "./ScheduledCard";
@@ -936,6 +937,23 @@ export function Thread({
     [stick.scrollRef]
   );
 
+  // "Export transcript": the conversation as a file, Markdown for another agent to read or JSON
+  // with every event. Built here from the events the thread already holds; no round trip.
+  const exportTranscript = React.useCallback(
+    (format: TranscriptFormat) => {
+      const head = { title, machine: friendlyName(box.name), url: window.location.href };
+      const name = transcriptFilename(title, format);
+      try {
+        if (format === "json") downloadText(name, toJson(events, head), "application/json");
+        else downloadText(name, toMarkdown(events, head), "text/markdown");
+        toast.success(`Saved ${name}`);
+      } catch (e) {
+        toast.error("Could not export", { description: e instanceof Error ? e.message : String(e) });
+      }
+    },
+    [events, title, box.name]
+  );
+
   // A long agent message must not drag the view to its end. Once the newest reply's first line
   // reaches the top while it is still the last thing in the thread, following stops there and the
   // reader scrolls on at their own pace; scrolling back to the bottom resumes following.
@@ -1101,6 +1119,7 @@ export function Thread({
     <SessionContext.Provider value={box.name}>
     <SessionReposContext.Provider value={repos}>
     <CodeNavContext.Provider value={openRef}>
+    <QuoteJumpContext.Provider value={jumpQuote}>
     {/* No mount animation: BootingThread (same layout, swapped by App inside one pane key) hands
         off to this pixel for pixel; a fade here was the second blink. Thread switches fade via
         App's pane crossfade. */}
@@ -1151,6 +1170,7 @@ export function Thread({
         onAttach={(full) => attach(full)}
         onDestroy={destroy}
         onCopyTranscript={async () => toMarkdown(events, { title, machine: friendlyName(box.name), url: window.location.href })}
+        onExportTranscript={exportTranscript}
         onNewFromThis={newFromThis}
         events={events}
       />
@@ -1494,6 +1514,7 @@ export function Thread({
       </AnimatePresence>
       </div>
     </div>
+    </QuoteJumpContext.Provider>
     </CodeNavContext.Provider>
     </SessionReposContext.Provider>
     </SessionContext.Provider>

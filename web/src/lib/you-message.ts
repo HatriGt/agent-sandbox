@@ -36,3 +36,45 @@ export function parseYouMessage(text: string): YouMessage {
   if (s) return { body: (s[2] ?? "").trim(), skill: s[1], files };
   return { body: rest, skill: null, files };
 }
+
+/** A piece of the body: prose, or a passage quoted from the conversation ("Quote in reply"). */
+export type BodyPart = { text: string } | { quote: string };
+
+/**
+ * The body split into prose and quoted passages. A quote travels as a paragraph of `> ` lines (the
+ * composer expands each pill on send); the bubble folds every such paragraph back into a pill, so
+ * the thread shows the message with the face it had in the composer. Prose keeps its own line
+ * breaks; the blank lines that framed a quote are dropped, the pill brings its own spacing.
+ */
+export function splitQuotes(body: string): BodyPart[] {
+  const out: BodyPart[] = [];
+  let text: string[] = [];
+  let quote: string[] | null = null;
+  const flushText = () => {
+    const t = text.join("\n").replace(/^\n+|\n+$/g, "");
+    if (t) out.push({ text: t });
+    text = [];
+  };
+  const flushQuote = () => {
+    if (!quote) return;
+    const q = quote.join("\n").trim();
+    if (q) out.push({ quote: q });
+    quote = null;
+  };
+  for (const line of body.split("\n")) {
+    const m = line.match(/^>(?: ?(.*))?$/);
+    if (m) {
+      if (!quote) {
+        flushText();
+        quote = [];
+      }
+      quote.push(m[1] ?? "");
+    } else {
+      flushQuote();
+      text.push(line);
+    }
+  }
+  flushQuote();
+  flushText();
+  return out;
+}

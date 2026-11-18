@@ -1,5 +1,13 @@
 import type { TraceEvent } from "@/lib/trace";
 
+export interface TranscriptHead {
+  title: string;
+  machine: string;
+  url?: string;
+}
+
+export type TranscriptFormat = "md" | "json";
+
 const SHELL = new Set(["Bash", "Shell", "Terminal", "Run", "Exec", "sh", "bash"]);
 const WRITES = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
@@ -33,7 +41,7 @@ export function runStats(events: TraceEvent[]): RunStats {
  * The conversation as Markdown for pasting into a PR, a ticket or a doc. Your messages are quoted,
  * the agent's prose is kept as written, tool work is folded into a list so the record stays readable.
  */
-export function toMarkdown(events: TraceEvent[], head: { title: string; machine: string; url?: string }): string {
+export function toMarkdown(events: TraceEvent[], head: TranscriptHead): string {
   const out: string[] = [`# ${head.title}`, "", `_${head.machine}${head.url ? ` · ${head.url}` : ""}_`, ""];
   let tools: string[] = [];
   const flush = () => {
@@ -45,7 +53,8 @@ export function toMarkdown(events: TraceEvent[], head: { title: string; machine:
     switch (e.kind) {
       case "you":
         flush();
-        out.push("> **You:** " + e.text.trim().replace(/\n/g, "\n> "), "");
+        // A message that opens with a quoted passage (`> ` lines) nests it under the label on its own line.
+        out.push((e.text.trimStart().startsWith(">") ? "> **You:**\n> \n> " : "> **You:** ") + e.text.trim().replace(/\n/g, "\n> "), "");
         break;
       case "say":
         flush();
@@ -68,4 +77,34 @@ export function toMarkdown(events: TraceEvent[], head: { title: string; machine:
   }
   flush();
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+}
+
+/**
+ * The conversation as JSON for another agent to read: the head, then every trace event as it was
+ * parsed (your turns, the agent's prose, thinking, tool calls with their results, plans, lifecycle).
+ * Nothing is folded or shortened, so a tool's full output travels with the record.
+ */
+export function toJson(events: TraceEvent[], head: TranscriptHead): string {
+  return JSON.stringify({ ...head, exportedAt: new Date().toISOString(), format: "agent-sandbox/transcript@1", events }, null, 2) + "\n";
+}
+
+/** A file name for the export: the title as a slug, the day, the extension. */
+export function transcriptFilename(title: string, format: TranscriptFormat, now = new Date()): string {
+  const slug = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  return `${slug || "transcript"}-${now.toISOString().slice(0, 10)}.${format}`;
+}
+
+/** Save text as a download (Blob, no network). */
+export function downloadText(filename: string, text: string, type: string) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
