@@ -1782,3 +1782,28 @@ Verified in both schemes with `node .shots/thread-fixture.mjs done <out> --inter
   with it; it is the only control that sends `force` to `/teardown.json`. Everything else that
   removes boxes is refused for a kept one (`docs/lifecycle.md`, "Keep means never lost").
 
+
+## Round: run settings as a list, not a pile (2026-11-20)
+
+What was wrong with the composer's `⋯` menu: four unrelated controls (agent radios, an attempts
+segmented control, verify with its own segmented control and input, then a box-host radio list)
+stacked in one 22rem popover with no row labels, a horizontal scrollbar when a label ran long, and
+the whole thing taller than the viewport allowed. It read as a settings dump, not a menu.
+
+- **A list of rows, then one panel at a time** (iOS Settings, Linear's command menu, the Slack
+  composer's "more" menu): the trigger is a sliders icon titled **Run settings**; the first view is
+  four rows, `label · current value · ›` (**Agent · Claude Code**, **Attempts · 1**, **Verify ·
+  Off**, **Box host · Automatic**). A row opens its panel in the same surface with a `‹ Back` head
+  and a one-line hint; a pick returns to the list (verify stays open while you type). The popover
+  keeps one width and never scrolls sideways.
+- **The row's value is the summary** ("3 in parallel", "Command · npm test", "on instabox-a"), so
+  the list alone says what will run; the chips above the toolbar say the same thing and a chip
+  opens the menu straight on that panel (`section` prop on `MoreMenu`).
+- **One generic `OptionList`** (`thread/RunSettings.tsx`) renders every radio panel: check on the
+  chosen row, roving ↑/↓, `note` for a trailing tag (default, primary) and `description` for a
+  second line (a partially supervised agent, a host's slot count). The host panel disables a full,
+  disabled or unreachable host but still lists it, so the reader learns why it is not an option.
+- Box host is admin-only and only shown when there is more than one host to choose from.
+- Shots: `node .shots/hub-settings-shot.mjs [--dark]` → `.shots/out/hub-settings[-dark]-{list,host,
+  list-after-pick,agent,chip,chip-opens-panel}.png`; it also prints the panel size and asserts no
+  horizontal overflow.

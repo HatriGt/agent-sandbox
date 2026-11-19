@@ -1,14 +1,13 @@
 import * as React from "react";
 import { Link } from "react-router";
-import { Check, ChevronDown, Layers, ListChecks, MoreHorizontal, Plus, RotateCcw, SquareSlash, Zap } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Layers, ListChecks, Plus, RotateCcw, SlidersHorizontal, SquareSlash, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { api, type AgentId, type WorkflowView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { SkillMark } from "@/lib/skillGlyph";
-import { Segmented } from "@/components/ui/segmented";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { HarnessList, HostList, ModelList, Row, TIER_TINT, VerifyRow, hostStateLine, useRoving, type Attempts, type RunSettingsProps } from "@/components/thread/RunSettings";
+import { HarnessList, HostList, ModelList, OptionList, TIER_TINT, VerifyFields, useRoving, type Attempts, type RunSettingsProps } from "@/components/thread/RunSettings";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { ModelChoice } from "@/components/thread/ModelPicker";
 import { BASE } from "@/lib/route";
@@ -414,55 +413,123 @@ export function ModelMenu({ model, disabled, ...shell }: Shell & { model: NonNul
 }
 
 /** ⋯ — the rarely touched options: coding agent, attempts, verification. */
-export function MoreMenu({ agent, attempts, verify, host, ...shell }: Shell & Pick<RunSettingsProps, "agent" | "attempts" | "verify" | "host">) {
+export type MoreSection = "agent" | "attempts" | "verify" | "host";
+
+/** One line of the run-settings list: the setting, what it is set to, and the way in. */
+function SettingRow({ label, value, note, onClick }: { label: string; value: string; note?: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="hover:bg-muted/60 flex min-h-10 w-full cursor-pointer items-center gap-3 px-3 text-left transition-colors outline-none focus-visible:bg-muted/60">
+      <span className="text-foreground w-20 shrink-0 text-meta">{label}</span>
+      <span className="text-muted-foreground min-w-0 flex-1 truncate text-right text-meta">
+        {value}
+        {note && <span className="text-attention-text ml-1.5 text-micro">{note}</span>}
+      </span>
+      <ChevronRight className="text-faint size-3.5 shrink-0" aria-hidden />
+    </button>
+  );
+}
+
+/** The head of a drill-in panel: back to the list, the setting's name, one line on what it does. */
+function PanelHead({ title, hint, onBack }: { title: string; hint?: string; onBack: () => void }) {
+  return (
+    <div className="px-2 pb-1">
+      <div className="flex items-center gap-1">
+        <button type="button" onClick={onBack} aria-label="Back to run settings" className="text-muted-foreground hover:text-foreground hover:bg-muted/60 grid size-7 shrink-0 cursor-pointer place-items-center rounded-md transition-colors">
+          <ChevronLeft className="size-4" aria-hidden />
+        </button>
+        <span className="text-foreground text-meta font-medium">{title}</span>
+      </div>
+      {hint && <p className="text-faint px-1 pt-0.5 text-micro leading-snug">{hint}</p>}
+    </div>
+  );
+}
+
+/**
+ * Run settings: agent, attempts, verify and (for an admin) the box host. The menu opens on a short
+ * list that names every setting with its current value; a row opens that setting's own panel
+ * (back arrow to return), so the menu is never taller or wider than one panel. `section` opens
+ * straight into a panel (the chip under the text was clicked).
+ */
+export function MoreMenu({ agent, attempts, verify, host, section, ...shell }: Shell & Pick<RunSettingsProps, "agent" | "attempts" | "verify" | "host"> & { section?: MoreSection | null }) {
   const showAgent = !!(agent && agent.choices.length > 1 && agent.current);
   // The host row is an admin's (the Hub passes it only then) and only worth a choice between two.
   const showHost = !!host && host.list.length > 1;
+  const [view, setView] = React.useState<MoreSection | null>(null);
+  React.useEffect(() => {
+    setView(shell.open ? (section ?? null) : null);
+  }, [shell.open, section]);
   if (!showAgent && !attempts && !verify && !showHost) return null;
   const chosenHost = showHost && host!.value ? host!.list.find((h) => h.id === host!.value) : undefined;
-  const set = (agent?.current && agent.current.id !== agent.defaultId) || (attempts && attempts.value > 1) || !!verify?.value?.text.trim() || !!chosenHost;
+  const verifyText = verify?.value?.text.trim() ?? "";
+  const set = (agent?.current && agent.current.id !== agent.defaultId) || (attempts && attempts.value > 1) || !!verifyText || !!chosenHost;
   const what = [showAgent && "agent", attempts && "attempts", verify && "verify", showHost && "box host"].filter(Boolean).join(", ");
+  const back = () => setView(null);
   return (
-    <ToolMenu
-      {...shell}
-      title="More options"
-      width="w-[22rem]"
-      trigger={{ icon: <MoreHorizontal />, "aria-label": `More options: ${what}`, title: what.replace(/^./, (c) => c.toUpperCase()), menu: "more", dot: !!set }}
-    >
-      <div className="flex flex-col gap-1 px-3 py-1.5">
-        {showAgent && agent?.current && (
-          <Row label="Agent" hint={agent.current.supervised === false ? "Supervised: partial — a pending question cannot stop this agent." : undefined} hintTone={agent.current.supervised === false ? "attention" : undefined}>
-            <Segmented
-              ariaLabel="Coding agent"
-              value={agent.current.id}
-              onChange={(id) => agent.onPick(id === agent.defaultId ? null : (id as AgentId))}
-              options={agent.choices.map((c) => ({ value: c.id, label: c.label }))}
-            />
-          </Row>
-        )}
-        {attempts && (
-          <Row label="Attempts" hint={attempts.value > 1 ? `Runs the task ${attempts.value} ways in parallel; the best attempt gets the PR.` : undefined}>
-            <Segmented
-              ariaLabel="Attempts"
-              value={String(attempts.value)}
-              onChange={(v) => attempts.onChange(Number(v) as Attempts)}
-              options={[
-                { value: "1", label: "1" },
-                { value: "2", label: "2" },
-                { value: "3", label: "3" },
-              ]}
-            />
-          </Row>
-        )}
-        {verify && <VerifyRow value={verify.value} onChange={verify.onChange} />}
-        {showHost && (
-          <Row label="Box host" hint={chosenHost ? `${chosenHost.name}: ${hostStateLine(chosenHost)}. The run lands there or is refused; it is not moved elsewhere.` : undefined}>
-            <div className="-mx-3">
-              <HostList list={host!.list} value={host!.value} onChange={host!.onChange} />
-            </div>
-          </Row>
-        )}
-      </div>
+    <ToolMenu {...shell} title="Run settings" width="w-[22rem]" trigger={{ icon: <SlidersHorizontal />, "aria-label": `Run settings: ${what}`, title: `Run settings: ${what}`, menu: "more", dot: !!set }}>
+      {view === null && (
+        <div className="py-0.5">
+          {showAgent && agent?.current && <SettingRow label="Agent" value={agent.current.label} note={agent.current.supervised === false ? "partial" : undefined} onClick={() => setView("agent")} />}
+          {attempts && <SettingRow label="Attempts" value={attempts.value > 1 ? `${attempts.value} in parallel` : "1"} onClick={() => setView("attempts")} />}
+          {verify && <SettingRow label="Verify" value={verifyText ? `${verify.value!.mode === "command" ? "Command" : "Criterion"} · ${verifyText}` : "Off"} onClick={() => setView("verify")} />}
+          {showHost && <SettingRow label="Box host" value={chosenHost ? chosenHost.name : "Automatic"} onClick={() => setView("host")} />}
+        </div>
+      )}
+      {view === "agent" && showAgent && agent?.current && (
+        <div>
+          <PanelHead title="Agent" hint="The coding agent that runs this task." onBack={back} />
+          <OptionList
+            ariaLabel="Coding agent"
+            value={agent.current.id}
+            rows={agent.choices.map((c) => ({
+              id: c.id,
+              label: c.label,
+              note: c.id === agent.defaultId ? "default" : undefined,
+              description: c.supervised === false ? "Supervised: partial. A pending question cannot stop this agent." : undefined,
+            }))}
+            onChange={(id) => {
+              agent.onPick(id === agent.defaultId ? null : (id as AgentId));
+              back();
+            }}
+          />
+        </div>
+      )}
+      {view === "attempts" && attempts && (
+        <div>
+          <PanelHead title="Attempts" hint="Run the task more than once, in parallel; the best attempt gets the PR." onBack={back} />
+          <OptionList
+            ariaLabel="Attempts"
+            value={String(attempts.value)}
+            rows={[
+              { id: "1", label: "One run" },
+              { id: "2", label: "Two attempts", description: "Two sandboxes, compared when both finish" },
+              { id: "3", label: "Three attempts", description: "Three sandboxes, compared when all finish" },
+            ]}
+            onChange={(v) => {
+              attempts.onChange(Number(v) as Attempts);
+              back();
+            }}
+          />
+        </div>
+      )}
+      {view === "verify" && verify && (
+        <div>
+          <PanelHead title="Verify" hint="How the outcome is judged once the agent finishes." onBack={back} />
+          <VerifyFields value={verify.value} onChange={verify.onChange} />
+        </div>
+      )}
+      {view === "host" && showHost && (
+        <div>
+          <PanelHead title="Box host" hint="The run lands on the host you pick or is refused; it is not moved elsewhere." onBack={back} />
+          <HostList
+            list={host!.list}
+            value={host!.value}
+            onChange={(id) => {
+              host!.onChange(id);
+              back();
+            }}
+          />
+        </div>
+      )}
     </ToolMenu>
   );
 }

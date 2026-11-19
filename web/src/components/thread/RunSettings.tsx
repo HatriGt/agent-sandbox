@@ -40,64 +40,6 @@ export interface RunSettingsProps {
   host?: { list: HostView[]; value: string | null; onChange: (id: string | null) => void };
 }
 
-/** What a host is doing right now, for the picker's second line. */
-export function hostStateLine(h: HostView): string {
-  const slots = `${h.running + h.reserved} of ${h.maxBoxes} slots busy`;
-  if (!h.enabled) return "disabled";
-  if (h.unreachable) return "unreachable";
-  if (h.asleep) return `asleep · woken first · ${slots}`;
-  return slots;
-}
-
-/** One row per box host, "Automatic" on top; a full or unreachable host is listed but cannot be picked. */
-export function HostList({ list, value, onChange }: { list: HostView[]; value: string | null; onChange: (id: string | null) => void }) {
-  const ordered = React.useMemo(() => [...list].sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name)), [list]);
-  const rows: (HostView | null)[] = [null, ...ordered];
-  const active = rows.findIndex((h) => (h?.id ?? null) === value);
-  const rov = useRoving(rows.length, active);
-  const blocked = (h: HostView | null) => !!h && (!h.enabled || h.unreachable || h.running + h.reserved >= h.maxBoxes);
-  return (
-    <div role="radiogroup" aria-label="Box host">
-      {rows.map((h, i) => {
-        const on = (h?.id ?? null) === value;
-        const disabled = blocked(h);
-        return (
-          <button
-            key={h?.id ?? "auto"}
-            ref={(el) => {
-              rov.refs.current[i] = el;
-            }}
-            type="button"
-            role="radio"
-            aria-checked={on}
-            tabIndex={rov.tabIndex(i)}
-            disabled={disabled}
-            title={h ? `${h.provider} · ${h.ssh}` : "The picker's choice: order, then the emptiest awake host"}
-            onKeyDown={rov.onKeyDown(i, (j) => !blocked(rows[j]) && onChange(rows[j]?.id ?? null))}
-            onClick={() => onChange(h?.id ?? null)}
-            className={cn(
-              "hover:bg-muted/60 flex min-h-9 w-full cursor-pointer items-start gap-2.5 px-3 py-1.5 text-left transition-colors outline-none focus-visible:bg-muted/60",
-              "disabled:cursor-not-allowed disabled:opacity-50",
-              on && "bg-muted/40"
-            )}
-          >
-            <span className="mt-0.5 grid size-4 shrink-0 place-items-center">
-              {on ? <Check className="text-foreground size-3.5" strokeWidth={2.5} aria-hidden /> : <span className="border-line-strong size-3 rounded-full border" aria-hidden />}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="text-foreground block truncate text-meta">
-                {h ? h.name : "Automatic"}
-                {h?.primary && <span className="text-faint ml-1.5 text-micro">primary</span>}
-              </span>
-              <span className="text-faint block truncate text-micro">{h ? hostStateLine(h) : "Order, then the emptiest awake host"}</span>
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 // Amber is reserved for "action needed" everywhere on the console — Haiku's dot is grey, not amber.
 export const TIER_TINT: Record<ModelChoice["tier"], string> = {
   opus: "bg-live",
@@ -105,18 +47,6 @@ export const TIER_TINT: Record<ModelChoice["tier"], string> = {
   haiku: "bg-muted-foreground",
   other: "bg-line-strong",
 };
-
-export function Row({ label, hint, hintTone, children }: { label: string; hint?: string; hintTone?: "attention"; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="flex min-h-9 items-center gap-2">
-        <span className="text-muted-foreground w-16 shrink-0 text-meta">{label}</span>
-        <div className="min-w-0 flex-1">{children}</div>
-      </div>
-      {hint && <p className={cn("pb-1 pl-[4.5rem] text-micro leading-snug", hintTone === "attention" ? "text-attention-text" : "text-faint")}>{hint}</p>}
-    </div>
-  );
-}
 
 /** Roving-tabindex radio list: ↑/↓ move, Enter/Space pick. One row per option, no boxes. */
 export function useRoving(count: number, active: number) {
@@ -257,48 +187,124 @@ export function ModelList({ current, models, defaultId, onPick }: RunSettingsMod
   );
 }
 
-export function VerifyRow({ value, onChange }: { value: VerifySpec | null; onChange: (v: VerifySpec | null) => void }) {
-  const mode = value?.mode ?? "command";
-  const text = value?.text ?? "";
+/** A row of `OptionList`: one choice with what it means. */
+export interface OptionRow {
+  id: string;
+  label: React.ReactNode;
+  /** What picking it means, under the label. */
+  description?: React.ReactNode;
+  /** A small note after the label ("default", "primary", "needs review"). */
+  note?: string;
+  disabled?: boolean;
+  title?: string;
+}
+
+/**
+ * The radio list every drill-in panel uses: one row per option, a check on the chosen one, no
+ * boxes. ↑/↓ move, Enter/Space pick, a disabled row is listed but cannot be picked.
+ */
+export function OptionList({ ariaLabel, rows, value, onChange }: { ariaLabel: string; rows: OptionRow[]; value: string; onChange: (id: string) => void }) {
+  const active = rows.findIndex((r) => r.id === value);
+  const rov = useRoving(rows.length, active);
   return (
-    <div>
-      <div className="flex min-h-9 items-center gap-2">
-        <span className="text-muted-foreground w-16 shrink-0 text-meta">Verify</span>
-        <Segmented
-          ariaLabel="Verification mode"
-          value={mode}
-          onChange={(m) => onChange({ mode: m, text })}
-          options={[
-            { value: "command", label: "Command" },
-            { value: "criterion", label: "Criterion" },
-          ]}
-        />
-      </div>
-      <div className="pb-1 pl-[4.5rem]">
-        <input
-          value={text}
-          onChange={(e) => onChange(e.target.value || mode !== "command" ? { mode, text: e.target.value } : null)}
-          placeholder={mode === "command" ? "npm test" : "what must be true when it's done"}
-          aria-label={mode === "command" ? "Verification command" : "Verification criterion"}
-          className={cn(
-            "placeholder:text-faint text-foreground bg-muted/60 focus:bg-muted h-8 w-full rounded-md px-2 outline-none transition-colors",
-            mode === "command" ? "stamp" : "text-meta"
-          )}
-        />
-        <p className="text-faint mt-1 text-micro leading-snug">
-          {mode === "command" ? "Runs in the sandbox after the agent finishes — exit 0 means verified." : "A read-only checker judges this against the workspace; it cannot edit anything."}
-        </p>
-      </div>
+    <div role="radiogroup" aria-label={ariaLabel}>
+      {rows.map((r, i) => {
+        const on = r.id === value;
+        return (
+          <button
+            key={r.id}
+            ref={(el) => {
+              rov.refs.current[i] = el;
+            }}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            tabIndex={rov.tabIndex(i)}
+            disabled={r.disabled}
+            title={r.title}
+            onKeyDown={rov.onKeyDown(i, (j) => !rows[j].disabled && onChange(rows[j].id))}
+            onClick={() => onChange(r.id)}
+            className={cn(
+              "hover:bg-muted/60 flex min-h-9 w-full cursor-pointer items-start gap-2.5 px-3 py-1.5 text-left transition-colors outline-none focus-visible:bg-muted/60",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+              on && "bg-muted/40"
+            )}
+          >
+            <span className="mt-0.5 grid size-4 shrink-0 place-items-center">
+              {on ? <Check className="text-foreground size-3.5" strokeWidth={2.5} aria-hidden /> : <span className="border-line-strong size-3 rounded-full border" aria-hidden />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="text-foreground block truncate text-meta">
+                {r.label}
+                {r.note && <span className="text-faint ml-1.5 text-micro">{r.note}</span>}
+              </span>
+              {r.description && <span className="text-faint block text-micro leading-snug">{r.description}</span>}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-/* ───────────────────────────── chips ───────────────────────────── */
+/** What a host is doing right now, for the picker's second line. */
+export function hostStateLine(h: HostView): string {
+  const slots = `${h.running + h.reserved} of ${h.maxBoxes} slots busy`;
+  if (!h.enabled) return "disabled";
+  if (h.unreachable) return "unreachable";
+  if (h.asleep) return `asleep · woken first · ${slots}`;
+  return slots;
+}
 
-/**
- * What is off its default, as removable chips. Click the body to open that option's menu; × resets that
- * one option. Nothing renders when everything is default — the quiet state IS the default state.
- */
+/** Every box host, "Automatic" on top; a full or unreachable host is listed but cannot be picked. */
+export function HostList({ list, value, onChange }: { list: HostView[]; value: string | null; onChange: (id: string | null) => void }) {
+  const ordered = React.useMemo(() => [...list].sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name)), [list]);
+  const rows: OptionRow[] = [
+    { id: "", label: "Automatic", description: "Order, then the emptiest awake host", title: "The picker's choice" },
+    ...ordered.map((h) => ({
+      id: h.id,
+      label: h.name,
+      description: hostStateLine(h),
+      note: h.primary ? "primary" : undefined,
+      disabled: !h.enabled || h.unreachable || h.running + h.reserved >= h.maxBoxes,
+      title: `${h.provider} · ${h.ssh}`,
+    })),
+  ];
+  return <OptionList ariaLabel="Box host" rows={rows} value={value ?? ""} onChange={(id) => onChange(id || null)} />;
+}
+
+/** The verify panel: how the outcome is judged, and by what. */
+export function VerifyFields({ value, onChange }: { value: VerifySpec | null; onChange: (v: VerifySpec | null) => void }) {
+  const mode = value?.mode ?? "command";
+  const text = value?.text ?? "";
+  return (
+    <div className="flex flex-col gap-2 px-3 pt-1 pb-2">
+      <Segmented
+        ariaLabel="Verification mode"
+        value={mode}
+        onChange={(m) => onChange({ mode: m, text })}
+        options={[
+          { value: "command", label: "Command" },
+          { value: "criterion", label: "Criterion" },
+        ]}
+      />
+      <input
+        value={text}
+        onChange={(e) => onChange(e.target.value || mode !== "command" ? { mode, text: e.target.value } : null)}
+        placeholder={mode === "command" ? "npm test" : "what must be true when it's done"}
+        aria-label={mode === "command" ? "Verification command" : "Verification criterion"}
+        className={cn(
+          "placeholder:text-faint text-foreground bg-muted/60 focus:bg-muted h-8 w-full rounded-md px-2 outline-none transition-colors",
+          mode === "command" ? "stamp" : "text-meta"
+        )}
+      />
+      <p className="text-faint text-micro leading-snug">
+        {mode === "command" ? "Runs in the sandbox after the agent finishes; exit 0 means verified." : "A read-only checker judges this against the workspace; it cannot edit anything."}
+      </p>
+    </div>
+  );
+}
+
 export type ChipKey = "harness" | "model" | "agent" | "attempts" | "verify" | "host";
 
 export function RunOptionChips({ onOpen, harness, model, agent, attempts, verify, host, className }: RunSettingsProps & { onOpen: (key: ChipKey) => void; className?: string }) {
