@@ -9,6 +9,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { run, DEFAULT_TIMEOUT_MS } from "../src/exec.ts";
 
 test("run: kills and rejects a command that outlives its timeout", async () => {
@@ -31,4 +32,18 @@ test("run: timeoutMs 0 opts out, and the default is generous but finite", async 
   const r = await run("sh", ["-c", "printf ok"], { timeoutMs: 0 });
   assert.equal(r.stdout.trim(), "ok");
   assert.ok(DEFAULT_TIMEOUT_MS > 60_000 && Number.isFinite(DEFAULT_TIMEOUT_MS));
+});
+
+test("a timed-out ssh names its master socket; a plain command or ControlPath=none names none", async () => {
+  const { sshControlPathOf } = await import("../src/exec.ts");
+  assert.equal(sshControlPathOf("ssh", ["-o", "BatchMode=yes", "-o", "ControlPath=/root/.ssh/asb/82f88631.sock", "host", "true"]), "/root/.ssh/asb/82f88631.sock");
+  assert.equal(sshControlPathOf("rsync", ["-e", "ssh -o BatchMode=yes -o ControlPath=/root/.ssh/asb/82f88631d.sock", "a", "b"]), "/root/.ssh/asb/82f88631d.sock");
+  assert.equal(sshControlPathOf("ssh", ["-o", "ControlMaster=no", "-o", "ControlPath=none", "host", "true"]), null);
+  assert.equal(sshControlPathOf("msb", ["ls"]), null);
+});
+
+test("run: a timeout on an ssh argv closes that master (pinned at the source)", () => {
+  const src = fs.readFileSync(new URL("../src/exec.ts", import.meta.url), "utf8");
+  const hooks = src.match(/child\.kill\("SIGKILL"\);\s*resetSshMasterOnTimeout\(cmd, args\);/g) ?? [];
+  assert.equal(hooks.length, 2, "both run() and runStream() reset the master on timeout");
 });

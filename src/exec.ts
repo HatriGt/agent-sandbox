@@ -2,7 +2,8 @@
  * Minimal promisified command runner. Uses argv arrays (no shell) to avoid injection
  * from task text, repo paths, or box names.
  */
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { unlink } from "node:fs";
 import { redactShapes } from "./redact.js";
 
 export interface RunResult {
@@ -37,6 +38,39 @@ export interface RunOptions {
  * NOTHING waits forever — an unbounded wait turns one wedged sandbox into a dead control plane.
  */
 export const DEFAULT_TIMEOUT_MS = 300_000;
+
+/**
+ * The multiplexing socket an ssh (or rsync -e ssh) argv rides, or null when it rides none.
+ * Exported for the test; the hook below is the only caller.
+ */
+export function sshControlPathOf(cmd: string, args: string[]): string | null {
+  if (cmd !== "ssh" && cmd !== "rsync") return null;
+  for (const a of args) {
+    const m = /(?:^|\s)-o\s*ControlPath=(\S+)/.exec(a) ?? /^ControlPath=(\S+)$/.exec(a);
+    if (m && m[1] !== "none") return m[1];
+  }
+  return null;
+}
+
+/**
+ * A timed-out ssh takes its master down with it. A ControlMaster whose connection died underneath
+ * (Freestyle's proxy after a VM pause and resume) keeps answering the control socket, so every
+ * later command queues on the dead channel and times out in turn — seen live 2026-11-19: with one
+ * such master, a fresh master and a plain ssh to the same host answered in 8 s while the shared
+ * one hung until killed. Closing the socket here, at the one place every timeout passes, means the
+ * NEXT command builds a fresh master instead of inheriting the hang. `-O exit` is asked politely
+ * and the socket is unlinked regardless: a master that cannot even answer its control socket is
+ * orphaned (it exits on its own once no client holds it) and the unlink is what frees the path.
+ */
+export function resetSshMasterOnTimeout(cmd: string, args: string[]): void {
+  const sock = sshControlPathOf(cmd, args);
+  if (!sock) return;
+  console.warn(`[ssh] a command through ${sock} timed out; closing that master so the next command builds a fresh one`);
+  const c = execFile("ssh", ["-O", "exit", "-o", `ControlPath=${sock}`, "asb-master"], { timeout: 3_000 }, () => {
+    unlink(sock, () => {});
+  });
+  c.on("error", () => unlink(sock, () => {}));
+}
 
 /** POSIX single-quote a string so it survives one round of remote shell parsing (ssh). */
 export function shellQuote(s: string): string {
@@ -83,6 +117,7 @@ export async function run(
         ? setTimeout(() => {
             settled = true;
             child.kill("SIGKILL");
+            resetSshMasterOnTimeout(cmd, args);
             reject(new Error(redactShapes(`Command timed out after ${timeoutMs}ms: ${cmd} ${args.join(" ")}`)));
           }, timeoutMs)
         : null;
@@ -172,6 +207,7 @@ export async function runStream(cmd: string, args: string[], opts: StreamOptions
     const timer = timeoutMs > 0 ? setTimeout(() => {
       settled = true;
       child.kill("SIGKILL");
+      resetSshMasterOnTimeout(cmd, args);
       reject(new Error(redactShapes(`Command timed out after ${timeoutMs}ms: ${cmd} ${args.join(" ")}`)));
     }, timeoutMs) : null;
     child.on("error", (err) => {
