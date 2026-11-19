@@ -117,7 +117,14 @@ export function noteSshFailure(sock: string, why: SshFailure): void {
   }
 }
 /** The exit-255 case of `noteSshFailure`, from an argv. */
-export function noteSshExit(cmd: string, args: string[], code: number): void {
+export function noteSshExit(cmd: string, args: string[], code: number, stderr = ""): void {
+  // ssh found the control socket, nobody answered on it, and it could not become the master
+  // because the file is there: the master is gone and the file is stale. Without this every
+  // command through that path paid a cold connection until something unlinked it.
+  if (/ControlSocket \S+ already exists, disabling multiplexing/.test(stderr)) {
+    const stale = sshControlPathOf(cmd, args);
+    if (stale) unlink(stale, () => {});
+  }
   if (code !== 255) return;
   const sock = sshControlPathOf(cmd, args);
   if (sock) noteSshFailure(sock, "exit255");
@@ -306,7 +313,7 @@ export async function run(
     child.on("close", (code) => {
       if (!done()) return; // already rejected by the timeout
       const result: RunResult = { code: code ?? -1, stdout, stderr };
-      noteSshExit(cmd, args, result.code);
+      noteSshExit(cmd, args, result.code, stderr);
       noteSshDone(cmd, args, result.code);
       if (check && result.code !== 0) {
         // The argv is redacted, not omitted (it's what makes ssh failures debuggable) — but it can
@@ -412,7 +419,7 @@ export async function runStream(cmd: string, args: string[], opts: StreamOptions
       freeLane();
       if (settled) return;
       settled = true;
-      noteSshExit(cmd, args, code ?? -1);
+      noteSshExit(cmd, args, code ?? -1, stderr);
       noteSshDone(cmd, args, code ?? -1);
       void outDone.then(() => resolve({ code: code ?? -1, stderr, stdout, bytes }));
     });

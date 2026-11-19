@@ -204,6 +204,11 @@ async function buildStoredPackage(cfg: Config, spec: string, ver: string): Promi
           // The same trims the image bake makes: GPU and other-platform runtimes no box can use.
           `find /out \\( -name libonnxruntime_providers_cuda.so -o -name libonnxruntime_providers_tensorrt.so \\) -delete; ` +
           `for d in $(find /out -type d -path '*onnxruntime-node/bin/napi-v*'); do rm -rf "$d/darwin" "$d/win32" "$d/linux/arm64"; done; ` +
+          // The builder runs as root in a container on a Docker host (the Instabox shim), and the
+          // host user then could not rename or remove what it wrote ("Permission denied" on every
+          // build there, 2026-11-19): /out goes to the mount's owner. On a microVM the mount is
+          // already the host user's and this changes nothing.
+          `chown -R "$(stat -c %u:%g /out)" /out 2>/dev/null || true; ` +
           `test -f /out/lib/node_modules/${shellQuote(name)}/package.json && echo asb-stored`,
       ],
       false,

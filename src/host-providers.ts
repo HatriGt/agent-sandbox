@@ -517,8 +517,17 @@ export function makeInstaboxAdapter(fetcher: Fetcher = fetch as unknown as Fetch
     const r = await lifecycle(c.apiKey, `${machinePath(c.vmId)}/suspend`);
     // An operation already in flight (its own idle pause landing) is the same outcome.
     if (!r.ok && errorCode(r) !== "operation_conflict") return { state: "unknown", detail: fail("suspend", r), at: Date.now() };
-    const after = await read(spec);
-    return after.state === "running" ? { state: "paused", detail: "suspend accepted", at: Date.now() } : after;
+    // The suspend lands a few seconds after it is accepted and the machine reads "running" until
+    // then; a start issued inside that window is swallowed by the suspend in flight (seen live
+    // 2026-11-19: a reply one second after a pause read the machine "running" after its start,
+    // and every probe then found the gateway saying suspended). The pause is over when the
+    // machine reads so, within a few polls.
+    let after = await read(spec);
+    for (let i = 0; i < 15 && after.state === "running"; i++) {
+      await new Promise((r) => setTimeout(r, pollMs));
+      after = await read(spec);
+    }
+    return after.state === "running" ? { state: "paused", detail: "suspend accepted (the machine still reads running)", at: Date.now() } : after;
   };
 
   const start = async (spec: HostSpec): Promise<ProviderState> => {

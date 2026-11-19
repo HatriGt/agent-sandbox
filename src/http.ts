@@ -518,7 +518,15 @@ const withStoredTranscript = async (s: string, snap: WatchSnapshot): Promise<Wat
   };
 };
 const watchHub = new WatchHub({
-  read: async (s) => withMemoryNew(await withStoredTranscript(s, redactSnap(await gatherWatch(hcfg(s), s, undefined, { metrics: false }))), s),
+  // A box on a paused host is not asked (the SSH fails at the gateway, or starts a Freestyle
+  // resume nobody wanted): it reads asleep, with the stored transcript and the thread row's
+  // state, the way an Away thread does. Seen live 2026-11-19: with no snapshot to park, three
+  // failed reads answered the thread page "could not read" for as long as the host stayed paused.
+  read: async (s) => {
+    const dormant = hostPool.dormant(hostPool.hostOfBox(s) ?? PRIMARY_HOST_ID);
+    const snap: WatchSnapshot = dormant ? { name: s, boxStatus: "stopped", runState: "idle", log: "" } : redactSnap(await gatherWatch(hcfg(s), s, undefined, { metrics: false }));
+    return withMemoryNew(await withStoredTranscript(s, snap), s);
+  },
   // A thread open on a box whose host is asleep or paused is served its last snapshot: an SSH would
   // hang on the proxy, and on a Freestyle VM it would start a resume nobody asked for.
   skip: (s) => hostPool.dormant(hostPool.hostOfBox(s) ?? PRIMARY_HOST_ID),
@@ -4538,7 +4546,7 @@ app.post("/sleep.json", async (req: Request, res: Response) => {
     // Mid-turn, `msb stop` kills the agent and the thread ends on "the sandbox restarted mid-run"
     // (seen live 2026-11-19 on an Instabox box: exit 254, the turn's work lost). The same answer the
     // host pause gives; the thread header disables the item, the command palette did not know.
-    if (!force && (await watchHub.read(session)).runState === "running") {
+    if (!force && (turnStarted.has(session) || (await watchHub.read(session)).runState === "running")) {
       res.status(409).json({ error: "the agent is working on this machine; wait for the turn to end or stop the run first" });
       return;
     }

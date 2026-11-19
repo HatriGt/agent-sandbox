@@ -99,6 +99,17 @@ export async function closeSshMasters(target: string, settleMs = 1_000): Promise
   );
   const until = Date.now() + settleMs;
   while (Date.now() < until && socks.some((p) => fs.existsSync(p))) await new Promise((r) => setTimeout(r, 50));
+  // A master whose connection died (the machine was suspended under it) is not there to answer
+  // the exit, and its socket file stays; every later command then reads "ControlSocket … already
+  // exists, disabling multiplexing" and pays a cold connection (seen live 2026-11-19). The file goes.
+  for (const p of socks) {
+    if (!fs.existsSync(p)) continue;
+    try {
+      fs.unlinkSync(p);
+    } catch {
+      /* raced by its own exit */
+    }
+  }
 }
 
 /**

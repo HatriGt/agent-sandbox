@@ -143,6 +143,72 @@ Disk on the fresh machine before the images: 11 GB free of 16 on `/`, 16 GB free
 `/data`. A temporary SSH token minted to look at the machine during the post-mortem was revoked
 afterwards; only the controller's token remains on the account.
 
+## A day on the host, timed (2026-11-19, evening)
+
+Two scripts drive production the way the dashboard does and time every step; both leave
+nothing behind. `.shots/live/instabox-cycle.mjs --host=instabox-b [--nap] [--extra]` is the
+sleep cycle: a task pinned to the host, the thread's Sleep, a reply to the sleeping box, the
+host paused from the Fleet page, a reply on the paused host, box asleep plus host paused and
+then the thread opened (wake), one more reply, with `--nap` the controller's own idle nap, then
+teardown. Every turn appends to one journal file and every later turn must print the earlier
+lines back, which is the proof the work survived; `--extra` adds the two refusals below.
+`.shots/live/instabox-provider-shut.mjs` is the provider's side: a task, two turns of work (a
+small Python tool), Sleep, then the MACHINE suspended through the Instabox API behind the
+controller's back (what the free plan's idle pause does), the thread opened, the chat continued;
+the agent must recall a code word from its session without reading a file, and the tool must
+still run. The provider call runs inside the container (`.shots/live/ibx-api.cjs`, copied to
+`/app`; the key stays on the host).
+
+What the first pass measured on instabox-b (a cold container, no warm pool there):
+
+| step | seconds |
+|---|---|
+| task accepted, machine suspended before it (resume + container boot) | 46 |
+| task accepted, machine awake | 38–40 |
+| first turn done, from the call | 52–61 |
+| Sleep answered / fleet shows Stopped | 0.7–1.5 / 4–7 |
+| reply to a sleeping box answered / turn done | 6–8 / 15 |
+| host pause answered / host reads paused | 3 / 8–18 |
+| reply on a paused host answered | 13.5 |
+| box asleep and host paused, thread opened: wake answered / box up | 3–5 / 7–10 |
+| machine suspended at the provider (API) / controller notices | 5 / 10 |
+| wake after the provider suspend / chat continued, turn done | 6.6 / 14 |
+| idle nap, no call (MSB_IDLE_TIMEOUT 15m) | 924 |
+| teardown | 4–6 |
+
+What it found, each fixed the same evening:
+
+1. **The sweep synced the transcript of every box that read "running"**, including boxes
+   served from memory while their host was suspended: one refused SSH per sweep, a hundred
+   failed syncs into one thread on instabox-a in an afternoon. Only boxes a host answered for
+   this round, on a host that is not dormant, are synced.
+2. **Sleep mid-turn stopped the container under the agent**: exit 254, "the sandbox restarted
+   mid-run", the turn's work lost. The thread header disables the item, the command palette did
+   not. `POST /sleep.json` refuses it with 409 like the host pause (a turn the controller just
+   started counts, before any sweep reads it), answers a paused host without an SSH
+   (`hostAsleep: true`), and reports a stop that did not land (404 / 503) instead of "ok".
+3. **The Fleet page flashed "unreachable · Connection refused"** on every pause: the pause drops
+   the direct SSH forward under an in-flight sweep command. A sweep error on a dormant host is
+   ignored, and a paused reading clears the error text.
+4. **`GET /watch.json?lines=` went straight to the box** and would exec into one on a paused host.
+   A dormant host's box is served the hub's snapshot; with no snapshot, the hub's read itself
+   now answers asleep + the stored transcript instead of three failed SSHes and "could not read".
+5. **A reply one second after a pause was lost**: the suspend is accepted at once and the machine
+   reads "running" for a few seconds more, so the reply's start was swallowed by the suspend in
+   flight, the four probes found the gateway saying "machine … is suspended", the reply
+   answered 500 and the host stayed paused for eleven minutes. The adapter's pause now waits for
+   the machine to read suspended; a probe refused with "is suspended" starts the machine again
+   and keeps probing; a dead master's socket file is unlinked (every try through it read
+   "ControlSocket … already exists, disabling multiplexing" and paid a cold connection).
+6. **The package store never built anything on a Docker host**: the builder container runs as
+   root, so the host user could not rename or remove what it wrote ("Permission denied" on
+   every build, boxes installed their MCP packages themselves). The builder hands `/out` to the
+   mount's owner before it reports.
+
+Still open: a host stays awake 60 minutes after any reply or open (`HOST_ATTENTION_MS`), so an
+Instabox machine the free plan would pause after 30 idle minutes is kept up by the sweep for an
+hour; and `[alert] host-disk` on the VPS read 93 % during these runs.
+
 ## Not covered
 
 - The egress allowlist: a container sees whatever the machine can reach.

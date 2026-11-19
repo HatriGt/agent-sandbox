@@ -451,8 +451,13 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     const h = get(id);
     if (!h) throw new Error(`no host "${id}"`);
     setProvider(h, await providerFor(h.spec).state(h.spec));
-    // SSH failing to a paused VM was expected; it is dormant, not unreachable.
-    if (h.provider!.state === "paused" || h.provider!.state === "stopped") h.unreachableSince = undefined;
+    // SSH failing to a paused VM was expected; it is dormant, not unreachable, and the sweep's
+    // error text (the one the Fleet page would show) is not news either (seen live 2026-11-19: a
+    // machine suspended at the provider read asleep with "Session open refused by peer" kept on it).
+    if (h.provider!.state === "paused" || h.provider!.state === "stopped") {
+      h.unreachableSince = undefined;
+      h.lastError = undefined;
+    }
     return h.provider!;
   }
 
@@ -941,8 +946,10 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     // A resumed VM's first SSH or two can die at once on the proxy ("Connection closed"), so the
     // tries are spaced out, 2 s then 4 s then 8 s: back-to-back refusals would give up on a host
     // that answers a moment later, and a fixed 10 s between tries made every refusal cost 10 s.
-    const spacing = (i: number): number => opts.readyPollMs ?? 2_000 * 2 ** i;
-    for (let i = 0; i < 4; i++) {
+    const spacing = (i: number): number => opts.readyPollMs ?? Math.min(8_000, 2_000 * 2 ** i);
+    let tries = 4;
+    let restarted = false;
+    for (let i = 0; i < tries; i++) {
       try {
         await withTimeout(opts.probe(h.cfg), cap, `probe of ${id}`);
         h.lastError = undefined;
@@ -952,11 +959,23 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
         return;
       } catch (e) {
         lastErr = (e as Error).message;
-        log(`[hosts] ${id} not answering yet (${i + 1}/4): ${lastErr.slice(0, 120)}`);
+        log(`[hosts] ${id} not answering yet (${i + 1}/${tries}): ${lastErr.slice(0, 120)}`);
         // A probe that timed out may have ridden a master whose connection is dead at the proxy;
         // the next try gets a fresh one instead of the same dead channel.
         if (/timed out/.test(lastErr)) await closeSshMasters(h.cfg.vpsSsh).catch(() => {});
-        if (i < 3) await new Promise((r) => setTimeout(r, spacing(i)));
+        // The gateway says the machine is suspended although the provider read "running": a
+        // pause that landed after the start, or the provider's own idle timer. Start it once
+        // more and keep probing, with the dead master's socket gone first (every try through it
+        // read "ControlSocket … already exists, disabling multiplexing"; seen live 2026-11-19).
+        if (!restarted && /is suspended|administratively prohibited/i.test(lastErr) && p.canDrive(h.spec)) {
+          restarted = true;
+          await closeSshMasters(h.cfg.vpsSsh).catch(() => {});
+          const r = await p.start(h.spec).catch((e): ProviderState => ({ state: "unknown", detail: String((e as Error).message ?? e), at: now() }));
+          log(`[hosts] start ${id} again (the gateway says it is suspended): ${r.state}${r.detail ? ` (${r.detail})` : ""}`);
+          if (r.state !== "unknown") setProvider(h, r);
+          tries = Math.max(tries, i + 5);
+        }
+        if (i < tries - 1) await new Promise((r) => setTimeout(r, spacing(i)));
       }
     }
     h.lastError = lastErr.slice(0, 300);
