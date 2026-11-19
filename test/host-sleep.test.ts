@@ -81,3 +81,32 @@ test("wokeAt: the moment the host last came back from sleep, 0 until it ever sle
   s.wake("message");
   assert.equal(s.wokeAt(), t);
 });
+
+test("makeHostSleep: a hold keeps the host up past the quiet delay, then the clock restarts from the hold's end", () => {
+  let t = 1_000_000;
+  const said: string[] = [];
+  const s = makeHostSleep(5 * 60_000, { now: () => t, log: (m) => said.push(m) });
+  s.hold(60 * 60_000, "open thread-a");
+  assert.match(said.at(-1)!, /held awake 60m: open thread-a/);
+  assert.equal(s.state().heldUntil, t + 60 * 60_000);
+  // Sweeps that read nothing working (or time out) for the whole hour: still awake.
+  for (let i = 0; i < 12; i++) {
+    t += 5 * 60_000;
+    s.noteFleet([box("done")]);
+    assert.equal(s.asleep(), false, `minute ${(i + 1) * 5}`);
+  }
+  // The hold has ended; the quiet delay counts from there, not from before the hold.
+  t += 4 * 60_000;
+  s.noteFleet([box("done")]);
+  assert.equal(s.asleep(), false);
+  t += 60_000;
+  s.noteFleet([box("done")]);
+  assert.equal(s.asleep(), true);
+  assert.equal(s.state().heldUntil, 0);
+  // A shorter hold never shortens a longer one already in force.
+  s.hold(60 * 60_000);
+  const until = s.state().heldUntil;
+  s.hold(60_000);
+  assert.equal(s.state().heldUntil, until);
+  assert.equal(s.asleep(), false, "a hold wakes");
+});

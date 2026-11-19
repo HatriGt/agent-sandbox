@@ -27,7 +27,17 @@ export interface HostSleepState {
   /** The last moment work was seen or asked for (ms). */
   lastWorkAt: number;
   afterMs: number;
+  /** The host is held awake until this moment (ms) because someone is using it; 0 when not held. */
+  heldUntil: number;
 }
+
+/**
+ * How long a host stays up after the operator touched one of its threads (opened it, woke its box,
+ * sent a reply). Seen live 2026-11-19: a kept thread was opened, its host woken, and six minutes
+ * later the clock paused the host again while the thread was being read, so the reply paid a
+ * second resume through the proxy (165 s). Attention is activity.
+ */
+export const ATTENTION_HOLD_MS = Math.max(0, Number(process.env.HOST_ATTENTION_MS ?? "") || 60 * 60_000);
 
 export interface SleepyBox {
   boxStatus: string;
@@ -46,6 +56,8 @@ export interface HostSleep {
   wake(reason?: string): void;
   /** What a real sweep saw. Working boxes keep the host up; a quiet fleet for `afterMs` sleeps. */
   noteFleet(boxes: readonly SleepyBox[]): void;
+  /** Someone is using a thread on this host: no sleep before now + ms, whatever the sweeps see. Wakes too. */
+  hold(ms: number, reason?: string): void;
   asleep(): boolean;
   state(): HostSleepState;
   /**
@@ -64,19 +76,29 @@ export function makeHostSleep(afterMs: number, opts: { now?: () => number; log?:
   let asleep = false;
   let since = 0;
   let wokeAt = 0;
+  let heldUntil = 0;
+  const wake = (reason?: string): void => {
+    lastWorkAt = now();
+    if (!asleep) return;
+    asleep = false;
+    since = 0;
+    wokeAt = now();
+    log(`[host-sleep] awake${reason ? `: ${reason}` : ""}`);
+  };
   return {
     enabled,
-    wake(reason) {
-      lastWorkAt = now();
-      if (!asleep) return;
-      asleep = false;
-      since = 0;
-      wokeAt = now();
-      log(`[host-sleep] awake${reason ? `: ${reason}` : ""}`);
+    wake,
+    hold(ms, reason) {
+      const until = now() + Math.max(0, ms);
+      const longer = until > heldUntil;
+      if (longer) heldUntil = until;
+      wake(reason);
+      if (longer && enabled) log(`[host-sleep] held awake ${Math.round(ms / 60_000)}m${reason ? `: ${reason}` : ""}`);
     },
     noteFleet(boxes) {
       if (!enabled) return;
-      if (boxes.some(isWorkingBox)) {
+      // Held (someone is using a thread here) counts as work: the quiet clock restarts when it ends.
+      if (boxes.some(isWorkingBox) || now() <= heldUntil) {
         lastWorkAt = now();
         return;
       }
@@ -86,7 +108,7 @@ export function makeHostSleep(afterMs: number, opts: { now?: () => number; log?:
       log(`[host-sleep] quiet for ${Math.round(afterMs / 60_000)}m: letting the host sleep`);
     },
     asleep: () => asleep,
-    state: () => ({ enabled, asleep, since, lastWorkAt, afterMs }),
+    state: () => ({ enabled, asleep, since, lastWorkAt, afterMs, heldUntil: now() <= heldUntil ? heldUntil : 0 }),
     wokeAt: () => wokeAt,
   };
 }

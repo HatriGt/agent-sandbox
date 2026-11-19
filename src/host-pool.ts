@@ -471,6 +471,10 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       return h.sleep.enabled;
     },
     wake: (reason) => wake(h.spec.id, reason),
+    hold: (ms, reason) => {
+      h.sleep.hold(ms, reason);
+      wake(h.spec.id, reason);
+    },
     noteFleet: (boxes) => h.sleep.noteFleet(boxes),
     asleep: () => dormant(h),
     state: () => ({ ...h.sleep.state(), asleep: dormant(h) }),
@@ -726,7 +730,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
             reserved: h.reserved,
             asleep: dormant(h),
             sleepSince: h.sleep.state().since || h.dormantSince || 0,
-            ...(h.sleep.enabled && h.spec.enabled && !dormant(h) && !h.lastBoxes.some(isWorkingBox) ? { sleepsAt: h.sleep.state().lastWorkAt + h.spec.sleepAfterMs } : {}),
+            ...(h.sleep.enabled && h.spec.enabled && !dormant(h) && !h.lastBoxes.some(isWorkingBox) ? { sleepsAt: Math.max(h.sleep.state().lastWorkAt, h.sleep.state().heldUntil) + h.spec.sleepAfterMs } : {}),
             draining: draining(h),
             unreachable: !!h.unreachableSince && !dormant(h),
             lastError: h.lastError,

@@ -50,6 +50,7 @@ import { KeptBoxError } from "./msb.js";
 import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread, noteAbsentThreads } from "./threads.js";
 import { closeSshMasters } from "./ssh.js";
 import { PRIMARY_HOST_ID, boxHostOf, slugify as hostSlug } from "./hosts.js";
+import { ATTENTION_HOLD_MS } from "./host-sleep.js";
 import { listProviders, providerFor } from "./host-providers.js";
 import { sweepHosts } from "./host-sweep.js";
 import { countBoxes as countBoxesOnHost } from "./msb.js";
@@ -184,6 +185,15 @@ const hostPool = configureHostPool(
 // placed by its thread row: the thread remembers the host it ran on. Without this, every command
 // for such a box went to the primary host, and a Destroy answered "ok" with nothing removed (seen
 // live 2026-11-19 on two boxes of a paused Freestyle host).
+/**
+ * The operator is using this box's thread (opened it, woke it, replied): its host is held awake for
+ * ATTENTION_HOLD_MS, whatever the sweeps read meanwhile. A sweep that times out right after a
+ * resume reads "nothing working", and the clock used to pause the host under the reader.
+ */
+const attend = (box: string, reason: string): void => {
+  if (!ATTENTION_HOLD_MS) return;
+  hostPool.get(hcfg(box).hostId ?? PRIMARY_HOST_ID)?.sleep.hold(ATTENTION_HOLD_MS, reason);
+};
 const hcfg = (box: string): Config => {
   if (!hostPool.hostOfBox(box)) {
     const th = getThread(db, box)?.host;
@@ -2252,6 +2262,7 @@ app.get("/watch.json", async (req: Request, res: Response) => {
 app.get("/watch.sse", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = boxParam(req.query);
+  if (session) attend(session, `open ${session}`);
   if (!session) {
     res.status(400).json({ error: "session query param required" });
     return;
@@ -2431,6 +2442,7 @@ app.post("/resume.json", async (req: Request, res: Response) => {
     res.status(400).json({ error: "session and message are required" });
     return;
   }
+  attend(session, `reply ${session}`);
   // One-shot secrets (the Resolve row): -e flags on this turn only, same rules as the MCP resume
   // tool (src/secret-env.ts refuses reserved names when the flags are built). Never stored here.
   const oneShot: Record<string, string> = {};
@@ -4354,6 +4366,7 @@ app.post("/wake.json", async (req: Request, res: Response) => {
     // Waking a stopped machine is starting a machine: the trial gate applies here exactly as it
     // does to delegation and resume.
     ownership.assertCanRun();
+    attend(session, `wake ${session}`);
     const outcome = await startBoxIfStopped(await hostPool.readyForBox(session, `wake ${session}`), session);
     // Report honestly. Answering `ok` for a box the runtime never started is indistinguishable
     // from a real wake, so the client sits on a progress card forever waiting for a boot that was
@@ -6117,6 +6130,7 @@ app.post("/hosts/prewake.json", (req: Request, res: Response) => {
     res.json({ ok: true, starting: false, ...(h ? { host: h.spec.id } : {}) });
     return;
   }
+  if (box) attend(box, `prewake ${box}`);
   void hostPool.ready(h.spec.id, `prewake ${box ?? "new task"}`).catch((e) => console.error(`[hosts] prewake ${h.spec.id}: ${(e as Error).message}`));
   res.status(202).json({ ok: true, starting: true, host: h.spec.id });
 });
