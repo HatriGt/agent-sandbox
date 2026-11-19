@@ -79,6 +79,12 @@ exec on a stopped box (boots, runs, stops), snapshot create / boot from / rm, mo
 restart, `save` on hostbrr piped into `load` here (1.87 GB in 2m48s), rm of a missing box
 failing the way msb does.
 
+Through the deployed controller (7c9c510), `.shots/live-instabox-run.mjs`: the row added with the
+machine id and key alone, token minted, check 2.5 s, prepare in 4m27s (shim reinstalled, claude
+image present, omp image streamed), then one delegated run: the machine resumed from the
+provider's own pause, the box ran as a container (hostname a container id, 4 CPUs, no
+/dev/kvm), the run finished and was torn down, 56 s end to end.
+
 ## Not covered
 
 - The egress allowlist: a container sees whatever the machine can reach.
