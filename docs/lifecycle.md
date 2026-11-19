@@ -49,10 +49,10 @@ Think about the machine from the operator's side. After a task is delegated ther
    expired sleepers go the first time it is up for something else. A thread whose box was destroyed
    is Away (its copy brings it back): the thread row records `absent` the first time an awake host
    lists without it, and that word holds while the host sleeps (before, every such thread came back
-   as "asleep" each time its host paused). **The Fleet page lists only machines worth coming back
-   to** (2026-11-19): running, just finished and still up, or kept. A temporary box that fell asleep
-   and an Away thread are not listed (a quiet "N temporary boxes asleep · removed within the hour"
-   says they exist); the thread stays in Threads and History. Only Keep holds a place on the page. **Implemented** — and it fixed a real bug: the maintainer used to
+   as "asleep" each time its host paused). The Fleet page lists a temporary sleeper as
+   "temporary · wakes on reply · destroyed in 37m" (it can be revived until then; a kept one reads
+   "kept · wakes on reply"), and does not list an unkept Away thread at all: that lives in Threads
+   and History (decided 2026-11-19). **Implemented** — and it fixed a real bug: the maintainer used to
    treat *any* stopped `pool-*` box as dead and force-remove it, which destroyed sleeping claimed runs
    (the "a reply wakes it" promise was broken). Claims are now recorded on the host
    (`~/.agent-sandbox/claims/<box>`, see `src/claims.ts`), so a stopped box's status as a run is
@@ -136,8 +136,7 @@ A box the user kept (pinned) cannot be lost by anything the system does on its o
   markers that could not be read refuse too (nobody can prove the box is unkept). Only a
   teardown that says `force` proceeds; the API answers 409 `kept` otherwise.
 - **Only the thread's own Destroy sends `force`**, and its dialog names the keep ("You kept this
-  machine…"). The Fleet page has no bulk "destroy sleeping" any more: temporary sleepers are not
-  listed there and go on their own within the hour.
+  machine…"). The bulk "destroy sleeping" never sends it, so it can never take a kept one.
 - **The copy off the box is kept too.** Keeping a thread stamps its row and its rescue copy as
   kept and takes the copy now if none exists (between turns; mid-turn the turn end does it). A
   kept copy is never swept by age and may be up to `RESCUE_KEPT_MAX_MB` (4096) instead of 512.

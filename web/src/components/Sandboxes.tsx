@@ -37,19 +37,11 @@ const groupOf = (v: StableBox): Exclude<Filter, "all"> => {
   if (v.runState === "waiting") return "attention";
   const s = displayState(v);
   if (s === "running") return "working";
-  // A kept thread whose machine is gone (Away) is not a machine asleep: it costs nothing and there
-  // is nothing to destroy, so it files under Done with the finished runs.
+  // Away (the machine is gone, the thread is kept) is not a machine asleep: it costs nothing and
+  // there is nothing to destroy, so it files under Done with the finished runs.
   if (s === "sleeping") return v.absent ? "done" : "sleeping";
   return "done";
 };
-
-/**
- * A temporary box that fell asleep: not kept, so it is on its way out (destroyed within the hour,
- * src/claims.ts) or already gone (Away). Not listed here: only Keep holds a place on the Fleet
- * page; the thread stays in Threads and History (asked for 2026-11-19: "I don't need the box in
- * the fleet list if the user didn't set it as keep").
- */
-const temporaryAsleep = (b: StableBox): boolean => displayState(b) === "sleeping" && !b.kept;
 
 const GROUP_LABEL: Record<Exclude<Filter, "all">, string> = {
   attention: "Action needed",
@@ -78,10 +70,10 @@ export function Sandboxes({
   const go = useGo();
   // This page lists runs. A machine kept ready for the next task is not one: nobody started it
   // and there is nothing to open, answer or destroy. It is handed to a task when one starts.
-  const machines = React.useMemo(() => everyBox.filter((b) => b.role !== "pool-free"), [everyBox]);
-  // And only the machines worth coming back to: running, just finished and still up, or kept.
-  const boxes = React.useMemo(() => machines.filter((b) => !temporaryAsleep(b)), [machines]);
-  const hiddenAsleep = machines.filter((b) => temporaryAsleep(b) && !b.absent && !b.leaving).length;
+  // Nor is a thread whose machine is already gone and that nobody kept (Away): it lives in
+  // Threads and History. A temporary box asleep IS listed, as "temporary · destroyed in 37m": it
+  // can be revived until then (asked for 2026-11-19).
+  const boxes = React.useMemo(() => everyBox.filter((b) => b.role !== "pool-free" && !(b.absent && !b.kept)), [everyBox]);
 
   const sorted = [...boxes].sort(threadSort);
   const counts = React.useMemo(() => {
@@ -104,6 +96,7 @@ export function Sandboxes({
 
   const waiting = boxes.filter((b) => b.runState === "waiting" && !b.leaving);
 
+  const sleepable = boxes.filter((b) => displayState(b) === "sleeping" && !b.absent && !b.kept && !b.leaving);
   // More than one box host in play: say which machine runs where.
   const multiHost = React.useMemo(() => new Set(boxes.map((b) => b.host).filter(Boolean)).size > 1, [boxes]);
   return (
@@ -116,7 +109,7 @@ export function Sandboxes({
           </Button>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Fleet</h1>
-            <Swap state={loading ? "loading" : "capacity"}>{loading ? <Bar className="h-3 w-56" /> : <Capacity boxes={machines} capacity={lifecycle.capacity} />}</Swap>
+            <Swap state={loading ? "loading" : "capacity"}>{loading ? <Bar className="h-3 w-56" /> : <Capacity boxes={boxes} capacity={lifecycle.capacity} />}</Swap>
           </div>
           <p className="text-muted-foreground mt-1 text-meta">
             Runs up to {lifecycle.maxDurationSec ? fmtDuration(lifecycle.maxDurationSec) : "the cap"} · sleeps after{" "}
@@ -193,9 +186,9 @@ export function Sandboxes({
                 )}
               </label>
               <AnimatePresence initial={false}>
-                {hiddenAsleep > 0 && (
-                  <motion.span key="asleep-note" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }} className="stamp text-faint whitespace-nowrap">
-                    {hiddenAsleep} temporary {hiddenAsleep === 1 ? "box" : "boxes"} asleep · removed within the hour
+                {sleepable.length > 0 && (
+                  <motion.span key="destroy-sleeping" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }} className="inline-flex">
+                    <DestroySleeping boxes={sleepable} onDestroyed={onDestroyed} />
                   </motion.span>
                 )}
               </AnimatePresence>
@@ -360,7 +353,7 @@ function MachineCell({ box, lifecycle, multiHost }: { box: StableBox; lifecycle:
       </span>
       {/* Words in the sans face; only the duration is data. */}
       <span className="font-sans text-micro">
-        {box.leaving ? "shutting down" : box.absent ? "away · machine gone, thread kept" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)}` : "asleep · wakes on reply") : box.role === "session" ? "" : roleLabel(box.role)}
+        {box.leaving ? "shutting down" : box.absent ? "away · machine gone, thread kept" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `temporary · wakes on reply · destroyed in ${deadline.remainingSec <= 0 ? "a moment" : fmtDuration(deadline.remainingSec)}` : "temporary · wakes on reply") : box.role === "session" ? "" : roleLabel(box.role)}
       </span>
       {(box.uptime || box.cpu) && (
         <span className="truncate" title={[box.uptime && `${state === "sleeping" ? "ran" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`].filter(Boolean).join(" · ")}>
@@ -383,7 +376,7 @@ function MachineCell({ box, lifecycle, multiHost }: { box: StableBox; lifecycle:
 function TimeLeft({ box, lifecycle }: { box: StableBox; lifecycle: FleetLifecycle }) {
   const deadline = deadlineOf(box, lifecycle);
   if (deadline.remainingSec == null) {
-    return <span className="stamp text-faint whitespace-nowrap">{box.kept ? "kept" : displayState(box) === "sleeping" ? "asleep" : "—"}</span>;
+    return <span className="stamp text-faint whitespace-nowrap">{box.kept ? "kept" : displayState(box) === "sleeping" ? "temporary" : "—"}</span>;
   }
   return (
     <Tooltip>
@@ -445,5 +438,34 @@ function RowActions({ box, onDestroyed }: { box: StableBox; onDestroyed: (name: 
         />
       )}
     </div>
+  );
+}
+
+/** Bulk clean-up: destroy every sleeping, non-kept sandbox (two clicks). */
+function DestroySleeping({ boxes, onDestroyed }: { boxes: StableBox[]; onDestroyed: (name: string) => void }) {
+  const run = async () => {
+    let ok = 0;
+    for (const b of boxes) {
+      try {
+        await api.teardown(b.name);
+        onDestroyed(b.name);
+        ok++;
+      } catch (e) {
+        toast.error(`Could not destroy ${friendlyName(b.name)}`, { description: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    if (ok) toast.success(`Destroyed ${ok} sleeping ${ok === 1 ? "sandbox" : "sandboxes"}`);
+  };
+  return (
+    <ArmButton
+      size="sm"
+      variant="ghost"
+      icon={<Trash2 />}
+      label={`Destroy ${boxes.length} sleeping`}
+      armedLabel={`Confirm: destroy ${boxes.length} sleeping`}
+      autoDisarmMs={5000}
+      onConfirm={run}
+      className="text-muted-foreground"
+    />
   );
 }
