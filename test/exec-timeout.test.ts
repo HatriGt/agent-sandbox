@@ -85,3 +85,58 @@ test("a timed-out command leaves a master that completed another command within 
     forgetSshDoneForTest();
   }
 });
+
+test("ssh lanes: a proxied host's commands start one at a time, both routes share the lane, it is given back once, and a host without one runs in parallel", async () => {
+  const { setSshLane, sshLaneOf, sshLaneTagOf, sshLaneTimeoutMs, takeSshLane, SSH_LANE_MIN_TIMEOUT_MS } = await import("../src/exec.ts");
+  assert.equal(sshLaneTagOf("/root/.ssh/asb/82f88631d.sock"), "82f88631");
+  assert.equal(sshLaneTagOf("/root/.ssh/asb/82f88631.sock"), "82f88631");
+  assert.equal(sshLaneTagOf("/tmp/other.sock"), null);
+  const argv = (s: string) => ["-o", `ControlPath=${s}`, "host", "true"];
+  assert.equal(sshLaneOf("ssh", argv("/root/.ssh/asb/82f88631.sock")), null, "no lane registered: parallel, as a static host");
+  setSshLane("82f88631", 1);
+  const lane = sshLaneOf("ssh", argv("/root/.ssh/asb/82f88631d.sock"));
+  assert.ok(lane, "the direct route is laned");
+  assert.equal(sshLaneOf("ssh", argv("/root/.ssh/asb/82f88631.sock")), lane, "the proxy route shares it");
+  assert.equal(sshLaneOf("rsync", ["-e", "ssh -o ControlPath=/root/.ssh/asb/82f88631.sock", "a", "b"]), lane, "rsync's ssh too");
+  assert.equal(sshLaneOf("msb", ["ls"]), null);
+  assert.equal(sshLaneOf("ssh", ["-o", "ControlPath=none", "host", "true"]), null, "a gated command has no socket and no lane");
+  try {
+    const first = await takeSshLane(lane);
+    let secondStarted = false;
+    const second = takeSshLane(lane).then((g) => ((secondStarted = true), g));
+    await new Promise((r) => setImmediate(r));
+    assert.equal(secondStarted, false, "the second waits for the first to open its channel");
+    first();
+    first();
+    const g2 = await second;
+    assert.equal(secondStarted, true);
+    assert.equal(lane.busy, 1, "a double give-back counts once");
+    g2();
+    assert.equal(lane.busy, 0);
+    assert.equal(sshLaneTimeoutMs(lane, 15_000), SSH_LANE_MIN_TIMEOUT_MS, "a short timeout is raised: a cold master through the proxy is 5-15 s");
+    assert.equal(sshLaneTimeoutMs(lane, 300_000), 300_000);
+    assert.equal(sshLaneTimeoutMs(lane, 0), 0, "forever stays forever");
+    assert.equal(sshLaneTimeoutMs(null, 15_000), 15_000);
+  } finally {
+    setSshLane("82f88631", undefined);
+  }
+  assert.equal(sshLaneOf("ssh", argv("/root/.ssh/asb/82f88631.sock")), null);
+  const src = fs.readFileSync(new URL("../src/exec.ts", import.meta.url), "utf8");
+  assert.equal((src.match(/const lane = sshLaneOf\(cmd, args\);/g) ?? []).length, 2, "run and runStream both take the lane");
+  assert.ok((src.match(/freeLane\(\);/g) ?? []).length >= 9, "the lane is given back on first output, on close, on error and on timeout, in both");
+});
+
+test("ssh lanes: the second command starts only when the first lets go", async () => {
+  const { setSshLane, takeSshLane, sshLaneOf } = await import("../src/exec.ts");
+  setSshLane("0badf00d", 1);
+  const lane = sshLaneOf("ssh", ["-o", "ControlPath=/root/.ssh/asb/0badf00d.sock", "h", "true"])!;
+  try {
+    const give = await takeSshLane(lane);
+    const t0 = Date.now();
+    const waited = takeSshLane(lane).then((g) => (g(), Date.now() - t0));
+    setTimeout(give, 120);
+    assert.ok((await waited) >= 100, "the second started only when the first let go");
+  } finally {
+    setSshLane("0badf00d", undefined);
+  }
+});

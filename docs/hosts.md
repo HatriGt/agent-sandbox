@@ -124,6 +124,23 @@ connection), kills the forward, closes the master sockets, waits 1.5 s for the p
 then asks the provider; the gate opens on the next start. The pause button therefore answers in
 about four seconds rather than two.
 
+### One channel at a time (2026-11-19)
+
+The proxy's relay stalls when two SSH channels are opened at the same moment. Measured from the
+controller on both accounts: one command alone is 0.45 s through the direct route and about 3 s
+through a proxy channel; a long command beside it (an agent run, a transfer) changes nothing; but
+two commands started together take a minute, four take 34 s, and four through the proxy's own
+channels take 13 s. A sweep started six at once with 15 s timeouts, so all six timed out, the host
+went "unreachable", host-sleep paused it, and a kept thread's reply failed on a VM that answered
+one command in half a second.
+
+So every host whose provider has an SSH proxy gets a lane of width one (src/exec.ts): a command
+waits its turn to start, and gives the lane back as soon as its channel is clearly open (its first
+byte of output, its end, or 15 s for a quiet one), so a running agent never blocks the sweep
+behind it. The wait does not count against the command's timeout, and a laned command's timeout
+is at least 45 s (a cold master through the proxy is 5-15 s by itself). A static host has no
+lane. The direct route is still worth having: 0.45 s a command against 3 s.
+
 Awake time is ticked every minute into `host_usage`; a host with an allowance shows "188 of 400
 vCPU-h left" and a bar on the Fleet page, is skipped once spent, and starts over on `resetDay`.
 

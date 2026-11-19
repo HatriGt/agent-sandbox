@@ -25,8 +25,9 @@ import type { BoxView } from "./monitor.js";
 import { isWorkingBox, makeHostSleep, registerSleepResolver, type HostSleep } from "./host-sleep.js";
 import { pickHost, totalCapacity, type HostCandidate, type PickResult } from "./host-pick.js";
 import { providerFor, type ProviderState } from "./host-providers.js";
+import { setSshLane } from "./exec.js";
 import { dropTunnel, ensureTunnel } from "./ssh-tunnel.js";
-import { closeSshMasters, gateSsh } from "./ssh.js";
+import { closeSshMasters, gateSsh, sshTargetTag } from "./ssh.js";
 import {
   PRIMARY_HOST_ID,
   addAwakeMs,
@@ -322,6 +323,9 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
 
   const build = (spec: HostSpec, prev?: HostRuntime): HostRuntime => {
     const cfg = configForHost(base, spec);
+    // A host behind its provider's SSH proxy opens one channel at a time (src/exec.ts: the relay
+    // stalls on openings that interleave); a static host runs its commands in parallel as before.
+    setSshLane(sshTargetTag(spec.ssh), providerFor(spec).proxyHost ? 1 : undefined);
     // A target that changed: the old tunnel points at a machine this host no longer is.
     if (prev && prev.cfg.vpsSsh !== cfg.vpsSsh) tunnel?.drop(prev.cfg);
     const month = monthOf(spec);

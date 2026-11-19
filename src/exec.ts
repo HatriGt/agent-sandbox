@@ -122,6 +122,82 @@ export function noteSshExit(cmd: string, args: string[], code: number): void {
   if (sock) noteSshFailure(sock, "exit255");
 }
 
+/**
+ * One ssh channel opened at a time per host behind a provider's SSH proxy.
+ *
+ * Measured from the controller on 2026-11-19 against Freestyle's proxy (both accounts): one
+ * command alone takes 0.45 s through the direct route and about 3 s through a proxy channel; a
+ * long channel beside them (idle or streaming) changes nothing; but two commands STARTED together
+ * take 60 s, four take 34 s, and four through the proxy's own channels take 13 s. The relay stalls
+ * on channel openings that interleave. A sweep started six commands at once with 15 s timeouts, so
+ * all of them timed out, the host was marked unreachable, host-sleep paused it, and a kept thread's
+ * reply failed on a machine that answers one command in half a second.
+ *
+ * So a proxied host gets a lane of width one: a command waits its turn to start, and gives the
+ * lane back as soon as its channel is clearly open (its first byte of output, its end, or
+ * SSH_LANE_HOLD_MS for a quiet one), so a running agent never blocks the sweep behind it. The wait
+ * is not counted against the command's timeout, and a laned command gets at least
+ * SSH_LANE_MIN_TIMEOUT_MS: a cold master through the proxy is 5-15 s by itself. The host pool
+ * registers the lane per target tag (src/host-pool.ts); a static host has none and runs in parallel.
+ */
+export interface SshLane {
+  width: number;
+  busy: number;
+  waiting: Array<() => void>;
+}
+const sshLanes = new Map<string, SshLane>();
+export const SSH_LANE_HOLD_MS = 15_000;
+export const SSH_LANE_MIN_TIMEOUT_MS = 45_000;
+
+export function setSshLane(tag: string, width: number | undefined): void {
+  if (!width) {
+    sshLanes.delete(tag);
+    return;
+  }
+  const lane = sshLanes.get(tag);
+  if (lane) lane.width = width;
+  else sshLanes.set(tag, { width, busy: 0, waiting: [] });
+}
+
+/** The target tag of a control socket (`<tag>.sock` is the proxy's, `<tag>d.sock` the direct route's: one lane). */
+export function sshLaneTagOf(sock: string): string | null {
+  const m = /([0-9a-f]{8})d?\.sock$/.exec(sock);
+  return m ? m[1] : null;
+}
+
+/** The lane an argv rides, or null: not ssh, no socket, or a host with no lane. */
+export function sshLaneOf(cmd: string, args: string[]): SshLane | null {
+  const sock = sshControlPathOf(cmd, args);
+  const tag = sock ? sshLaneTagOf(sock) : null;
+  return (tag && sshLanes.get(tag)) || null;
+}
+
+/** Wait for a turn on the lane. The function returned gives it back; once, however often it is called. */
+export function takeSshLane(lane: SshLane): Promise<() => void> {
+  let given = false;
+  const giveBack = () => {
+    if (given) return;
+    given = true;
+    lane.busy--;
+    lane.waiting.shift()?.();
+  };
+  if (lane.busy < lane.width) {
+    lane.busy++;
+    return Promise.resolve(giveBack);
+  }
+  return new Promise((res) => {
+    lane.waiting.push(() => {
+      lane.busy++;
+      res(giveBack);
+    });
+  });
+}
+
+/** A laned command's timeout: its own, but never under SSH_LANE_MIN_TIMEOUT_MS (0 stays "forever"). */
+export function sshLaneTimeoutMs(lane: SshLane | null, ms: number): number {
+  return lane && ms > 0 && ms < SSH_LANE_MIN_TIMEOUT_MS ? SSH_LANE_MIN_TIMEOUT_MS : ms;
+}
+
 /** POSIX single-quote a string so it survives one round of remote shell parsing (ssh). */
 export function shellQuote(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
@@ -132,7 +208,10 @@ export async function run(
   args: string[],
   opts: RunOptions = {}
 ): Promise<RunResult> {
-  const { cwd, env, check = true, input, timeoutMs = DEFAULT_TIMEOUT_MS } = opts;
+  const { cwd, env, check = true, input } = opts;
+  const lane = sshLaneOf(cmd, args);
+  const timeoutMs = sshLaneTimeoutMs(lane, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const giveBack = lane ? await takeSshLane(lane) : () => {};
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd,
@@ -143,6 +222,13 @@ export async function run(
       child.stdin.on("error", () => {}); // EPIPE if the remote exits early — the close handler reports it
       child.stdin.end(input);
     }
+    // The lane is the host's again once the channel is clearly open: first output, end, or the hold.
+    const hold = lane ? setTimeout(giveBack, SSH_LANE_HOLD_MS) : null;
+    hold?.unref?.();
+    const freeLane = () => {
+      if (hold) clearTimeout(hold);
+      giveBack();
+    };
 
     let stdout = "";
     let stderr = "";
@@ -151,8 +237,14 @@ export async function run(
     // sentinel landing on a 64 KB pipe boundary) into U+FFFD, corrupting the parsed trace.
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", (d) => (stdout += d));
-    child.stderr?.on("data", (d) => (stderr += d));
+    child.stdout?.on("data", (d) => {
+      freeLane();
+      stdout += d;
+    });
+    child.stderr?.on("data", (d) => {
+      freeLane();
+      stderr += d;
+    });
 
     // SIGKILL, not SIGTERM: a wedged ssh sitting in poll() is exactly the case this exists for, and
     // it may not act on a polite signal.
@@ -166,6 +258,7 @@ export async function run(
       timeoutMs > 0
         ? setTimeout(() => {
             settled = true;
+            freeLane();
             child.kill("SIGKILL");
             resetSshMasterOnTimeout(cmd, args);
             reject(new Error(redactShapes(`Command timed out after ${timeoutMs}ms: ${cmd} ${args.join(" ")}`)));
@@ -173,6 +266,7 @@ export async function run(
         : null;
     const done = () => {
       if (timer) clearTimeout(timer);
+      freeLane();
       const first = !settled;
       settled = true;
       return first;
@@ -230,24 +324,39 @@ export interface StreamResult {
  */
 export async function runStream(cmd: string, args: string[], opts: StreamOptions = {}): Promise<StreamResult> {
   const { createReadStream, createWriteStream } = await import("node:fs");
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const lane = sshLaneOf(cmd, args);
+  const timeoutMs = sshLaneTimeoutMs(lane, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const giveBack = lane ? await takeSshLane(lane) : () => {};
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: [opts.stdinFile ? "pipe" : "ignore", "pipe", "pipe"] });
+    const hold = lane ? setTimeout(giveBack, SSH_LANE_HOLD_MS) : null;
+    hold?.unref?.();
+    const freeLane = () => {
+      if (hold) clearTimeout(hold);
+      giveBack();
+    };
     let stderr = "";
     let stdout = "";
     let bytes = 0;
     child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (d) => (stderr += d));
+    child.stderr?.on("data", (d) => {
+      freeLane();
+      stderr += d;
+    });
     let outDone: Promise<void> = Promise.resolve();
     if (opts.stdoutFile && child.stdout) {
       const out = createWriteStream(opts.stdoutFile);
-      child.stdout.on("data", (d: Buffer) => (bytes += d.length));
+      child.stdout.on("data", (d: Buffer) => {
+        freeLane();
+        bytes += d.length;
+      });
       child.stdout.pipe(out);
       outDone = new Promise((r) => out.on("close", () => r()));
       out.on("error", (e) => reject(e));
     } else if (child.stdout) {
       child.stdout.setEncoding("utf8");
       child.stdout.on("data", (d: string) => {
+        freeLane();
         if (stdout.length < 65_536) stdout += d;
       });
     }
@@ -258,16 +367,19 @@ export async function runStream(cmd: string, args: string[], opts: StreamOptions
     let settled = false;
     const timer = timeoutMs > 0 ? setTimeout(() => {
       settled = true;
+      freeLane();
       child.kill("SIGKILL");
       resetSshMasterOnTimeout(cmd, args);
       reject(new Error(redactShapes(`Command timed out after ${timeoutMs}ms: ${cmd} ${args.join(" ")}`)));
     }, timeoutMs) : null;
     child.on("error", (err) => {
       if (timer) clearTimeout(timer);
+      freeLane();
       if (!settled) (settled = true), reject(err);
     });
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
+      freeLane();
       if (settled) return;
       settled = true;
       noteSshExit(cmd, args, code ?? -1);
