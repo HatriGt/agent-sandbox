@@ -26,7 +26,7 @@ import { isWorkingBox, makeHostSleep, registerSleepResolver, type HostSleep } fr
 import { pickHost, totalCapacity, type HostCandidate, type PickResult } from "./host-pick.js";
 import { providerFor, type ProviderState } from "./host-providers.js";
 import { dropTunnel, ensureTunnel } from "./ssh-tunnel.js";
-import { gateSsh } from "./ssh.js";
+import { closeSshMasters, gateSsh } from "./ssh.js";
 import {
   PRIMARY_HOST_ID,
   addAwakeMs,
@@ -908,6 +908,9 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       } catch (e) {
         lastErr = (e as Error).message;
         log(`[hosts] ${id} not answering yet (${i + 1}/4): ${lastErr.slice(0, 120)}`);
+        // A probe that timed out may have ridden a master whose connection is dead at the proxy;
+        // the next try gets a fresh one instead of the same dead channel.
+        if (/timed out/.test(lastErr)) await closeSshMasters(h.cfg.vpsSsh).catch(() => {});
         if (i < 3) await new Promise((r) => setTimeout(r, spacing(i)));
       }
     }

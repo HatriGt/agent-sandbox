@@ -126,6 +126,13 @@ export function sshMuxOpts(cfg: Config, o: { direct?: false | DirectRoute } = {}
     `ControlPath=${controlPath}`,
     "-o",
     `ControlPersist=${cfg.sshPersist}`,
+    // A master whose connection died underneath (Freestyle's proxy drops a session after a pause or
+    // an idle spell without closing it) must notice and exit, or every command rides a dead channel
+    // until its own timeout (seen live 2026-11-19: four 45 s probes in a row through one such master).
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=2",
     // Deploy-time extras (e.g. `-i <key>`, StrictHostKeyChecking) for the containerized controller.
     ...(cfg.sshExtraOpts ?? []),
   ];

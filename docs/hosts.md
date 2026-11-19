@@ -367,3 +367,14 @@ for), and the hourly canary had woken the VM for nothing.
   (`/dev/kvm`) for microsandbox, whatever the adapter says.
 - The allowance is the controller's count of awake minutes, not the provider's bill; it will be
   a little under the bill (resume time before the first SSH is not counted).
+
+## A master that died at the proxy (2026-11-19)
+
+After a pause and start, the controller's multiplexed SSH master to the Freestyle VM can stay
+"running" while the proxy has dropped the connection underneath: `ssh -O check` answers, every
+command through it hangs until its own timeout, and `ready` burned four 45 s probes in a row on the
+same dead channel while a plain SSH from the same container answered in a second. Two rules now:
+every master carries `ServerAliveInterval=15` / `ServerAliveCountMax=2` (src/ssh.ts), so a dead one
+exits within about half a minute; and a probe that times out closes the host's masters before the
+next try (src/host-pool.ts `ready`), so the retry builds a fresh connection. By hand, the cure was
+killing the `ssh: … [mux]` process for the host inside the container.

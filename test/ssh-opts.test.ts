@@ -25,3 +25,10 @@ test("extras are appended verbatim (e.g. -i key, StrictHostKeyChecking)", () => 
   // base opts still present
   assert.ok(s.includes("ControlMaster=auto"));
 });
+
+test("every master carries a keepalive, so one whose connection died at the proxy exits instead of hanging every command", () => {
+  const opts = sshMuxOpts(cfg());
+  const i = opts.indexOf("ServerAliveInterval=15");
+  assert.ok(i > 0 && opts[i - 1] === "-o", "ServerAliveInterval=15 is set");
+  assert.ok(opts.includes("ServerAliveCountMax=2"), "ServerAliveCountMax=2 is set");
+});
