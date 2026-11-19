@@ -37,7 +37,9 @@ const groupOf = (v: StableBox): Exclude<Filter, "all"> => {
   if (v.runState === "waiting") return "attention";
   const s = displayState(v);
   if (s === "running") return "working";
-  if (s === "sleeping") return "sleeping";
+  // Away (the machine is gone, the thread is kept) is not a machine asleep: it costs nothing and
+  // there is nothing to destroy, so it files under Done with the finished runs.
+  if (s === "sleeping") return v.absent ? "done" : "sleeping";
   return "done";
 };
 
@@ -91,7 +93,7 @@ export function Sandboxes({
 
   const waiting = boxes.filter((b) => b.runState === "waiting" && !b.leaving);
 
-  const sleepable = boxes.filter((b) => displayState(b) === "sleeping" && !b.kept && !b.leaving);
+  const sleepable = boxes.filter((b) => displayState(b) === "sleeping" && !b.absent && !b.kept && !b.leaving);
   // More than one box host in play: say which machine runs where.
   const multiHost = React.useMemo(() => new Set(boxes.map((b) => b.host).filter(Boolean)).size > 1, [boxes]);
   return (
@@ -246,7 +248,7 @@ const stateDot = (box: StableBox) => {
     case "done":
       return <StatusDot tone={isFailedExit(box.exitCode) ? "destructive" : "ok"}>{doneLabel(box.exitCode)}</StatusDot>;
     case "sleeping":
-      return <StatusDot tone="muted">sleeping</StatusDot>;
+      return <StatusDot tone="muted">{box.absent ? "away" : "sleeping"}</StatusDot>;
     default:
       return <StatusDot tone="muted">idle</StatusDot>;
   }
@@ -348,7 +350,7 @@ function MachineCell({ box, lifecycle, multiHost }: { box: StableBox; lifecycle:
       </span>
       {/* Words in the sans face; only the duration is data. */}
       <span className="font-sans text-micro">
-        {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)}` : "asleep · wakes on reply") : box.role === "session" ? "" : roleLabel(box.role)}
+        {box.leaving ? "shutting down" : box.absent ? "away · machine gone, thread kept" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)}` : "asleep · wakes on reply") : box.role === "session" ? "" : roleLabel(box.role)}
       </span>
       {(box.uptime || box.cpu) && (
         <span className="truncate" title={[box.uptime && `${state === "sleeping" ? "ran" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`].filter(Boolean).join(" · ")}>

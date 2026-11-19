@@ -47,7 +47,7 @@ import { createBox, claudeRootSource } from "./msb.js";
 import { markClaimed } from "./claims.js";
 import { RESCUE_MAX_MB, capturedTurn, listRescues, pullRescue, pushRescue, readRescue, rescueBoxes, stampRescueKept, summarize, sweepRescues } from "./rescue.js";
 import { KeptBoxError } from "./msb.js";
-import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread } from "./threads.js";
+import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread, noteAbsentThreads } from "./threads.js";
 import { closeSshMasters } from "./ssh.js";
 import { PRIMARY_HOST_ID, boxHostOf, slugify as hostSlug } from "./hosts.js";
 import { listProviders, providerFor } from "./host-providers.js";
@@ -1320,7 +1320,7 @@ const readFleet = makeFleetReader(
   cfg,
   async () => {
     const sweepAt = Date.now();
-    const { boxes, kept, claims, titles, stale } = await sweepHosts(cfg);
+    const { boxes, kept, claims, titles, stale, swept } = await sweepHosts(cfg);
     lastKept = kept;
     // Copies taken before the box was kept (or before copies knew about keeps) get the stamp once.
     for (const k of kept) if (!keptStamped.has(k)) { keptStamped.add(k); void stampRescueKept(cfg, k).then((did) => did && console.error(`[keep] ${k}: copy stamped kept`)).catch(() => {}); }
@@ -1329,7 +1329,9 @@ const readFleet = makeFleetReader(
     for (const b of boxes) {
       const was = lastSeenStatus.get(b.name);
       const runningNow = /^running$/i.test(b.boxStatus);
-      if (was === true && !runningNow && claims.has(b.name)) void touchClaimed(hcfg(b.name), b.name).catch(() => {});
+      // A session box (a delegate) is launched without a claim marker: its first nap writes one, so
+      // the sleep TTL covers it exactly as it covers a pool box (src/claims.ts stoppedBoxVerdict).
+      if (was === true && !runningNow && b.role !== "pool-free") void (claims.has(b.name) ? touchClaimed(hcfg(b.name), b.name) : markClaimed(hcfg(b.name), b.name)).catch(() => {});
       lastSeenStatus.set(b.name, runningNow);
     }
     for (const k of [...lastSeenStatus.keys()]) if (!boxes.some((b) => b.name === k)) lastSeenStatus.delete(k);
@@ -1448,6 +1450,12 @@ const readFleet = makeFleetReader(
     for (const b of boxes) if (/^running$/i.test(b.boxStatus) && b.role !== "pool-free") void syncThreadTranscript(b.name);
     const copies = await rescueBoxes(cfg).catch(() => new Set<string>());
     const present = new Set(boxes.map((b) => b.name));
+    // A host that answered with a listing and did not list a thread's box: the row records it
+    // (box_status "absent"), so the sweeps served from memory while that host sleeps show the thread
+    // away, not as a box asleep on it. Only a listing with something in it counts: an empty answer
+    // from a host that had boxes is far more likely cut short than emptied.
+    const answered = new Set(swept.filter((id) => boxes.some((b) => b.host === id)));
+    noteAbsentThreads(db, listThreads(db), present, answered, sweepAt);
     const away = threadViews(listThreads(db), present, new Set(stale), (id) => copies.has(id));
     // A Stopped box nobody remembers is dead capacity only when nobody holds it (fleet.ts mergeWithMemory).
     // A thread row holds its box too: a box can vanish, a thread cannot.

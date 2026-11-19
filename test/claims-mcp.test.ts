@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseClaims, shouldKeepStopped } from "../src/claims.ts";
+import { parseClaims, shouldKeepStopped, stoppedBoxVerdict } from "../src/claims.ts";
 import { parseMcpImport, normalizeServer, toClaudeMcpConfig, viewServers, parseMcpStore, serializeMcpStore, isBoxRunnableServer } from "../src/mcp-store.ts";
 
 test("claims: parse stat output into ages; keep a sleeping claimed box under the TTL", () => {
@@ -85,4 +85,14 @@ test("mcp: a server carrying the controller's operator token never reaches a box
   assert.deepEqual(Object.keys(build(store, boxSecretPolicy({ httpToken: "operator-token-value", boxOperatorMcp: true }))!.mcpServers), ["self", "env", "other"]);
   // Short/empty tokens never match (an unset token is not a wildcard).
   assert.equal(carriesOperatorToken(self, ["", "short"]), false);
+});
+
+test("claims: stoppedBoxVerdict judges every stopped box; a session box with no clock gets one, a pool box with none is dead", () => {
+  assert.equal(stoppedBoxVerdict({ pool: true, kept: true, ageSec: 99_999, ttlSec: 3600 }), "keep", "kept: held until the operator destroys it");
+  assert.equal(stoppedBoxVerdict({ pool: false, kept: true, ageSec: undefined, ttlSec: 3600 }), "keep", "kept, even with no clock");
+  assert.equal(stoppedBoxVerdict({ pool: false, kept: false, ageSec: 1000, ttlSec: 3600 }), "keep", "asleep 16m of 1h");
+  assert.equal(stoppedBoxVerdict({ pool: false, kept: false, ageSec: 3600, ttlSec: 3600 }), "reap", "a delegate box at the TTL goes like a pool box");
+  assert.equal(stoppedBoxVerdict({ pool: true, kept: false, ageSec: 100_000, ttlSec: 3600 }), "reap", "asleep 27h");
+  assert.equal(stoppedBoxVerdict({ pool: true, kept: false, ageSec: undefined, ttlSec: 3600 }), "reap", "a pool box never claimed is dead capacity");
+  assert.equal(stoppedBoxVerdict({ pool: false, kept: false, ageSec: undefined, ttlSec: 3600 }), "start", "a delegate box asleep with no clock: the clock starts, nothing is destroyed on sight");
 });

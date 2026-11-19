@@ -120,6 +120,9 @@ export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>,
       const view = asleep({ ...known, host: b.host ?? known.host });
       if (b.kept) view.kept = true;
       else delete view.kept;
+      // Listed again: whatever an earlier listing said, the box is there.
+      delete view.absent;
+      memory.set(b.name, view);
       out.push(view);
       continue;
     }
@@ -132,15 +135,24 @@ export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>,
   for (const [name, known] of [...memory]) {
     if (seen.has(name)) continue;
     if (known.host && opts.stale?.has(known.host)) {
-      out.push(asleep(known));
+      // Out of sight, not gone: shown asleep. Unless a listing from the awake host already said the
+      // box is gone (`absent` below): then the thread row speaks (threadViews), and the memory says
+      // nothing. Before 2026-11-19 every thread whose box had been destroyed came back as "asleep"
+      // each time its host paused, and the Sleeping list was mostly boxes that did not exist.
+      if (!known.absent) out.push(asleep(known));
       continue;
     }
     // A box someone holds (a kept box, a claim, an owner, a live thread row) keeps its memory on its
     // own word, not one sweep's: a listing cut short by a VM resuming or a pause landing used to
     // forget the task of every thread it missed, on the controller and on the host. The box is not
     // listed here (threadViews speaks for a thread whose box is really gone); the memory waits for
-    // the next listing that has it, and leaves when the thread is deleted.
-    if (opts.held?.(name)) continue;
+    // the next listing that has it, and leaves when the thread is deleted. What the memory does
+    // learn is that the box is gone, from a listing that had something in it (an empty answer from
+    // a host that had boxes is more likely cut short than emptied).
+    if (opts.held?.(name)) {
+      if (!known.absent && known.host && latest.some((b) => b.host === known.host)) memory.set(name, { ...known, absent: true });
+      continue;
+    }
     memory.delete(name);
   }
   return out;
@@ -203,6 +215,9 @@ export function makeFleetReader(
   // sweep; failures are swallowed — memory is a convenience layer, never a reason to fail the fleet.
   let hydrated = !opts.store;
   const written = new Map<string, string>();
+  // Boxes the durable store was told to forget because an awake host no longer lists them (the
+  // in-process memory keeps them, flagged absent). Cleared when a box is listed again.
+  const forgotten = new Set<string>();
   const persist = (boxes: BoxView[]) => {
     if (!opts.store) return;
     for (const b of boxes) {
@@ -243,7 +258,18 @@ export function makeFleetReader(
         const before = new Set(memory.keys());
         const merged = mergeWithMemory(boxes, memory, { stale, held });
         persist(boxes);
-        if (opts.store) for (const name of before) if (!memory.has(name)) void opts.store.forget(name).catch(() => {});
+        if (opts.store) {
+          for (const name of before) if (!memory.has(name)) void opts.store.forget(name).catch(() => {});
+          // A box an awake host no longer lists leaves the durable store too: after a restart the
+          // thread row speaks for it, instead of a remembered "stopped" on a host that is asleep.
+          for (const [name, v] of memory) {
+            if (!v.absent) forgotten.delete(name);
+            else if (!forgotten.has(name)) {
+              forgotten.add(name);
+              void opts.store.forget(name).catch(() => {});
+            }
+          }
+        }
         cached = { boxes: opts.decorate ? opts.decorate(merged) : merged, lifecycle: opts.capacity ? { ...lifecycle, capacity: opts.capacity() } : lifecycle, at: now() };
         opts.sleep?.noteFleet(boxes);
         return cached;

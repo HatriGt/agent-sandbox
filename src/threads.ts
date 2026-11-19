@@ -183,8 +183,25 @@ export function threadRunMetas(rows: ThreadRow[], taskHead: (id: string) => stri
 }
 
 /**
+ * Threads whose host answered this sweep with a listing that did not have their box: the row
+ * records "absent" (box_status), once. A row younger than two minutes is left alone: its box may
+ * still be booting into the listing. Returns the ids written.
+ */
+export function noteAbsentThreads(db: Db, rows: ThreadRow[], present: ReadonlySet<string>, answered: ReadonlySet<string>, now = Date.now()): string[] {
+  const out: string[] = [];
+  for (const r of rows) {
+    if (r.deleted_at || present.has(r.id) || !r.host || !answered.has(r.host) || r.box_status === "absent") continue;
+    if (now - r.created_at < 120_000) continue;
+    upsertThread(db, { id: r.id, boxStatus: "absent", boxSeenAt: now }, now);
+    out.push(r.id);
+  }
+  return out;
+}
+
+/**
  * The fleet rows for threads whose box the hosts did not list this sweep. Pure.
- *   · host in `stale` (asleep or unreachable): the box is merely out of sight → shown asleep;
+ *   · host in `stale` (asleep or unreachable) and no listing has said the box is gone (box_status
+ *     "absent", noteAbsentThreads): the box is merely out of sight → shown asleep;
  *   · a copy of the thread is kept → shown AWAY (`absent`): opening or replying brings it back;
  *   · neither → not listed (History still has it).
  */
@@ -206,7 +223,7 @@ export function threadViews(rows: ThreadRow[], present: ReadonlySet<string>, sta
       ...(r.kept ? { kept: true } : {}),
       ...(r.repos_json ? { repos: safeRepos(r.repos_json) } : {}),
     };
-    if (r.host && stale.has(r.host)) out.push(base);
+    if (r.host && stale.has(r.host) && r.box_status !== "absent") out.push(base);
     else if (hasCopy(r.id)) out.push({ ...base, boxStatus: "Absent", absent: true });
   }
   return out;

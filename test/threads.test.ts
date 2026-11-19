@@ -11,7 +11,7 @@ import path from "node:path";
 import { openMemoryDb } from "../src/db.ts";
 import { mergeWithMemory } from "../src/fleet.ts";
 import type { BoxView } from "../src/monitor.ts";
-import { getThread, listThreads, markThreadDeleted, planSync, readTranscript, syncSh, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread } from "../src/threads.ts";
+import { getThread, listThreads, markThreadDeleted, noteAbsentThreads, planSync, readTranscript, syncSh, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread } from "../src/threads.ts";
 
 const box = (name: string, extra: Partial<BoxView> = {}): BoxView => ({ name, role: "session", boxStatus: "Running", runState: "running", task: "fix the pool", ...extra });
 
@@ -152,4 +152,37 @@ test("threadRunMetas: live rows seed the fleet's memory; a row with no task uses
   const merged = mergeWithMemory(sweep, new Map(m.entries()) as never, { held: () => true });
   assert.equal(merged[0]?.task, "create a deal for ...");
   assert.equal(merged[0]?.boxStatus, "Stopped");
+});
+
+test("threads: a host that answered without the box marks the row absent (not a row seconds old, not from a host that did not answer); the view then shows away while the host sleeps, not asleep", () => {
+  const db = openMemoryDb();
+  const t0 = 1_000_000;
+  for (const [id, host, created] of [
+    ["gone", "freestyle-a", t0],
+    ["young", "freestyle-a", t0 + 500_000],
+    ["elsewhere", "freestyle-b", t0],
+    ["present", "freestyle-a", t0],
+  ] as const) {
+    upsertThread(db, { id, host, task: `task ${id}`, runState: "done", exitCode: 0, boxStatus: "stopped" }, created);
+  }
+  const now = t0 + 600_000;
+  const wrote = noteAbsentThreads(db, listThreads(db), new Set(["present"]), new Set(["freestyle-a"]), now);
+  assert.deepEqual(wrote, ["gone"], "only the old row on the host that answered");
+  assert.equal(getThread(db, "gone")?.box_status, "absent");
+  assert.equal(getThread(db, "gone")?.box_seen_at, now);
+  assert.equal(getThread(db, "young")?.box_status, "stopped", "a row seconds old may still be booting");
+  assert.equal(getThread(db, "elsewhere")?.box_status, "stopped", "its host did not answer");
+  assert.deepEqual(noteAbsentThreads(db, listThreads(db), new Set(["present"]), new Set(["freestyle-a"]), now + 1), [], "written once");
+  // freestyle-a sleeps: "gone" reads away (a copy exists), never asleep; "young" still reads asleep.
+  const views = threadViews(listThreads(db), new Set(["present"]), new Set(["freestyle-a", "freestyle-b"]), (id) => id === "gone");
+  const byName = Object.fromEntries(views.map((v) => [v.name, v]));
+  assert.equal(byName.gone.absent, true);
+  assert.equal(byName.gone.boxStatus, "Absent");
+  assert.equal(byName.young.absent, undefined);
+  assert.equal(byName.young.boxStatus, "Stopped");
+  assert.equal(byName.elsewhere.boxStatus, "Stopped");
+  // Listed again (restored): the sweep's upsert says stopped/running and the view follows.
+  upsertThread(db, { id: "gone", boxStatus: "running" }, now + 2);
+  const back = threadViews(listThreads(db), new Set(), new Set(["freestyle-a"]), () => true);
+  assert.equal(back.find((v) => v.name === "gone")?.absent, undefined);
 });

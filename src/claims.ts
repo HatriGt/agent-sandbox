@@ -127,3 +127,20 @@ export function shouldKeepStopped(claimAgeSec: number | undefined, sleepTtlSec: 
   if (kept) return true;
   return claimAgeSec !== undefined && claimAgeSec < sleepTtlSec;
 }
+
+/**
+ * The reaping decision for ANY non-running box, pool or session (a delegate box). Pure.
+ *   - kept: "keep", held until the operator destroys it;
+ *   - asleep for less than its TTL (the park TTL for a parked box): "keep";
+ *   - no sleep clock yet: a pool box nobody claimed is dead capacity, "reap"; a session box is
+ *     launched without a claim marker, so its clock "start"s now and it is judged on a later sweep.
+ *     A box that fell asleep while the controller was down or its host was paused gets the full TTL
+ *     from the moment it is first seen asleep, never the axe on sight;
+ *   - past the TTL: "reap". Until 2026-11-19 only pool boxes were judged at all, and a sleeping
+ *     delegate box stayed on its host for days.
+ */
+export function stoppedBoxVerdict(o: { pool: boolean; kept: boolean; ageSec: number | undefined; ttlSec: number }): "keep" | "start" | "reap" {
+  if (o.kept) return "keep";
+  if (o.ageSec === undefined) return o.pool ? "reap" : "start";
+  return o.ageSec < o.ttlSec ? "keep" : "reap";
+}

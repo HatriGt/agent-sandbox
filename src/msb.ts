@@ -9,7 +9,7 @@ import { BAKED_MCP_PACKAGES, IMAGE_PINNED_PACKAGES } from "./package-watch.js";
 import { assertBoxName } from "./sync.js";
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
-import { listClaims, listKept, listKeptStrict, listParked, markClaimed, removalVerdict, shouldKeepStopped, unmarkClaimed, unmarkKept, unmarkParked } from "./claims.js";
+import { listClaims, listKept, listKeptStrict, listParked, markClaimed, removalVerdict, stoppedBoxVerdict, unmarkClaimed, unmarkKept, unmarkParked } from "./claims.js";
 import { askParkTtlSec } from "./snapshot.js";
 import { guardNodeProgram } from "./guard.js";
 import { loadEffectiveMcpStore, toClaudeMcpConfig, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
@@ -671,13 +671,13 @@ export function diskFullFromLaunch(stdout: string): { freeKb: number; totalKb: n
 }
 
 /**
- * All warm pool boxes with their msb lifecycle status, from `msb ls --format json` (robust to the
- * variable-width text table). Newest-name order not guaranteed.
+ * Every run box (pool and session; never a package-store box) with its msb lifecycle status, from
+ * `msb ls --format json` (robust to the variable-width text table). Newest-name order not guaranteed.
  */
-async function allPoolBoxes(cfg: Config): Promise<Array<{ name: string; status: string }>> {
+async function allRunBoxes(cfg: Config): Promise<Array<{ name: string; status: string }>> {
   const r = await msb(cfg, ["ls", "--format", "json"], false);
   return parseLsJson(r.stdout)
-    .filter((e) => e.name.startsWith(POOL_PREFIX))
+    .filter((e) => !isStoreBox(e.name))
     .map((e) => ({ name: e.name, status: e.status }));
 }
 
@@ -736,23 +736,27 @@ export async function forceRemoveBox(cfg: Config, box: string): Promise<void> {
 }
 
 /**
- * Reap pool boxes that are not actually Running (Stopped/exited/unknown). Returns the names of the
- * still-Running boxes. Removing dead boxes clears msb's stale state so a later refill can recreate
- * them cleanly instead of hitting "cannot start: already running".
+ * Reap boxes that are not actually Running (Stopped/exited/unknown) and have no reason to stay: dead
+ * warm capacity at once, an unkept sleeping run (pool or delegate box alike) once it has slept past
+ * the sleep TTL. Returns the names of the still-Running POOL boxes (the warm capacity; a running
+ * session box is somebody's run and is never probed or handed out). Removing dead boxes clears
+ * msb's stale state so a later refill can recreate them cleanly instead of hitting "cannot start:
+ * already running".
  */
 export async function reapDeadPoolBoxes(cfg: Config): Promise<string[]> {
-  const boxes = await allPoolBoxes(cfg);
+  const boxes = await allRunBoxes(cfg);
   const live: string[] = [];
   let claims: Map<string, number> | null = null;
   let kept: Set<string> | null = null;
   let parked: Set<string> | null = null;
   const sleepTtlSec = parseDurationSec(cfg.sleepTtl) ?? 86_400;
   for (const b of boxes) {
+    const pool = b.name.startsWith(POOL_PREFIX);
     if (isRunning(b.status)) {
-      live.push(b.name);
+      if (pool) live.push(b.name);
       continue;
     }
-    // A stopped box is either dead capacity (never claimed) or a SLEEPING RUN: claimed, idle-stopped,
+    // A stopped box is either dead capacity (a pool box never claimed) or a SLEEPING RUN: idle-stopped,
     // workspace and session intact, wakeable by a reply. Only the former is reaped now; the latter
     // survives until the sleep TTL. (The claim marker lives on the host — the box can't be asked.)
     claims ??= await listClaims(cfg);
@@ -762,7 +766,18 @@ export async function reapDeadPoolBoxes(cfg: Config): Promise<string[]> {
     // A PARKED box (stopped by the controller because a question is pending) costs disk only, so it
     // is held to the much longer park TTL — an overnight question must survive to be answered.
     const ttl = parked.has(b.name) ? Math.max(sleepTtlSec, askParkTtlSec()) : sleepTtlSec;
-    if (shouldKeepStopped(age, ttl, kept.has(b.name))) {
+    const verdict = stoppedBoxVerdict({ pool, kept: kept.has(b.name), ageSec: age, ttlSec: ttl });
+    if (verdict === "start") {
+      // A session box asleep with no clock (it fell asleep while the controller was away, or before
+      // delegate boxes had one): the clock starts now; the next sweeps judge it like any other.
+      if (saidKeeping.get(b.name) !== "clock") {
+        saidKeeping.set(b.name, "clock");
+        console.error(`[pool] sleeping run ${b.name} had no sleep clock; it starts now (destroyed after ${cfg.sleepTtl} unless kept or woken)`);
+      }
+      await markClaimed(cfg, b.name).catch((e) => console.error(`[pool] ${b.name}: could not start its sleep clock: ${String((e as Error).message ?? e).slice(0, 160)}`));
+      continue;
+    }
+    if (verdict === "keep") {
       // Said when it becomes true, not on every sweep: one pinned run wrote this line every few
       // minutes for months and buried everything else in the log.
       const why = kept.has(b.name) ? "pinned" : "asleep";

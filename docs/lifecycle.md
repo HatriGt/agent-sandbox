@@ -39,7 +39,17 @@ Think about the machine from the operator's side. After a task is delegated ther
    later — it simply pays a few seconds to restart. The one loss on sleep is the co-pilot (it needs a
    running box), which the UI says plainly.
 4. **Abandoned.** A sleeping box that nobody ever wakes is destroyed after `MSB_SLEEP_TTL` (default
-   `1h`, i.e. the run cap; pin a sandbox with **Keep** to hold it) by the pool maintainer. **Implemented** — and it fixed a real bug: the maintainer used to
+   `1h`, i.e. the run cap; pin a sandbox with **Keep** to hold it) by the pool maintainer. This covers
+   every box kind: a delegate box is launched without a claim marker, so its first nap writes one
+   (the sweep that sees it go Running → Stopped), and a delegate box found asleep with no clock (it
+   fell asleep while the controller was down or its host paused) has its clock started on sight and is
+   judged on the next sweeps, never destroyed on sight (`stoppedBoxVerdict` in `src/claims.ts`; until
+   2026-11-19 only `pool-*` boxes were judged, and sleeping delegate boxes stayed for days). The
+   maintainer only runs against a host that is awake: a paused Freestyle VM is left paused, and its
+   expired sleepers go the first time it is up for something else. A thread whose box was destroyed
+   is Away (its copy brings it back), and the fleet files it under Done, not Sleeping: the thread
+   row records `absent` the first time an awake host lists without it, and that word holds while the
+   host sleeps (before, every such thread came back as "asleep" each time its host paused). **Implemented** — and it fixed a real bug: the maintainer used to
    treat *any* stopped `pool-*` box as dead and force-remove it, which destroyed sleeping claimed runs
    (the "a reply wakes it" promise was broken). Claims are now recorded on the host
    (`~/.agent-sandbox/claims/<box>`, see `src/claims.ts`), so a stopped box's status as a run is

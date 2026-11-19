@@ -350,3 +350,57 @@ test("mergeWithMemory: a held box missing from a host that answered keeps its me
   const back = mergeWithMemory([{ ...running("delegate-held", { host: "freestyle-a" }), boxStatus: "Stopped", task: undefined, runState: "idle" as const }], memory, { held: () => true });
   assert.equal(back[0]?.task, "the task");
 });
+
+test("mergeWithMemory: a held box gone from a host that listed something is remembered as absent: not shown asleep when that host sleeps, back when listed again; an empty listing teaches nothing", () => {
+  const mem = new Map<string, BoxView>();
+  const held = () => true;
+  mergeWithMemory([running("delegate-1-gone", { host: "freestyle-a" })], mem, { held });
+  // The host answers with a listing that no longer has the box (its warm box is still there).
+  let out = mergeWithMemory([running("pool-1-warm", { host: "freestyle-a", role: "pool-free" })], mem, { stale: new Set(), held });
+  assert.deepEqual(out.map((b) => b.name), ["pool-1-warm"]);
+  assert.equal(mem.get("delegate-1-gone")?.absent, true, "the memory learnt the box is gone");
+  assert.equal(mem.get("delegate-1-gone")?.task, "do a thing", "and kept its task");
+  // The host falls asleep: served from memory, the gone box is NOT shown as a box asleep on it.
+  out = mergeWithMemory([], mem, { stale: new Set(["freestyle-a"]), held });
+  assert.deepEqual(out.map((b) => b.name), ["pool-1-warm"], "no phantom sleeping box");
+  // Listed again (restored): the flag is gone and the box shows asleep.
+  out = mergeWithMemory([{ name: "delegate-1-gone", host: "freestyle-a", role: "session", boxStatus: "Stopped", runState: "idle" }], mem, { stale: new Set(), held });
+  assert.equal(out.find((b) => b.name === "delegate-1-gone")?.absent, undefined);
+  assert.equal(out.find((b) => b.name === "delegate-1-gone")?.task, "do a thing");
+  assert.equal(mem.get("delegate-1-gone")?.absent, undefined);
+  // An empty listing from the host (cut short) teaches nothing.
+  out = mergeWithMemory([], mem, { stale: new Set(), held });
+  assert.equal(mem.get("delegate-1-gone")?.absent, undefined, "not flagged from an empty answer");
+  assert.ok(mem.has("delegate-1-gone"), "still remembered");
+});
+
+test("makeFleetReader: a remembered box an awake host no longer lists is forgotten by the store once, and never shown asleep again while that host sleeps", async () => {
+  const forgotten: string[] = [];
+  const store = {
+    load: async () => new Map([["delegate-9-fs", { name: "delegate-9-fs", host: "freestyle-a", role: "session" as const, runState: "done" as const, task: "old work" }]]),
+    save: async () => {},
+    forget: async (b: string) => void forgotten.push(b),
+  };
+  const cfg = { idleTimeout: "15m", poolIdleTimeout: "6h", maxDuration: "1h", maxBoxes: 5, poolSize: 1 } as Config;
+  let t = 0;
+  let stale = ["freestyle-a"];
+  let listed: BoxView[] = [running("live", { host: "primary" })];
+  const read = makeFleetReader(cfg, async () => ({ boxes: listed, stale, held: () => true }), { ttlMs: 1, now: () => (t += 10), store });
+  // Asleep host: the remembered box shows asleep.
+  let snap = await read();
+  assert.deepEqual(snap.boxes.map((b) => b.name).sort(), ["delegate-9-fs", "live"]);
+  // The host wakes and lists its warm box only: the remembered box is gone.
+  stale = [];
+  listed = [running("live", { host: "primary" }), running("pool-1-fs", { host: "freestyle-a", role: "pool-free" })];
+  snap = await read();
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(snap.boxes.map((b) => b.name).sort(), ["live", "pool-1-fs"]);
+  assert.deepEqual(forgotten, ["delegate-9-fs"], "the store forgets it once");
+  // The host sleeps again: still not shown.
+  stale = ["freestyle-a"];
+  listed = [running("live", { host: "primary" })];
+  snap = await read();
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(snap.boxes.map((b) => b.name).sort(), ["live", "pool-1-fs"], "served from memory, the gone box stays gone");
+  assert.deepEqual(forgotten, ["delegate-9-fs"], "forgotten once, not every sweep");
+});
