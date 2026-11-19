@@ -20,7 +20,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import type { Config } from "./config.js";
-import { run, shellQuote, sshFailureHooks, type SshFailure } from "./exec.js";
+import { run, shellQuote, sshFailureHooks, sshLaneFront, type SshFailure } from "./exec.js";
 import { setDirectRoute, sshMuxOpts, sshTargetTag, type DirectRoute, SOCK_DIR } from "./ssh.js";
 
 export interface TunnelIO {
@@ -195,8 +195,9 @@ export function ensureTunnel(cfg: Config, wanted: () => boolean = () => true, io
 async function dial(cfg: Config, e: Entry, io: TunnelIO): Promise<boolean> {
   const route = routeFor(cfg.vpsSsh);
   try {
+    // Front of the host's ssh lane: once the route is up every command after it is 0.45 s, not 3 s.
     if (!e.keyInstalled) {
-      if (!(await io.installKey(cfg))) {
+      if (!(await sshLaneFront(() => io.installKey(cfg)))) {
         e.off = "no key to install";
         io.log(`[ssh-direct] ${label(cfg)}: no identity to put on the VM; staying on the proxy`);
         return false;
@@ -207,7 +208,7 @@ async function dial(cfg: Config, e: Entry, io: TunnelIO): Promise<boolean> {
     const child = io.spawn(tunnelArgs(cfg, route), (code) => onExit(cfg, e, child, code, io));
     e.child = child;
     await io.waitPort(route.port, 15_000);
-    await io.probe(cfg, route, 20_000);
+    await sshLaneFront(() => io.probe(cfg, route, 20_000));
     if (e.child !== child) throw new Error("the forward ended while it was being checked");
     e.route = route;
     e.failures = 0;

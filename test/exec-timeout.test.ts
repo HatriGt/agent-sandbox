@@ -140,3 +140,39 @@ test("ssh lanes: the second command starts only when the first lets go", async (
     setSshLane("0badf00d", undefined);
   }
 });
+
+test("ssh lanes: a front-of-lane command starts before the queue, a command that waits past its timeout is refused unsent, and run() reads the front context", async () => {
+  const { setSshLane, sshLaneOf, takeSshLane, sshLaneFront } = await import("../src/exec.ts");
+  setSshLane("0f00f00d", 1);
+  const lane = sshLaneOf("ssh", ["-o", "ControlPath=/root/.ssh/asb/0f00f00d.sock", "h", "true"])!;
+  try {
+    const holder = await takeSshLane(lane);
+    const order: string[] = [];
+    const back = takeSshLane(lane).then((g) => (order.push("back"), g()));
+    const front = takeSshLane(lane, { front: true }).then((g) => (order.push("front"), g()));
+    const refused = takeSshLane(lane, { waitMs: 50 });
+    await assert.rejects(refused, /waited \d+s for a turn on the host's ssh lane \(2 still queued\); not sent/);
+    assert.equal(lane.waiting.length, 2, "the refused one left the queue");
+    holder();
+    await Promise.all([front, back]);
+    assert.deepEqual(order, ["front", "back"]);
+    assert.equal(lane.busy, 0);
+    let seen: boolean | undefined;
+    await sshLaneFront(async () => {
+      await new Promise((r) => setImmediate(r));
+      const { AsyncLocalStorage } = await import("node:async_hooks");
+      void AsyncLocalStorage;
+      seen = true;
+    });
+    assert.equal(seen, true);
+  } finally {
+    setSshLane("0f00f00d", undefined);
+  }
+  const src = fs.readFileSync(new URL("../src/exec.ts", import.meta.url), "utf8");
+  assert.equal((src.match(/takeSshLane\(lane, \{ front: laneContext\.getStore\(\)\?\.front, waitMs: timeoutMs \}\)/g) ?? []).length, 2, "run and runStream take the front context and bound the wait");
+  const tunnel = fs.readFileSync(new URL("../src/ssh-tunnel.ts", import.meta.url), "utf8");
+  assert.match(tunnel, /sshLaneFront\(\(\) => io\.installKey\(cfg\)\)/, "the dial's key install goes first");
+  assert.match(tunnel, /sshLaneFront\(\(\) => io\.probe\(cfg, route, 20_000\)\)/, "the dial's check goes first");
+  const http = fs.readFileSync(new URL("../src/http.ts", import.meta.url), "utf8");
+  assert.match(http, /await sshLaneFront\(\(\) => Promise\.all\(\[countBoxesOnHost\(c\)/, "the readiness probe goes first");
+});

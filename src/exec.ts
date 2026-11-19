@@ -3,6 +3,7 @@
  * from task text, repo paths, or box names.
  */
 import { spawn, execFile } from "node:child_process";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { unlink } from "node:fs";
 import { redactShapes } from "./redact.js";
 
@@ -172,8 +173,24 @@ export function sshLaneOf(cmd: string, args: string[]): SshLane | null {
   return (tag && sshLanes.get(tag)) || null;
 }
 
-/** Wait for a turn on the lane. The function returned gives it back; once, however often it is called. */
-export function takeSshLane(lane: SshLane): Promise<() => void> {
+/**
+ * Commands run inside `sshLaneFront` take the front of the queue: the readiness probe after a wake
+ * and the direct route's dial. Seen live after the lane shipped (2026-11-19 08:02): one command at
+ * a time, none timing out, and the host still "unreachable", because the probe queued behind two
+ * sweeps' worth of 3 s proxy commands and its 45 s cap ran out. The probe first makes the host
+ * answer; the dial first makes every command after it 0.45 s instead of 3 s.
+ */
+const laneContext = new AsyncLocalStorage<{ front: boolean }>();
+export function sshLaneFront<T>(fn: () => Promise<T>): Promise<T> {
+  return laneContext.run({ front: true }, fn);
+}
+
+/**
+ * Wait for a turn on the lane. The function returned gives it back; once, however often it is
+ * called. A command that waits longer than `waitMs` is refused without ever reaching the host: a
+ * sweep whose cap ran out must not leave its commands in the queue to run for nobody.
+ */
+export function takeSshLane(lane: SshLane, o: { front?: boolean; waitMs?: number } = {}): Promise<() => void> {
   let given = false;
   const giveBack = () => {
     if (given) return;
@@ -185,11 +202,24 @@ export function takeSshLane(lane: SshLane): Promise<() => void> {
     lane.busy++;
     return Promise.resolve(giveBack);
   }
-  return new Promise((res) => {
-    lane.waiting.push(() => {
+  return new Promise((res, rej) => {
+    const t0 = Date.now();
+    const turn = () => {
+      if (timer) clearTimeout(timer);
       lane.busy++;
       res(giveBack);
-    });
+    };
+    const timer =
+      o.waitMs && o.waitMs > 0
+        ? setTimeout(() => {
+            const i = lane.waiting.indexOf(turn);
+            if (i >= 0) lane.waiting.splice(i, 1);
+            rej(new Error(`waited ${Math.round((Date.now() - t0) / 1000)}s for a turn on the host's ssh lane (${lane.waiting.length} still queued); not sent`));
+          }, o.waitMs)
+        : null;
+    timer?.unref?.();
+    if (o.front) lane.waiting.unshift(turn);
+    else lane.waiting.push(turn);
   });
 }
 
@@ -211,7 +241,7 @@ export async function run(
   const { cwd, env, check = true, input } = opts;
   const lane = sshLaneOf(cmd, args);
   const timeoutMs = sshLaneTimeoutMs(lane, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  const giveBack = lane ? await takeSshLane(lane) : () => {};
+  const giveBack = lane ? await takeSshLane(lane, { front: laneContext.getStore()?.front, waitMs: timeoutMs }) : () => {};
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd,
@@ -326,7 +356,7 @@ export async function runStream(cmd: string, args: string[], opts: StreamOptions
   const { createReadStream, createWriteStream } = await import("node:fs");
   const lane = sshLaneOf(cmd, args);
   const timeoutMs = sshLaneTimeoutMs(lane, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  const giveBack = lane ? await takeSshLane(lane) : () => {};
+  const giveBack = lane ? await takeSshLane(lane, { front: laneContext.getStore()?.front, waitMs: timeoutMs }) : () => {};
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: [opts.stdinFile ? "pipe" : "ignore", "pipe", "pipe"] });
     const hold = lane ? setTimeout(giveBack, SSH_LANE_HOLD_MS) : null;

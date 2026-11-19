@@ -141,6 +141,12 @@ behind it. The wait does not count against the command's timeout, and a laned co
 is at least 45 s (a cold master through the proxy is 5-15 s by itself). A static host has no
 lane. The direct route is still worth having: 0.45 s a command against 3 s.
 
+Two things take the front of the lane: the readiness probe after a wake (it is what makes the
+host "answer"; behind two sweeps' worth of proxy commands it ran out of its 45 s cap while nothing
+timed out) and the direct route's dial (once it is up, everything after it is seven times
+cheaper). A command that has waited longer than its own timeout for a turn is refused unsent
+(`waited Ns for a turn on the host's ssh lane`), so a sweep whose cap ran out leaves no backlog.
+
 Awake time is ticked every minute into `host_usage`; a host with an allowance shows "188 of 400
 vCPU-h left" and a bar on the Fleet page, is skipped once spent, and starts over on `resetDay`.
 

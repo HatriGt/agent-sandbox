@@ -90,7 +90,7 @@ import { currentPrincipal, guardDeps, makeOwnership, NotOwnedError, QuotaError, 
 import { allowShellScripts, securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, readAgentLogFull, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, mirrorInboxMessage, takeDeliveredInbox, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo, pauseRunForResize, type MemoryTier, type DiskTier } from "./msb.js";
 import { isBoxName } from "./sync.js";
-import { run as runCmd, shellQuote } from "./exec.js";
+import { run as runCmd, shellQuote, sshLaneFront } from "./exec.js";
 import { touchClaimed, markParked } from "./claims.js";
 import { askParkEnabled, askParkGraceMs, parkWaitingBox, shouldPark } from "./snapshot.js";
 import { safeWorkspacePath } from "./artifact.js";
@@ -172,7 +172,9 @@ const hostPool = configureHostPool(
     log: (m) => console.error(m),
     quiesce: (c) => closeSshMasters(c.vpsSsh).then(() => new Promise<void>((r) => setTimeout(r, 1_500))),
     probe: async (c) => {
-      const [live, disk] = await Promise.all([countBoxesOnHost(c), hostDisk(c).catch(() => undefined)]);
+      // Front of the host's ssh lane: the probe is what makes a woken host "answer", and behind a
+      // sweep's commands through the proxy it ran out of its cap (src/exec.ts, sshLaneFront).
+      const [live, disk] = await sshLaneFront(() => Promise.all([countBoxesOnHost(c), hostDisk(c).catch(() => undefined)]));
       return `${live} live box(es)${disk ? `, disk ${disk.usedPct}% used` : ""}`;
     },
   })
