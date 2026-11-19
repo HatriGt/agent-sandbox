@@ -200,10 +200,14 @@ What it found, each fixed the same evening:
    the machine to read suspended; a probe refused with "is suspended" starts the machine again
    and keeps probing; a dead master's socket file is unlinked (every try through it read
    "ControlSocket … already exists, disabling multiplexing" and paid a cold connection).
-6. **The package store never built anything on a Docker host**: the builder container runs as
-   root, so the host user could not rename or remove what it wrote ("Permission denied" on
-   every build, boxes installed their MCP packages themselves). The builder hands `/out` to the
-   mount's owner before it reports.
+6. **The package store never built anything on a Docker host.** Two faults: the builder container
+   runs as root, so the host user could not rename or remove what it wrote (the builder now hands
+   `/out` to the mount's owner before it reports); and the store's directory and build queue were
+   one value for the whole controller, learned from the first host that asked after a boot, so a
+   build for a box here staged under the VPS path `/root/.agent-sandbox/npm-store` (the machine's
+   home is `/data/home`) and failed at `mkdir`, while boxes installed their MCP packages
+   themselves on every launch. The store is per host now: its root keyed by the host's SSH
+   target, one queue per host, the mount flag from the box's own host.
 
 Still open: a host stays awake 60 minutes after any reply or open (`HOST_ATTENTION_MS`), so an
 Instabox machine the free plan would pause after 30 idle minutes is kept up by the sweep for an

@@ -148,9 +148,15 @@ function egressFlags(cfg: Config, allowAll = cfg.egressAllowAll): string[] {
 const saidKeeping = new Map<string, string>();
 
 // ---- the package store (src/pkg-store.ts): MCP packages installed once on the host ----
-let pkgStoreRoot: string | undefined;
-// Once per HOST: the store lives under the same path on every host, but the directory has to be
-// made on each (a box on a second host mounted a path that existed only on the primary).
+// Per HOST: the store lives under each host's own home (/root on the VPS, /data/home on an
+// Instabox machine), so the path learned on one host is nothing to another. One value for the
+// whole controller meant every build on a second host staged under the first host's path
+// ("Permission denied" on every store build on instabox-b, 2026-11-19, and a mount of a
+// directory that did not exist there).
+const pkgStoreRoots = new Map<string, string>();
+function pkgStoreRootOf(cfg: Config): string | undefined {
+  return pkgStoreRoots.get(cfg.vpsSsh);
+}
 const pkgStoreLearned = new Map<string, Promise<void>>();
 /** Find (and make) the store's directory on the host, once per host. Never throws; off with MCP_PKG_STORE=0. */
 export function learnPkgStore(cfg: Config): Promise<void> {
@@ -161,7 +167,9 @@ export function learnPkgStore(cfg: Config): Promise<void> {
       try {
         const r = await ssh(cfg, 'D="$HOME/.agent-sandbox/npm-store"; mkdir -p "$D/pkgs" "$D/stage" && echo "$D"', false);
         const d = String(r.stdout ?? "").trim().split("\n").pop() ?? "";
-        if (r.code === 0 && /^\/[\w./-]+$/.test(d)) pkgStoreRoot ??= d;
+        if (r.code === 0 && /^\/[\w./-]+$/.test(d)) {
+          if (!pkgStoreRoots.has(cfg.vpsSsh)) pkgStoreRoots.set(cfg.vpsSsh, d);
+        }
         else pkgStoreLearned.delete(cfg.vpsSsh);
       } catch {
         pkgStoreLearned.delete(cfg.vpsSsh);
@@ -172,8 +180,9 @@ export function learnPkgStore(cfg: Config): Promise<void> {
   return p;
 }
 /** The read-only mount every image-booted box gets. Empty until the store is known. */
-function pkgStoreFlags(): string[] {
-  return pkgStoreRoot ? ["--mount-dir", `${pkgStoreRoot}/pkgs:${PKG_STORE_MOUNT}:ro`] : [];
+function pkgStoreFlags(cfg: Config): string[] {
+  const root = pkgStoreRootOf(cfg);
+  return root ? ["--mount-dir", `${root}/pkgs:${PKG_STORE_MOUNT}:ro`] : [];
 }
 /** Free host memory a builder box needs before it is started (its own 1 GB plus the reserve). */
 const STORE_BUILD_MIN_FREE_MB = 1536;
@@ -185,12 +194,13 @@ const STORE_BUILD_MIN_FREE_MB = 1536;
 async function buildStoredPackage(cfg: Config, spec: string, ver: string): Promise<void> {
   if (!storable(spec) || !/^v\d+$/.test(ver)) throw new Error("not a package the store can hold");
   await learnPkgStore(cfg);
-  if (!pkgStoreRoot) throw new Error("the store directory is not available on the host");
+  const root = pkgStoreRootOf(cfg);
+  if (!root) throw new Error("the store directory is not available on the host");
   const free = await hostFreeMb(cfg);
   if (free !== undefined && free < STORE_BUILD_MIN_FREE_MB) throw new Error(`the host has ${free} MB free; a build needs ${STORE_BUILD_MIN_FREE_MB}`);
   await learnHostGuard(cfg);
   const key = storeKey(spec), name = specName(spec);
-  const stage = `${pkgStoreRoot}/stage/${key}-${ver}`, dest = `${pkgStoreRoot}/pkgs/${key}`;
+  const stage = `${root}/stage/${key}-${ver}`, dest = `${root}/pkgs/${key}`;
   const box = `${STORE_BOX_PREFIX}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   await ssh(cfg, `rm -rf ${shellQuote(stage)} && mkdir -p ${shellQuote(stage)}`);
   try {
@@ -228,21 +238,28 @@ async function buildStoredPackage(cfg: Config, spec: string, ver: string): Promi
       `ls -d ${shellQuote(dest)}/v* | sort | head -n -2 | while read -r old; do rm -rf "$old"; done`
   );
 }
-let pkgStoreQueue: ReturnType<typeof makePkgStore> | undefined;
+// One queue per host: what one host holds says nothing about another, and a build runs on the
+// host whose box asked for it.
+const pkgStoreQueues = new Map<string, ReturnType<typeof makePkgStore>>();
 /** Ask for these specs to be in the store; anything missing is built in the background. */
 export function wantStoredPackages(cfg: Config, specs: readonly string[]): void {
   if (process.env.MCP_PKG_STORE === "0" || !specs.length) return;
-  pkgStoreQueue ??= makePkgStore({
-    nowSec: () => Math.floor(Date.now() / 1000),
-    list: async () => {
-      await learnPkgStore(cfg);
-      if (!pkgStoreRoot) throw new Error("the store directory is not available on the host");
-      return String((await ssh(cfg, `ls -d ${shellQuote(pkgStoreRoot)}/pkgs/*/v* 2>/dev/null; true`, false)).stdout ?? "");
-    },
-    build: (spec, ver) => buildStoredPackage(cfg, spec, ver),
-    log: (m) => console.error(m),
-  });
-  pkgStoreQueue.want(specs);
+  let q = pkgStoreQueues.get(cfg.vpsSsh);
+  if (!q) {
+    q = makePkgStore({
+      nowSec: () => Math.floor(Date.now() / 1000),
+      list: async () => {
+        await learnPkgStore(cfg);
+        const root = pkgStoreRootOf(cfg);
+        if (!root) throw new Error("the store directory is not available on the host");
+        return String((await ssh(cfg, `ls -d ${shellQuote(root)}/pkgs/*/v* 2>/dev/null; true`, false)).stdout ?? "");
+      },
+      build: (spec, ver) => buildStoredPackage(cfg, spec, ver),
+      log: (m) => console.error(`${m} [${cfg.hostId ?? cfg.vpsSsh}]`),
+    });
+    pkgStoreQueues.set(cfg.vpsSsh, q);
+  }
+  q.want(specs);
 }
 /** Builder boxes a restart left behind (a build is cut off when the controller stops). */
 export async function reapStoreBuilders(cfg: Config): Promise<void> {
@@ -254,7 +271,8 @@ export async function reapStoreBuilders(cfg: Config): Promise<void> {
       await msb(cfg, ["rm", "--force", e.name], false);
     }
     await learnPkgStore(cfg);
-    if (pkgStoreRoot) await ssh(cfg, `rm -rf ${shellQuote(pkgStoreRoot)}/stage/* 2>/dev/null; true`, false);
+    const root = pkgStoreRootOf(cfg);
+    if (root) await ssh(cfg, `rm -rf ${shellQuote(root)}/stage/* 2>/dev/null; true`, false);
   } catch {
     /* next start tries again */
   }
@@ -328,7 +346,7 @@ export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void>
     // the operator grows from there (msb modify --root-disk is grow-only). Snapshot boots skip
     // the flag — a snapshot carries its own rootfs size (pinned at bake time in createBareBox),
     // and asking for a smaller disk than the snapshot was baked with would fail the boot.
-    ...(cfg.snapshot ? [] : ["--root-disk", cfg.rootDisk, ...pkgStoreFlags()]),
+    ...(cfg.snapshot ? [] : ["--root-disk", cfg.rootDisk, ...pkgStoreFlags(cfg)]),
     ...egressFlags(cfg),
     "--idle-timeout",
     cfg.idleTimeout,
@@ -583,7 +601,7 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind, owner: s
     "--pull",
     "never",
     // The package store, for image boots (a snapshot boot is left exactly as it was).
-    ...(cfg.snapshot ? [] : pkgStoreFlags()),
+    ...(cfg.snapshot ? [] : pkgStoreFlags(cfg)),
     // A snapshot carries its own rootfs size (pinned at bake time); an image boot sizes it here.
     ...rootSourceArgs(cfg),
     "--",
