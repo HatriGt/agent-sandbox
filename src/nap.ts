@@ -7,6 +7,13 @@
  */
 export const NAP_TURN_GRACE_MS = 3 * 60_000;
 
+/** The quiet clock's start: the agent log's age, or the last wake when that is newer (a wake is activity). */
+export function quietSinceSec(lastOutputAtSec: number | undefined, wokenAtMs: number | undefined): number | undefined {
+  const woke = wokenAtMs != null ? wokenAtMs / 1000 : undefined;
+  if (woke == null) return lastOutputAtSec;
+  return lastOutputAtSec == null ? woke : Math.max(lastOutputAtSec, woke);
+}
+
 export function shouldNap(o: {
   role: string;
   boxStatus: string;

@@ -21,3 +21,13 @@ test("a box whose turn the controller just started is left alone until the grace
   assert.equal(shouldNap({ ...quiet, turnStartedAtMs: now - NAP_TURN_GRACE_MS + 1 }), false);
   assert.equal(shouldNap({ ...quiet, turnStartedAtMs: now - NAP_TURN_GRACE_MS }), true);
 });
+
+test("a wake is activity: the quiet clock starts at the wake when that is newer than the log", async () => {
+  const { quietSinceSec } = await import("../src/nap.ts");
+  assert.equal(quietSinceSec(100, undefined), 100);
+  assert.equal(quietSinceSec(undefined, 5_000), 5);
+  assert.equal(quietSinceSec(100, 5_000), 100, "an older wake changes nothing");
+  assert.equal(quietSinceSec(100, 500_000), 500, "a newer wake is the start");
+  // The live loop of 2026-11-19: woken 45 s ago, log 145 min old → not napped.
+  assert.equal(shouldNap({ ...base, lastOutputAtSec: quietSinceSec(now / 1000 - 145 * 60, now - 45_000) }), false);
+});

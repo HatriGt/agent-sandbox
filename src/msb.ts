@@ -2613,6 +2613,16 @@ const lastLsStatus = new Map<string, { status: string; at: number }>();
 /** After `msb start`, stop treating the box as asleep so the watch hub execs again immediately. */
 export function noteRunning(box: string): void {
   lastLsStatus.set(box, { status: "Running", at: Date.now() });
+  wokenAt.set(box, Date.now());
+}
+/**
+ * When the controller last started the box (a wake from the thread, a reply, a restore). A wake is
+ * activity: the idle nap counts from it, not from the agent log the box had before it slept, or
+ * the sweep after a wake would stop the box again before the first message (seen live 2026-11-19).
+ */
+const wokenAt = new Map<string, number>();
+export function wokenAtOf(box: string): number | undefined {
+  return wokenAt.get(box);
 }
 /** After `msb stop`, treat the box as asleep at once so no reader execs into it and re-boots it. */
 export function noteStopped(box: string): void {

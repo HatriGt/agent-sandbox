@@ -88,7 +88,7 @@ import { seedStarterSkills } from "./starter-skills.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { currentPrincipal, guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { allowShellScripts, securityHeaders } from "./security-headers.js";
-import { gatherMonitor, gatherWatch, readAgentLogFull, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, mirrorInboxMessage, takeDeliveredInbox, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo, pauseRunForResize, type MemoryTier, type DiskTier } from "./msb.js";
+import { gatherMonitor, gatherWatch, readAgentLogFull, askInBox, driverStateLine, startBoxIfStopped, noteRunning, wokenAtOf, stopBox, noteStopped, interruptAgentRun, mirrorInboxMessage, takeDeliveredInbox, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo, pauseRunForResize, type MemoryTier, type DiskTier } from "./msb.js";
 import { isBoxName } from "./sync.js";
 import { run as runCmd, shellQuote, sshLaneFront } from "./exec.js";
 import { touchClaimed, markParked } from "./claims.js";
@@ -119,7 +119,7 @@ import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor, isPlumbingError } from "./redact.js";
 import { isSecretKey, probeMcpServer, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
 import { parseDurationSec, type BoxView, type WatchSnapshot } from "./monitor.js";
-import { shouldNap } from "./nap.js";
+import { quietSinceSec, shouldNap } from "./nap.js";
 import { listChanges, readDiff, readFullDiff, discardChange, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta, forgetRunMetas, loadRunMetasLocal, saveRunMetaLocal, forgetRunMetaLocal, type RunMeta } from "./run-memory.js";
 import { contentDisposition, readArtifact } from "./artifact.js";
@@ -1268,10 +1268,11 @@ const maybeNap = (boxes: BoxView[], claims: Map<string, number>, nowMs: number) 
     if (napInFlight.has(b.name)) continue;
     // A paused host's listing is memory: nothing is stopped on it until it is up for something else.
     if (hostPool.dormant(hostPool.hostOfBox(b.name) ?? PRIMARY_HOST_ID)) continue;
-    const verdict = shouldNap({ role: b.role, boxStatus: b.boxStatus, runState: b.runState, lastOutputAtSec: b.lastOutputAt, idleTimeoutSec, nowMs, turnStartedAtMs: turnStarted.get(b.name) });
+    const since = quietSinceSec(b.lastOutputAt, wokenAtOf(b.name));
+    const verdict = shouldNap({ role: b.role, boxStatus: b.boxStatus, runState: b.runState, lastOutputAtSec: since, idleTimeoutSec, nowMs, turnStartedAtMs: turnStarted.get(b.name) });
     if (!verdict) continue;
     napInFlight.add(b.name);
-    const quiet = Math.round((nowMs / 1000 - (b.lastOutputAt ?? nowMs / 1000)) / 60);
+    const quiet = Math.round((nowMs / 1000 - (since ?? nowMs / 1000)) / 60);
     void stopBox(hcfg(b.name), b.name)
       .then(async () => {
         noteStopped(b.name);
@@ -1518,6 +1519,8 @@ const readFleet = makeFleetReader(
       ...(b.task ? { task: redactor.redact(b.task) } : {}),
       ...(b.question ? { question: redactor.redact(b.question) } : {}),
       ...(kept.has(b.name) ? { kept: true } : {}),
+      // The quiet clock the dashboard counts down is the nap's own: a wake is activity.
+      ...(/^running$/i.test(b.boxStatus) && quietSinceSec(b.lastOutputAt, wokenAtOf(b.name)) !== b.lastOutputAt ? { lastOutputAt: quietSinceSec(b.lastOutputAt, wokenAtOf(b.name)) } : {}),
       // For a stopped box the claim age is (a good proxy for) how long it has been asleep.
       ...(!/^running$/i.test(b.boxStatus) && claims.has(b.name) ? { asleepSec: claims.get(b.name) } : {}),
     }));
