@@ -50,9 +50,12 @@ Think about the machine from the operator's side. After a task is delegated ther
    is Away (its copy brings it back): the thread row records `absent` the first time an awake host
    lists without it, and that word holds while the host sleeps (before, every such thread came back
    as "asleep" each time its host paused). The Fleet page lists a temporary sleeper as
-   "temporary · wakes on reply · destroyed in 37m" (it can be revived until then; a kept one reads
-   "kept · wakes on reply"), and does not list an unkept Away thread at all: that lives in Threads
-   and History (decided 2026-11-19). **Implemented** — and it fixed a real bug: the maintainer used to
+   "temporary · wakes on reply" with a live "37m 12s to destroy" countdown in its Time left column
+   (it can be revived until then; a kept one reads "kept · wakes on reply" and "kept" in place of a
+   countdown), and does not list an unkept Away thread at all: that lives in Threads and History
+   (decided 2026-11-19). The table is one flat, pageable list (10/25/50 rows, triage order, any
+   column sorts the whole set) under a header that stays put while the rows scroll; a row's Destroy
+   takes a kept machine too, after an armed "Kept · destroy anyway?" that sends `force`. **Implemented** — and it fixed a real bug: the maintainer used to
    treat *any* stopped `pool-*` box as dead and force-remove it, which destroyed sleeping claimed runs
    (the "a reply wakes it" promise was broken). Claims are now recorded on the host
    (`~/.agent-sandbox/claims/<box>`, see `src/claims.ts`), so a stopped box's status as a run is

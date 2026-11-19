@@ -39,7 +39,22 @@ const BP: Record<NonNullable<Column<unknown>["hideBelow"]>, string> = { sm: "(mi
 /** The trailing actions column, sized from its own buttons on a phone. */
 const ACTIONS = "__actions";
 
-type Sort = { id: string; dir: "asc" | "desc" } | null;
+export type Sort = { id: string; dir: "asc" | "desc" } | null;
+
+/** The comparator a sorted column uses, exported so a caller that paginates can order the whole set the same way. */
+export function compareBy<T>(col: Column<T> | undefined, dir: "asc" | "desc"): (a: T, b: T) => number {
+  const k = col?.sort;
+  if (!k) return () => 0;
+  const m = dir === "asc" ? 1 : -1;
+  return (a, b) => {
+    const x = k(a);
+    const y = k(b);
+    if (x == null && y == null) return 0;
+    if (x == null) return 1;
+    if (y == null) return -1;
+    return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" })) * m;
+  };
+}
 
 const NO_GHOSTS: ReadonlySet<string> = new Set();
 
@@ -65,6 +80,8 @@ export function DataTable<T>({
   rowProps,
   groupOf,
   initialSort = null,
+  sort: sortProp,
+  onSortChange,
   loading,
   empty,
   minWidth,
@@ -90,6 +107,9 @@ export function DataTable<T>({
   /** Group head shown above the first row of each run of equal values (unsorted only). */
   groupOf?: (row: T) => string | null;
   initialSort?: Sort;
+  /** Controlled sort: the caller orders the rows itself (a paginated table sorts the whole set, not the page). */
+  sort?: Sort;
+  onSortChange?: (sort: Sort) => void;
   loading?: boolean;
   empty?: React.ReactNode;
   minWidth?: string;
@@ -118,7 +138,8 @@ export function DataTable<T>({
   // truncates into what is left and the actions cell is as wide as its buttons.
   const narrow = !at.sm;
   const cols = useColumnWidths(resizeKey ?? ariaLabel, !loading && rows.length > 0, `${visibleCols.map((c) => c.id).join(",")}|${rows.length}`);
-  const [sort, setSort] = React.useState<Sort>(initialSort);
+  const [sortState, setSortState] = React.useState<Sort>(initialSort);
+  const sort = sortProp !== undefined ? sortProp : sortState;
   const sorted = React.useMemo(() => {
     const col = sort && columns.find((c) => c.id === sort.id);
     if (!col?.sort) return rows;
@@ -144,7 +165,9 @@ export function DataTable<T>({
   const cycle = (id: string) => {
     enterOf.current.clear();
     setEpoch((n) => n + 1);
-    setSort((s) => (s?.id !== id ? { id, dir: "asc" } : s.dir === "asc" ? { id, dir: "desc" } : null));
+    const next: Sort = sort?.id !== id ? { id, dir: "asc" } : sort.dir === "asc" ? { id, dir: "desc" } : null;
+    setSortState(next);
+    onSortChange?.(next);
   };
   React.useEffect(() => {
     // Not until real rows arrive: an empty first render must not make every later row "new".

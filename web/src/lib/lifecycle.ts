@@ -60,6 +60,17 @@ export function fmtDuration(sec: number): string {
   return rh ? `${d}d ${rh}h` : `${d}d`;
 }
 
+/**
+ * A live countdown: seconds under a minute, "11m 05s" under an hour (the seconds are what makes it
+ * read as a clock and not an estimate), then fmtDuration's "1h 12m" / "2d 3h".
+ */
+export function fmtCountdown(sec: number): string {
+  const s = Math.max(0, Math.round(sec));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+  return fmtDuration(s);
+}
+
 /** The dashboard's display state: the agent's run state, or "sleeping" for an idle-stopped microVM. */
 export type DisplayState = RunState | "sleeping";
 
@@ -82,13 +93,18 @@ export interface Deadline {
  * What ends this machine first, right now. A live run is bounded by max-duration; a finished or
  * waiting run is bounded by whichever of idle-stop (estimated) and max-duration comes sooner.
  */
-export function deadlineOf(b: BoxView, lc: FleetLifecycle, nowMs = Date.now()): Deadline {
+export function deadlineOf(b: BoxView, lc: FleetLifecycle, nowMs = Date.now(), snapshotMs?: number): Deadline {
+  // `uptime` and `asleepSec` are readings taken at the poll; a cell that ticks between polls adds
+  // the time since, so the countdown moves every second instead of once per poll.
+  const age = snapshotMs ? Math.max(0, (nowMs - snapshotMs) / 1000) : 0;
   if (/^stopped$/i.test(b.boxStatus)) {
     // Asleep: destroyed when the sleep TTL runs out, unless kept.
     if (b.kept || b.asleepSec == null || !lc.sleepTtlSec) return { kind: "none" };
-    return { kind: "sleep", remainingSec: Math.max(0, lc.sleepTtlSec - b.asleepSec), fraction: Math.min(1, b.asleepSec / lc.sleepTtlSec) };
+    const asleep = b.asleepSec + age;
+    return { kind: "sleep", remainingSec: Math.max(0, lc.sleepTtlSec - asleep), fraction: Math.min(1, asleep / lc.sleepTtlSec) };
   }
-  const up = parseUptimeSec(b.uptime);
+  const upRead = parseUptimeSec(b.uptime);
+  const up = upRead == null ? undefined : upRead + age;
   const cands: Deadline[] = [];
   if (up != null && lc.maxDurationSec) {
     cands.push({ kind: "max-duration", remainingSec: Math.max(0, lc.maxDurationSec - up), fraction: Math.min(1, up / lc.maxDurationSec) });
@@ -106,7 +122,7 @@ export function deadlineOf(b: BoxView, lc: FleetLifecycle, nowMs = Date.now()): 
 /** One quiet sentence for the header: "1h cap · 42m left" / "stops in ~9m if it stays quiet". */
 export function deadlineLabel(d: Deadline): string | null {
   if (d.kind === "none" || d.remainingSec == null) return null;
-  if (d.remainingSec <= 0) return d.kind === "sleep" ? "being destroyed" : d.kind === "max-duration" ? "at the run cap — stopping" : "going to sleep any moment";
+  if (d.remainingSec <= 0) return d.kind === "sleep" ? "being destroyed now" : d.kind === "max-duration" ? "at the run cap — stopping" : "going to sleep now";
   if (d.kind === "max-duration") return `${fmtDuration(d.remainingSec)} left of the run cap`;
   if (d.kind === "sleep") return `destroyed in ${fmtDuration(d.remainingSec)} unless kept or woken`;
   return `stops in ~${fmtDuration(d.remainingSec)} if it stays quiet`;
@@ -115,7 +131,7 @@ export function deadlineLabel(d: Deadline): string | null {
 /** The same fact in three words for the header context line: "sleeps in 4m" / "destroyed in 20m" / "42m left of cap". */
 export function deadlineShort(d: Deadline): string | null {
   if (d.kind === "none" || d.remainingSec == null) return null;
-  if (d.remainingSec <= 0) return d.kind === "sleep" ? "being destroyed" : d.kind === "max-duration" ? "at the cap" : "sleeping any moment";
+  if (d.remainingSec <= 0) return d.kind === "sleep" ? "being destroyed" : d.kind === "max-duration" ? "at the cap" : "sleeping now";
   const t = fmtDuration(d.remainingSec);
   return d.kind === "max-duration" ? `${t} left of cap` : d.kind === "sleep" ? `destroyed in ${t}` : `sleeps in ${t}`;
 }

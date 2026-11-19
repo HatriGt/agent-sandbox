@@ -1035,6 +1035,7 @@ export default function App() {
                     loading={loading}
                     onOpen={open}
                     onDestroyed={() => {}}
+                    snapshotAt={updatedAt}
                     onBack={backToRail}
                   />
                 ) : view === "automations" || view === "playbooks" ? (
