@@ -399,7 +399,7 @@ function summarizeError(body: string): string {
 // machine token as the user name (`ibssh_…@ssh.instabox.sh`, port 2222); the machine's own sshd
 // listens on 22 for the direct route, as `user`. The REST API (X-API-Key) reads the machine
 // (`state`: running / suspended / stopped / …), suspends, starts, creates, snapshots and deletes it;
-// lifecycle calls carry an Idempotency-Key and a delete the X-Confirm-Delete header.
+// lifecycle calls (a delete too) carry an Idempotency-Key and a delete the X-Confirm-Delete header.
 
 export const INSTABOX_API = "https://api.instabox.sh";
 export const INSTABOX_SSH_GATEWAY = "ssh.instabox.sh";
@@ -576,7 +576,7 @@ export function makeInstaboxAdapter(fetcher: Fetcher = fetch as unknown as Fetch
     let vmId: string | undefined;
     const undo = async (why: string): Promise<void> => {
       if (vmId) {
-        const r = await req(apiKey, "DELETE", machinePath(vmId), undefined, timeoutMs, { "X-Confirm-Delete": vmId });
+        const r = await req(apiKey, "DELETE", machinePath(vmId), undefined, timeoutMs, { "Idempotency-Key": `asb-${crypto.randomUUID()}`, "X-Confirm-Delete": vmId });
         say(r.ok || r.status === 404 ? `machine ${vmId} deleted` : `could not delete machine ${vmId} (${fail("DELETE", r)}); remove it by hand`);
       }
       say(`undone: ${why}`);
@@ -633,7 +633,7 @@ export function makeInstaboxAdapter(fetcher: Fetcher = fetch as unknown as Fetch
   const destroy = async (spec: HostSpec): Promise<{ ok: boolean; detail: string }> => {
     const c = cloudOf(spec);
     if (!c?.vmId || !c.apiKey) return { ok: false, detail: "the host has no machine id or API key" };
-    const r = await req(c.apiKey, "DELETE", machinePath(c.vmId), undefined, timeoutMs, { "X-Confirm-Delete": c.vmId });
+    const r = await req(c.apiKey, "DELETE", machinePath(c.vmId), undefined, timeoutMs, { "Idempotency-Key": `asb-${crypto.randomUUID()}`, "X-Confirm-Delete": c.vmId });
     if (r.ok || r.status === 404) return { ok: true, detail: `machine ${c.vmId} deleted` };
     return { ok: false, detail: `machine ${c.vmId}: ${fail("DELETE", r)}` };
   };

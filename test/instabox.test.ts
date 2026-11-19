@@ -170,6 +170,7 @@ test("instabox: mintSsh turns the key and the machine id into a token target; pr
   assert.match(failed.ok ? "" : failed.error, /SSH never answered: Permission denied/);
   assert.ok(deleted, "the machine was deleted");
   assert.equal(deleted!.headers["X-Confirm-Delete"], "m_new");
+  assert.match(deleted!.headers["Idempotency-Key"] ?? "", /^asb-/, "a delete is a lifecycle call: without the key the API answers 400 and the machine is left behind");
   assert.ok(!(await a.provision({ apiKey: "ibk_KEY", slug: "Bad Name" })).ok);
 });
 
@@ -186,6 +187,7 @@ test("instabox: destroy confirms with the machine id; a snapshot is named for th
   const d = await a.destroy!(spec);
   assert.ok(d.ok);
   assert.equal(seen[0].headers["X-Confirm-Delete"], "m_abc");
+  assert.match(seen[0].headers["Idempotency-Key"] ?? "", /^asb-/);
   const s = await a.snapshot!(spec, { slug: "asb-host-20261119" });
   assert.deepEqual(s, { ok: true, snapshotId: "snap_9", slug: "asb-host-20261119" });
 });

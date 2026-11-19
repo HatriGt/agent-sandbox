@@ -6207,13 +6207,14 @@ app.post("/hosts/provision.json", async (req: Request, res: Response) => {
   const log = (m: string) => console.error(`[hosts] provision ${id}: ${m}`);
   try {
     // The VM's sshd behind the proxy has to take the token before the row is worth saving: a plain
-    // ssh (no master: the pool opens its own once the row exists), tried for up to two minutes.
+    // ssh (no master: the pool opens its own once the row exists) with the provider's own options
+    // (`-p 2222` for the Instabox gateway), tried for up to two minutes.
     const sshReady = async (target: string): Promise<void> => {
       const until = Date.now() + 120_000;
       let last = "";
       for (;;) {
         try {
-          await runCmd("ssh", ["-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=20", ...(cfg.sshExtraOpts ?? []), target, "true"], { timeoutMs: 40_000 });
+          await runCmd("ssh", ["-o", "BatchMode=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=20", ...(adapter.sshOpts ?? []), ...(cfg.sshExtraOpts ?? []), target, "true"], { timeoutMs: 40_000 });
           return;
         } catch (e) {
           last = String((e as Error).message ?? e).split("\n")[0];
