@@ -378,3 +378,5 @@ every master carries `ServerAliveInterval=15` / `ServerAliveCountMax=2` (src/ssh
 exits within about half a minute; and a probe that times out closes the host's masters before the
 next try (src/host-pool.ts `ready`), so the retry builds a fresh connection. By hand, the cure was
 killing the `ssh: … [mux]` process for the host inside the container.
+
+**Every timed-out ssh closes its own master (2026-11-19, later the same day).** The keepalive was not enough: a master built right after a resume answered its control socket while its channel was dead, so a fresh master and a plain ssh reached the VM in 8 s while every command through the shared one hung until killed. The central runner (`run()` and `runStream()` in `src/exec.ts`) now reads the `ControlPath` of any ssh or rsync argv that times out, asks that master to exit and unlinks its socket, so the next command builds a fresh one. This is the universal fix; the probe-loop close in the host pool is the early special case of it.
