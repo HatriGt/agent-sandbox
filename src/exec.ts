@@ -70,6 +70,32 @@ export function resetSshMasterOnTimeout(cmd: string, args: string[]): void {
     unlink(sock, () => {});
   });
   c.on("error", () => unlink(sock, () => {}));
+  noteSshFailure(sock, "timeout");
+}
+
+/**
+ * A connection-level ssh failure: the command timed out, or ssh itself exited 255 (its own exit
+ * code, never a remote command's). Whoever owns a route through that control socket hears of it:
+ * the direct route to a proxied VM (src/ssh-tunnel.ts) drops itself on the first such failure,
+ * because its forward can be dead underneath while its process lives on, and nothing else would
+ * ever notice. Registered by the owner at load; exec.ts stays free of ssh imports.
+ */
+export type SshFailure = "timeout" | "exit255";
+export const sshFailureHooks = new Set<(sock: string, why: SshFailure) => void>();
+export function noteSshFailure(sock: string, why: SshFailure): void {
+  for (const hook of sshFailureHooks) {
+    try {
+      hook(sock, why);
+    } catch {
+      /* a hook must never fail a command */
+    }
+  }
+}
+/** The exit-255 case of `noteSshFailure`, from an argv. */
+export function noteSshExit(cmd: string, args: string[], code: number): void {
+  if (code !== 255) return;
+  const sock = sshControlPathOf(cmd, args);
+  if (sock) noteSshFailure(sock, "exit255");
 }
 
 /** POSIX single-quote a string so it survives one round of remote shell parsing (ssh). */
@@ -132,6 +158,7 @@ export async function run(
     child.on("close", (code) => {
       if (!done()) return; // already rejected by the timeout
       const result: RunResult = { code: code ?? -1, stdout, stderr };
+      noteSshExit(cmd, args, result.code);
       if (check && result.code !== 0) {
         // The argv is redacted, not omitted (it's what makes ssh failures debuggable) — but it can
         // carry a token-embedded clone URL, and this message flows back to MCP callers verbatim:
@@ -218,6 +245,7 @@ export async function runStream(cmd: string, args: string[], opts: StreamOptions
       if (timer) clearTimeout(timer);
       if (settled) return;
       settled = true;
+      noteSshExit(cmd, args, code ?? -1);
       void outDone.then(() => resolve({ code: code ?? -1, stderr, stdout, bytes }));
     });
   });

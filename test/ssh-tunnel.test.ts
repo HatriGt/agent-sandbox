@@ -6,7 +6,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Config } from "../src/config.ts";
-import { directPort, directUser, dropTunnel, ensureTunnel, resetTunnelsForTest, routeFor, tunnelArgs, tunnelState, type TunnelIO } from "../src/ssh-tunnel.ts";
+import { directPort, directUser, dropTunnel, ensureTunnel, noteDirectRouteFailure, resetTunnelsForTest, routeFor, tunnelArgs, tunnelState, type TunnelIO } from "../src/ssh-tunnel.ts";
+import { noteSshFailure } from "../src/exec.ts";
 import { directRoute, gateSsh, sshGated, sshMasterSockets, sshMuxOpts, SSH_GATED_OPTS } from "../src/ssh.ts";
 
 const cfg = { vpsSsh: "asb-host+root:tok@beta-ssh.freestyle.sh", hostId: "fs-1", sshPersist: "120", sshExtraOpts: ["-i", "/k/id", "-o", "StrictHostKeyChecking=accept-new"] } as unknown as Config;
@@ -179,4 +180,34 @@ test("gateSsh: a gated target's commands fail locally (ProxyCommand=false, no ma
   const socks = sshMasterSockets(cfg.vpsSsh);
   assert.equal(socks.length, 2);
   assert.ok(socks[0].endsWith(".sock") && socks[1].endsWith("d.sock"));
+});
+
+test("a command that times out or dies (255) on the direct route drops it at once: the forward is killed, the proxy is next, a re-dial is scheduled; the proxy's own socket and a route not up are nobody's business", async () => {
+  resetTunnelsForTest();
+  const { io, log, spawned } = fakeIO();
+  assert.equal(await ensureTunnel(cfg, () => true, io), true);
+  const route = routeFor(cfg.vpsSsh);
+  assert.ok(directRoute(cfg.vpsSsh), "up");
+  // A timeout on the proxy's socket (no d) is not the route's.
+  assert.equal(noteDirectRouteFailure(`/root/.ssh/asb/${route.tag}.sock`, "timeout", io), false);
+  assert.ok(directRoute(cfg.vpsSsh), "still up");
+  // A timeout through the direct socket: dropped, killed, re-dial scheduled.
+  assert.equal(noteDirectRouteFailure(`/root/.ssh/asb/${route.tag}d.sock`, "timeout", io), true);
+  assert.equal(directRoute(cfg.vpsSsh), undefined, "the next command takes the proxy");
+  assert.equal(spawned[0].killed, true, "the dead forward is killed");
+  assert.equal(tunnelState(cfg), "down");
+  assert.match(log.at(-1) ?? "", /fs-1: a command through the direct route timed out; the route is dropped, commands take the proxy, dialled again in \d+s/);
+  // The killed forward's own exit is not reported twice.
+  const n = log.length;
+  spawned[0].exit(null);
+  assert.equal(log.length, n);
+  // Not up any more: a second failure is nobody's.
+  assert.equal(noteDirectRouteFailure(`/root/.ssh/asb/${route.tag}d.sock`, "exit255", io), false);
+  // The hook exec.ts calls is registered: the production io logs to the console, so only the drop is checked.
+  await ensureTunnel(cfg, () => true, io).catch(() => {});
+  resetTunnelsForTest();
+  assert.equal(await ensureTunnel(cfg, () => true, io), true);
+  noteSshFailure(`/root/.ssh/asb/${route.tag}d.sock`, "exit255");
+  assert.equal(directRoute(cfg.vpsSsh), undefined, "exec.ts's hook reaches the route");
+  resetTunnelsForTest();
 });

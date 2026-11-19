@@ -20,7 +20,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import type { Config } from "./config.js";
-import { run, shellQuote } from "./exec.js";
+import { run, shellQuote, sshFailureHooks, type SshFailure } from "./exec.js";
 import { setDirectRoute, sshMuxOpts, sshTargetTag, type DirectRoute, SOCK_DIR } from "./ssh.js";
 
 export interface TunnelIO {
@@ -37,6 +37,7 @@ export interface TunnelIO {
 
 interface Entry {
   target: string;
+  cfg: Config;
   wanted: () => boolean;
   child?: { kill(): void };
   route?: DirectRoute;
@@ -169,9 +170,10 @@ export function ensureTunnel(cfg: Config, wanted: () => boolean = () => true, io
   const target = cfg.vpsSsh;
   let e = entries.get(target);
   if (!e) {
-    e = { target, wanted, failures: 0, keyInstalled: false };
+    e = { target, cfg, wanted, failures: 0, keyInstalled: false };
     entries.set(target, e);
   }
+  e.cfg = cfg;
   e.wanted = wanted;
   if (e.off) return Promise.resolve(false);
   if (e.route) return Promise.resolve(true);
@@ -249,6 +251,37 @@ function scheduleRetry(cfg: Config, e: Entry, io: TunnelIO): void {
   }, retryMs(e));
   e.retry.unref?.();
 }
+
+/**
+ * A command through the direct route timed out or died at connection level (ssh exit 255): the
+ * forward is dead underneath while its process lives on. Seen live 2026-11-19: the port answered,
+ * every command through it hung to its timeout, the host was marked unreachable and its own probes
+ * took the same dead route for minutes, a kept thread's reply failed, while the proxy reached the
+ * VM in 13 s. The route is dropped at once (the next command takes the proxy), the forward is
+ * killed, and it is dialled again with backoff while the host still wants it. A failure while the
+ * dial itself is checking the route is the dial's own to report. Returns true when a route was dropped.
+ */
+export function noteDirectRouteFailure(sock: string, why: SshFailure, io: TunnelIO = defaultIO): boolean {
+  const m = /([0-9a-f]{8})d\.sock$/.exec(sock);
+  if (!m) return false;
+  for (const e of entries.values()) {
+    if (!e.route || e.route.tag !== m[1]) continue;
+    const child = e.child;
+    e.child = undefined;
+    e.route = undefined;
+    e.failures++;
+    setDirectRoute(e.target, undefined);
+    child?.kill();
+    const again = e.wanted();
+    io.log(
+      `[ssh-direct] ${label(e.cfg)}: a command through the direct route ${why === "timeout" ? "timed out" : "died (ssh exit 255)"}; the route is dropped, commands take the proxy${again ? `, dialled again in ${Math.round(retryMs(e) / 1000)}s` : ""}`
+    );
+    if (again) scheduleRetry(e.cfg, e, io);
+    return true;
+  }
+  return false;
+}
+sshFailureHooks.add((sock, why) => void noteDirectRouteFailure(sock, why));
 
 /**
  * Tear the tunnel down and stop re-dialling: the host is going to sleep, or is gone. New commands

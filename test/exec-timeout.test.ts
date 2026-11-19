@@ -47,3 +47,21 @@ test("run: a timeout on an ssh argv closes that master (pinned at the source)", 
   const hooks = src.match(/child\.kill\("SIGKILL"\);\s*resetSshMasterOnTimeout\(cmd, args\);/g) ?? [];
   assert.equal(hooks.length, 2, "both run() and runStream() reset the master on timeout");
 });
+
+test("run: ssh exit 255 and a timeout both announce the control socket to the failure hooks (pinned at the source)", async () => {
+  const { noteSshExit, sshFailureHooks } = await import("../src/exec.ts");
+  const heard: string[] = [];
+  const hook = (sock: string, why: string) => void heard.push(`${why} ${sock}`);
+  sshFailureHooks.add(hook);
+  try {
+    noteSshExit("ssh", ["-o", "ControlPath=/root/.ssh/asb/82f88631d.sock", "host", "true"], 255);
+    noteSshExit("ssh", ["-o", "ControlPath=/root/.ssh/asb/82f88631d.sock", "host", "false"], 1);
+    noteSshExit("msb", ["ls"], 255);
+    assert.deepEqual(heard, ["exit255 /root/.ssh/asb/82f88631d.sock"], "only ssh's own exit code, only with a socket");
+  } finally {
+    sshFailureHooks.delete(hook);
+  }
+  const src = fs.readFileSync(new URL("../src/exec.ts", import.meta.url), "utf8");
+  assert.equal((src.match(/noteSshExit\(cmd, args, /g) ?? []).length, 2, "both run() and runStream() announce an exit 255");
+  assert.match(src, /c\.on\("error", \(\) => unlink\(sock, \(\) => \{\}\)\);\s*noteSshFailure\(sock, "timeout"\);/, "a timeout announces too");
+});
