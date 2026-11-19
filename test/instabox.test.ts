@@ -16,7 +16,7 @@ import {
 import { configForHost, normalizeHostSpec, publicHostSpec, redactSshTarget, type HostSpec } from "../src/hosts.ts";
 import { routeFor } from "../src/ssh-tunnel.ts";
 import { redactShapes } from "../src/redact.ts";
-import { imagesWanted, prepareCuresCheck, prepareHost, prepareStatus, resetPrepareForTest, startPrepare } from "../src/host-prepare.ts";
+import { imagesWanted, PREPARE_HOLD_MS, prepareCuresCheck, prepareHost, prepareStatus, resetPrepareForTest, startPrepare } from "../src/host-prepare.ts";
 
 // A fabricated token in the real shape (never a live credential in the repo).
 const TOKEN = "ibssh_fakeFAKEfake0000000000000000";
@@ -326,6 +326,30 @@ test("prepareHost: the adapter's step, then each missing image streamed from the
     assert.equal(failed.ok, false);
     assert.match(failed.error ?? "", /no space left/);
     assert.deepEqual(failed.steps, ["shim installed · rsync:ok"]);
+
+    // The host is held awake before the first step (the sleep gate paused a machine under a
+    // running stream once), and `done` gets the report whether it ended well or not.
+    const holds: string[] = [];
+    const done: Array<boolean | undefined> = [];
+    const held = await prepareHost(base, host, spec, {
+      hasImage: async () => true,
+      streamImage: async () => undefined,
+      log: () => undefined,
+      hold: (ms, reason) => void holds.push(`${ms}:${reason}`),
+      ready: async () => void holds.push("ready"),
+      done: (r) => void done.push(r.ok),
+    });
+    assert.equal(held.ok, true);
+    assert.deepEqual(holds, [`${PREPARE_HOLD_MS}:preparing ib`, "ready"], "held, then woken and waited for, before the first step");
+    assert.deepEqual(done, [true]);
+    // A machine that never comes up ends the preparation at that step, with the reason.
+    const down = await prepareHost(base, host, spec, { hasImage: async () => true, streamImage: async () => undefined, log: () => undefined, ready: async () => { throw new Error("ib never answered after its start"); } });
+    assert.equal(down.ok, false);
+    assert.match(down.error ?? "", /never answered/);
+    assert.deepEqual(down.steps, []);
+    const broke = await prepareHost(base, host, spec, { hasImage: async () => false, streamImage: async () => { throw new Error("EPIPE: the host stopped taking the image"); }, log: () => undefined, done: (r) => void done.push(r.ok) });
+    assert.equal(broke.ok, false);
+    assert.deepEqual(done, [true, false]);
 
     // Started in the background: the report is "running" at once and only one runs per host.
     let release!: () => void;

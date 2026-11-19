@@ -64,7 +64,23 @@ export interface PrepareDeps {
   now?: () => number;
   /** Called once the run ends, with the report (the caller re-checks the host after a success). */
   done?: (report: PrepareReport) => void;
+  /**
+   * Keep the host awake for `ms` more: the preparation renews it as it goes, so the sleep gate
+   * does not pause the machine under a running image stream (it did: the ssh died, `msb load`
+   * closed, the pipe into it broke, and the controller went down on the EPIPE, 2026-11-19).
+   */
+  hold?: (ms: number, reason: string) => void;
+  /**
+   * The host is up and answering: a paused machine is started through its provider first. The
+   * Instabox gateway refuses SSH to a suspended machine ("administratively prohibited … start it
+   * in the dashboard") instead of resuming it, so the preparation cannot rely on its first ssh.
+   */
+  ready?: () => Promise<void>;
 }
+
+/** How long one renewal of the awake hold lasts, and how often the preparation renews it. */
+export const PREPARE_HOLD_MS = 15 * 60_000;
+export const PREPARE_HOLD_EVERY_MS = 5 * 60_000;
 
 /**
  * A failed check that preparation would cure: the machine answered over SSH but has no `msb`
@@ -103,6 +119,14 @@ function streamImageOverSsh(primary: Config, host: Config, ref: string): Promise
     src.stderr.on("data", (d: string) => (srcErr = (srcErr + d).slice(-600)));
     dst.stderr.on("data", (d: string) => (dstErr = (dstErr + d).slice(-600)));
     dst.stdout.on("data", (d: string) => (dstOut = (dstOut + d).slice(-200)));
+    // The load's stdin closes when the host goes away under the stream (paused, rebooted, the
+    // gateway dropped): the write fails with EPIPE, which must not take the controller down. The
+    // save is stopped and the close handlers below settle with the load's exit.
+    dst.stdin.on("error", (e: NodeJS.ErrnoException) => {
+      dstErr = `${dstErr}\n${e.code ?? e.message}: the host stopped taking the image`.slice(-600);
+      src.kill();
+    });
+    src.stdout.on("error", () => dst.stdin.end());
     src.stdout.pipe(dst.stdin);
     const timer = setTimeout(() => {
       src.kill();
@@ -161,7 +185,11 @@ export async function prepareHost(primary: Config, host: Config, spec: HostSpec,
     report.steps.push(m);
     log(`[hosts] prepare ${spec.id}: ${m}`);
   };
+  const keepAwake = () => deps.hold?.(PREPARE_HOLD_MS, `preparing ${spec.id}`);
+  keepAwake();
+  const renew = deps.hold ? setInterval(keepAwake, PREPARE_HOLD_EVERY_MS) : undefined;
   try {
+    await deps.ready?.();
     const adapter = providerFor(spec);
     if (adapter.prepare) {
       const r = await adapter.prepare(spec, prepareIO(host));
@@ -185,6 +213,7 @@ export async function prepareHost(primary: Config, host: Config, spec: HostSpec,
     report.error = String((e as Error).message ?? e).slice(0, 300);
     log(`[hosts] prepare ${spec.id} failed: ${report.error}`);
   } finally {
+    if (renew) clearInterval(renew);
     report.running = false;
     report.endedAt = now();
     deps.done?.(report);

@@ -6040,19 +6040,27 @@ const hostsWithPrepare = () => hostPool.state().map((h) => ({ ...h, ...(prepareS
  * A host whose kind the controller can set up itself (the msb shim on a Docker host, the box images
  * from the primary) is prepared in the background once it answers; the row shows the progress.
  */
+/**
+ * What a preparation needs from the controller: the host held awake while it runs (the sleep gate
+ * paused a machine under a running image stream once), and a fresh check when it ends well, so
+ * the row stops saying "unreachable" without anyone pressing Check.
+ */
+const prepareDeps = (id: string): Parameters<typeof startPrepare>[3] => ({
+  log: (m) => console.error(m),
+  hold: (ms, reason) => hostPool.get(id)?.sleep.hold(ms, reason),
+  ready: () => hostPool.ready(id, "preparing"),
+  done: (r) => {
+    if (r.ok) void hostPool.check(id).catch(() => undefined);
+  },
+});
+
 // A fresh machine fails its first check (no msb on it yet: the shim is what prepare installs),
-// so that failure starts the preparation rather than stopping it; the host is checked again once
-// it ends, so the row stops saying "unreachable" without anyone pressing Check.
+// so that failure starts the preparation rather than stopping it.
 const prepareIfNeeded = (id: string, check: { ok: boolean; detail: string } | undefined): void => {
   const h = hostPool.get(id);
   if (!h || !prepareCuresCheck(check)) return;
   if (!providerFor(h.spec).prepare) return;
-  startPrepare(cfg, hostPool.cfgFor(id), h.spec, {
-    log: (m) => console.error(m),
-    done: (r) => {
-      if (r.ok) void hostPool.check(id).catch(() => undefined);
-    },
-  });
+  startPrepare(cfg, hostPool.cfgFor(id), h.spec, prepareDeps(id));
 };
 app.post("/hosts.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
@@ -6112,7 +6120,7 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
           res.status(400).json({ error: `a ${providerFor(h.spec).label} host is prepared by hand (see the runbook)` });
           return;
         }
-        const report = startPrepare(cfg, hostPool.cfgFor(id), h.spec, { log: (m) => console.error(m) });
+        const report = startPrepare(cfg, hostPool.cfgFor(id), h.spec, prepareDeps(id));
         res.locals.auditAction = `host.prepare:${id}`;
         res.json({ ok: true, prepare: report, host: hostsWithPrepare().find((x) => x.id === id) });
         return;

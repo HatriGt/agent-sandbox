@@ -7,6 +7,10 @@ was found, what the controller does differently there, and how to keep it health
 
 - A Firecracker microVM. **No `/dev/kvm`**, so microsandbox (`msb`) cannot boot its own microVMs
   inside it. Docker (29.x, overlayfs, cgroup v2) runs fine.
+- A suspended machine is **not** resumed by SSH: the gateway refuses the channel
+  ("administratively prohibited: machine … is suspended; start it in the instabox dashboard").
+  Only the API's `start` (or the dashboard) brings it back; the controller's `ready` does that
+  before any SSH to a dormant host. An API call does not resume it either, only `start` does.
 - Login user `user` (uid 1000, in the docker and sudo groups, passwordless sudo), home
   `/data/home`. Root disk 16 GB (Docker's data root `/var/lib/docker` lives there), `/data`
   20 GB, `/tmp` a 2 GB tmpfs.
@@ -92,7 +96,14 @@ key alone through the deployed controller: the first attempt showed that the rea
 dialled the gateway on port 22 and that the rollback delete lacked its Idempotency-Key (fixed in
 191a702, the stray machine deleted by hand), the second created the machine, minted the token
 and proved SSH in 6 s; the failing first check did not start the preparation (fixed next: a
-missing `msb` is now the cue), so it was started from the row's Prepare button.
+missing `msb` is now the cue), so it was started from the row's Prepare button. That
+preparation installed the shim and began streaming the claude image, then the sleep gate found
+the host "quiet for 5m" and suspended it under the stream: the ssh died, `msb load` closed, the
+pipe into it broke and the controller went down on an unhandled EPIPE. Fixed in one go: the
+stream's pipe handles the error (the preparation fails at that step, the controller stays up),
+a running preparation holds its host awake and renews the hold every five minutes, and it waits
+for the pool's `ready` (API start, then a probe) before its first ssh, since the gateway refuses
+a suspended machine.
 
 Against machine `m_agq5uelpl6qyy44ht6hbqm247i` ("sandbox", agent-browser template): every verb
 above with the controller's real flags, a `--copy-dir` run, exec with stdin, env and exit code,
