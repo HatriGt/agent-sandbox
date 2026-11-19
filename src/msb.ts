@@ -3096,8 +3096,18 @@ export async function setBoxDisk(cfg: Config, box: string, tier: DiskTier): Prom
 }
 
 /** Stop a box (no remove) so it can be snapshotted. */
-export async function stopBox(cfg: Config, box: string): Promise<void> {
-  await msb(cfg, ["stop", box], false);
+export type StopOutcome = "stopped" | "absent" | "failed";
+
+/**
+ * `msb stop`, and what became of it: a stop that did not land used to answer like one that did,
+ * so a sleep on a box the host no longer had was "ok" and the fleet read it as asleep.
+ */
+export async function stopBox(cfg: Config, box: string): Promise<StopOutcome> {
+  const r = await msb(cfg, ["stop", box], false);
+  if (r.code === 0) return "stopped";
+  const entry = parseLsJson((await msb(cfg, ["ls", "--format", "json"], false)).stdout).find((e) => e.name === box);
+  if (!entry) return "absent";
+  return isRunning(entry.status) ? "failed" : "stopped";
 }
 
 /** Create a named snapshot from a stopped box. */

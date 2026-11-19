@@ -654,6 +654,10 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     noteSweepError: (id, err) => {
       const h = get(id);
       if (!h) return;
+      // A command the pause cut short (the forward is dropped before the API call) or one that
+      // reached a paused machine says nothing about the host; it is dormant, and the Fleet page
+      // flashed "unreachable · Connection refused" for it (seen live 2026-11-19 on Instabox).
+      if (dormant(h)) return;
       h.lastError = err.slice(0, 200);
       if (!h.unreachableSince) {
         h.unreachableSince = now();

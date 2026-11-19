@@ -968,6 +968,37 @@ test("pause: the host is dormant and its SSH shut before the provider is asked; 
   }
 });
 
+test("a sweep error on a dormant host is not the host being unreachable: the pause cut the command short, or the machine is paused", async () => {
+  const fake = {
+    metered: true,
+    state: async (): Promise<ProviderState> => ({ state: "paused", at: 0 }),
+    pause: async (): Promise<ProviderState> => ({ state: "paused", at: 0 }),
+    start: async (): Promise<ProviderState> => ({ state: "running", at: 0 }),
+  };
+  setProviderForTest("freestyle", fake);
+  try {
+    const pool = makeHostPool(cfg, openMemoryDb(), { now: () => 1_000_000, tunnel: { ensure: async () => true, drop: () => {} } });
+    pool.upsert(vmSpec);
+    pool.noteSweep("fs-1", []);
+    await pool.pause("fs-1");
+    assert.equal(pool.dormant("fs-1"), true);
+    // The sweep that was in flight when the forward was dropped (seen live 2026-11-19 on Instabox:
+    // "ssh: connect to host 127.0.0.1 port 46784: Connection refused").
+    pool.noteSweepError("fs-1", "msb ls failed (exit 255): Connection refused");
+    const h = pool.state().find((x) => x.id === "fs-1")!;
+    assert.equal(h.unreachable, false, "a paused host is dormant, never unreachable");
+    assert.equal(h.lastError, undefined, "nothing for the Fleet page to flash");
+    // Awake again, a failed sweep counts as it always did.
+    await pool.start("fs-1");
+    pool.noteSweep("fs-1", []);
+    pool.noteSweepError("fs-1", "ssh: connect to host timed out");
+    assert.equal(pool.state().find((x) => x.id === "fs-1")?.unreachable, true);
+  } finally {
+    setProviderForTest("freestyle", null);
+    registerSleepResolver(null);
+  }
+});
+
 test("a metered host with no provider reading yet is dormant (nothing SSHes a VM on a guess at boot); the first reading settles it", async () => {
   let answered = false;
   const gate = new Promise<void>((r) => setTimeout(() => (answered = true, r()), 20));

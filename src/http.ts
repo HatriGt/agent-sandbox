@@ -1506,7 +1506,16 @@ const readFleet = makeFleetReader(
     // NOT list are added from the table: asleep when their host did not answer, away when the box
     // is really gone and a copy is kept. A box can vanish; a thread cannot.
     recordThreads(boxes, kept, titles, sweepAt);
-    for (const b of boxes) if (/^running$/i.test(b.boxStatus) && b.role !== "pool-free") void syncThreadTranscript(b.name);
+    // Only the boxes a host answered for this round: a box served from memory while its host is
+    // paused reads "running" too, and syncing it cost one refused SSH per sweep (seen live
+    // 2026-11-19: sixty failed syncs into a thread on a suspended Instabox machine).
+    const unanswered = new Set(stale);
+    for (const b of boxes) {
+      if (!/^running$/i.test(b.boxStatus) || b.role === "pool-free") continue;
+      const hostId = b.host ?? PRIMARY_HOST_ID;
+      if (unanswered.has(hostId) || hostPool.dormant(hostId)) continue;
+      void syncThreadTranscript(b.name);
+    }
     const copies = await rescueBoxes(cfg).catch(() => new Set<string>());
     const present = new Set(boxes.map((b) => b.name));
     // A host that answered with a listing and did not list a thread's box: the row records it
@@ -2249,7 +2258,9 @@ app.get("/watch.json", async (req: Request, res: Response) => {
   const lines = Number(req.query.lines);
   try {
     res.json(
-      Number.isInteger(lines) && lines > 0 && lines <= 5000 ? redactSnap(await gatherWatch(hcfg(session), session, lines)) : await watchHub.read(session)
+      Number.isInteger(lines) && lines > 0 && lines <= 5000 && !hostPool.dormant(hostPool.hostOfBox(session) ?? PRIMARY_HOST_ID)
+        ? redactSnap(await gatherWatch(hcfg(session), session, lines))
+        : await watchHub.read(session)
     );
   } catch (e) {
     failWith(res, e);
@@ -4513,8 +4524,33 @@ app.post("/sleep.json", async (req: Request, res: Response) => {
     res.status(400).json({ error: "session is required" });
     return;
   }
+  const { force } = (req.body ?? {}) as { force?: boolean };
   try {
-    await stopBox(hcfg(session), session);
+    const hostId = hostPool.hostOfBox(session) ?? PRIMARY_HOST_ID;
+    // The host is paused: the box is as asleep as it gets, and an SSH would start the host
+    // (or, at a provider whose gateway refuses a suspended machine, fail) only to stop it.
+    if (hostPool.dormant(hostId)) {
+      noteStopped(session);
+      watchHub.drop(session);
+      res.json({ ok: true, hostAsleep: true });
+      return;
+    }
+    // Mid-turn, `msb stop` kills the agent and the thread ends on "the sandbox restarted mid-run"
+    // (seen live 2026-11-19 on an Instabox box: exit 254, the turn's work lost). The same answer the
+    // host pause gives; the thread header disables the item, the command palette did not know.
+    if (!force && (await watchHub.read(session)).runState === "running") {
+      res.status(409).json({ error: "the agent is working on this machine; wait for the turn to end or stop the run first" });
+      return;
+    }
+    const outcome = await stopBox(hcfg(session), session);
+    if (outcome === "absent") {
+      res.status(404).json({ error: "no such machine" });
+      return;
+    }
+    if (outcome === "failed") {
+      res.status(503).json({ error: "the sandbox host could not stop this machine — try again shortly" });
+      return;
+    }
     noteStopped(session);
     watchHub.drop(session); // the cached "running" snapshot must not be served as live
     res.json({ ok: true });
