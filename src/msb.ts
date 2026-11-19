@@ -706,11 +706,18 @@ export class KeptBoxError extends Error {
  */
 async function removalRefusal(cfg: Config, box: string, force = false): Promise<KeptBoxError | null> {
   // Strict: a host that did not answer (SSH gated while its VM is paused) must not read as "nothing kept".
-  const kept = await listKeptStrict(cfg).catch(() => null);
+  // A few tries: a VM that just resumed crawls for a minute, and one slow read must not turn a
+  // Destroy that already woke the host into a refusal.
+  let why = "";
+  let kept: Set<string> | null = null;
+  for (let i = 0; i < 3 && !kept; i++) {
+    if (i) await new Promise((r) => setTimeout(r, 3_000));
+    kept = await listKeptStrict(cfg).catch((e) => ((why = String((e as Error).message ?? e).slice(0, 160)), null));
+  }
   const v = removalVerdict(kept, box, force);
   if (v === "proceed") return null;
   const err = new KeptBoxError(box, v === "refuse-kept" ? "kept" : "unknown");
-  console.error(`[keep] refusing to remove ${box}: ${err.why === "kept" ? "it is kept (pinned)" : "the keep markers could not be read"}`);
+  console.error(`[keep] refusing to remove ${box}: ${err.why === "kept" ? "it is kept (pinned)" : `the keep markers could not be read (${why})`}`);
   return err;
 }
 

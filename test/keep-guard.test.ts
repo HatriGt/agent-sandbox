@@ -30,5 +30,5 @@ test("a teardown wakes the box's host first, and the removal guard reads the kee
   const http = fs.readFileSync(new URL("../src/http.ts", import.meta.url), "utf8");
   assert.match(http, /deps\.teardown = async \(c, session, opts\) => \{[\s\S]*?await hostPool\.readyForBox\(session, `destroy \$\{session\}`\);[\s\S]*?await rawTeardown\(c, session, opts\)/, "the cleanup lane must bring the host up before the raw teardown");
   const msb = fs.readFileSync(new URL("../src/msb.ts", import.meta.url), "utf8");
-  assert.match(msb, /async function removalRefusal[\s\S]*?await listKeptStrict\(cfg\)\.catch\(\(\) => null\)/, "removalRefusal must use the strict reader so a gated SSH reads as unknown");
+  assert.match(msb, /async function removalRefusal[\s\S]*?await listKeptStrict\(cfg\)\.catch\(/, "removalRefusal must use the strict reader so a gated SSH reads as unknown");
 });
