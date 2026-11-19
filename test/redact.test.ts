@@ -98,3 +98,13 @@ test("ssh/msb plumbing in an error is recognised so it never reaches a client", 
     "no repository at /workspace/api",
   ]) assert.equal(isPlumbingError(m), false, m);
 });
+
+test("an ssh target with the token in the user part keeps the vm and the host, loses the token", () => {
+  // The Freestyle proxy's form (fabricated token). Seen in a live "Command timed out" line on 2026-11-19.
+  const line = "Command timed out after 15000ms: ssh -o BatchMode=yes -i /root/.ssh/id_ed25519 asb-host+root:FAKEtokenFAKEtokenFAKE1234@beta-ssh.freestyle.sh [ -d claims ] && ls";
+  const out = redactShapes(line);
+  assert.doesNotMatch(out, /FAKEtokenFAKEtoken/);
+  assert.match(out, / asb-host\+root:…1234@beta-ssh\.freestyle\.sh \[ -d claims \]/);
+  // Plain host:port and user@host are not credentials.
+  assert.equal(redactShapes("ssh root@hostbrr -p 22 and 127.0.0.1:53528"), "ssh root@hostbrr -p 22 and 127.0.0.1:53528");
+});

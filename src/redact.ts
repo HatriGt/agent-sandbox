@@ -16,6 +16,10 @@
 const SHAPES: RegExp[] = [
   // URL-embedded basic auth: https://user:secret@host — keep the user, drop the secret.
   /(https?:\/\/[^\s/:@]+:)([^\s@/]{4,})(@)/g,
+  // An SSH target with the secret in the user part: `vm+root:TOKEN@beta-ssh.freestyle.sh` (the
+  // Freestyle proxy authenticates the session by that token). It is the argv of every ssh the
+  // controller runs there, so it rode along in every "Command timed out" line of the log.
+  /((?:^|[\s"'=])[A-Za-z0-9._+-]+:)([A-Za-z0-9._~-]{12,})(@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)/g,
   // GitHub: classic/OAuth/app/refresh tokens and fine-grained PATs.
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
@@ -58,9 +62,12 @@ export function redactShapes(text: string): string {
   for (const re of SHAPES) {
     out = out.replace(re, (m: string, ...groups: unknown[]) => {
       // Patterns with capture groups keep their prefix/suffix; bare patterns replace the whole match.
-      const g = groups.filter((x) => typeof x === "string") as string[];
-      if (re.source.startsWith("(https?")) return `${g[0]}${tail(g[1])}${g[2]}`;
-      if (g.length >= 2) return `${g[0]}${tail(g[1])}`;
+      // The callback gets (match, p1..pn, offset, input): only the pattern's own groups count. Three
+      // groups: prefix, secret, suffix (the host after the @). Two: prefix and secret.
+      const n = (new RegExp(`${re.source}|`).exec("")?.length ?? 1) - 1;
+      const g = groups.slice(0, n).map((x) => (typeof x === "string" ? x : ""));
+      if (n >= 3) return `${g[0]}${tail(g[1])}${g[2]}`;
+      if (n >= 2) return `${g[0]}${tail(g[1])}`;
       return `${m.slice(0, Math.min(4, m.indexOf("_") + 1 || 3))}${tail(m)}`;
     });
   }
