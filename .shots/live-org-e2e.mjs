@@ -146,7 +146,7 @@ r = await call("POST", "/memory-notes.json", { body: { id: mineNoteId, text: `${
 check(r.status === 200 && r.json.followed?.[0] === orgName, "editing the own note reports the org's copy followed", r.json?.followed);
 r = await call("GET", `/memory-notes.json?org=${org}`, { cookie: A });
 const orgNote = r.json?.notes?.find((n) => n.id === mineNoteId);
-check(orgNote?.text === `${mineNote} (edited)` && orgNote?.why === "e2e follow", "org's note copy has the new text and rationale", { text: orgNote?.text, why: orgNote?.why });
+check(orgNote?.text.includes(`${mineNote} (edited)`) && orgNote?.why === "e2e follow", "org's note copy has the new text and rationale (the store adds the closing full stop)", { text: orgNote?.text, why: orgNote?.why });
 // B (a member, not an admin) editing their own same-named skill reaches nothing.
 r = await call("POST", "/skills.json", { body: { action: "upsert", skill: { name: `${mineSkill}-renamed`, description: "B's own", content: "# b\n\nB's own skill.\n" } }, cookie: B });
 check(r.status === 200 && !r.json.followed, "a member's own save never touches the org", r.json?.followed);
