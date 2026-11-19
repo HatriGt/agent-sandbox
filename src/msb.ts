@@ -9,7 +9,7 @@ import { BAKED_MCP_PACKAGES, IMAGE_PINNED_PACKAGES } from "./package-watch.js";
 import { assertBoxName } from "./sync.js";
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
-import { listClaims, listKept, listParked, markClaimed, removalVerdict, shouldKeepStopped, unmarkClaimed, unmarkKept, unmarkParked } from "./claims.js";
+import { listClaims, listKept, listKeptStrict, listParked, markClaimed, removalVerdict, shouldKeepStopped, unmarkClaimed, unmarkKept, unmarkParked } from "./claims.js";
 import { askParkTtlSec } from "./snapshot.js";
 import { guardNodeProgram } from "./guard.js";
 import { loadEffectiveMcpStore, toClaudeMcpConfig, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
@@ -705,7 +705,8 @@ export class KeptBoxError extends Error {
  * unreadable keep markers refuse too. Returns the error to throw (or log) instead of proceeding.
  */
 async function removalRefusal(cfg: Config, box: string, force = false): Promise<KeptBoxError | null> {
-  const kept = await listKept(cfg).catch(() => null);
+  // Strict: a host that did not answer (SSH gated while its VM is paused) must not read as "nothing kept".
+  const kept = await listKeptStrict(cfg).catch(() => null);
   const v = removalVerdict(kept, box, force);
   if (v === "proceed") return null;
   const err = new KeptBoxError(box, v === "refuse-kept" ? "kept" : "unknown");

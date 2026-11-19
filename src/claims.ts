@@ -70,6 +70,21 @@ export async function unmarkKept(cfg: Config, box: string): Promise<void> {
 }
 export async function listKept(cfg: Config): Promise<Set<string>> {
   const out = await ssh(cfg, `[ -d ${KEEP_DIR} ] && ls -1 ${KEEP_DIR} 2>/dev/null || true`);
+  return parseKept(out);
+}
+
+/**
+ * The keep markers, or a throw when the host did not answer (SSH gated for a paused VM, a timeout, a
+ * refused connection). The removal guard (msb.ts removalRefusal) uses this one: an empty answer from
+ * an SSH that never ran must read as "could not be read", never as "nothing is kept".
+ */
+export async function listKeptStrict(cfg: Config): Promise<Set<string>> {
+  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `[ -d ${KEEP_DIR} ] && ls -1 ${KEEP_DIR} 2>/dev/null || true`], { check: false, timeoutMs: 15_000 });
+  if (r.code !== 0) throw new Error(`keep markers of ${cfg.hostId ?? cfg.vpsSsh} could not be read (ssh exit ${r.code})`);
+  return parseKept(r.stdout ?? "");
+}
+
+function parseKept(out: string): Set<string> {
   return new Set(out.split("\n").map((l) => l.trim()).filter((l) => l && l !== "*"));
 }
 

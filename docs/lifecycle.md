@@ -168,3 +168,12 @@ The controller exposes all of it on `GET /fleet.json` (`boxes`, `lifecycle`, `at
   the stream `?from=<offset>`, so switching back renders immediately and transfers only the delta.
   Hovering a row prefetches. The fallback poll is held 2.5s so it never races the stream.
 - **Fleet read cached 1.5s** server-side; N tabs cost one SSH sweep.
+
+## A Destroy wakes the host first (2026-11-19)
+
+A Destroy of a box whose Freestyle VM was paused used to answer "ok" with nothing removed: the SSH
+gate is shut for a dormant host, `msb stop` and `msb rm` are best-effort, and the keep-marker read
+came back empty (an SSH that never ran) and so read as "nothing kept". Now every teardown lane
+brings the box's host up first (`readyForBox`), and the removal guard reads the markers strictly
+(`listKeptStrict`): a host that did not answer counts as "could not be read", which refuses. A
+host that never comes up makes the Destroy fail with its reason instead of pretending.

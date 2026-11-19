@@ -560,6 +560,10 @@ const retriesOf = (box: string) => verifyRetrier?.retriesOf(box) ?? 0;
 {
   const rawTeardown = deps.teardown.bind(deps);
   deps.teardown = async (c, session, opts) => {
+    // The host first: a Destroy while the box's VM is paused used to answer "ok" with nothing removed
+    // (the SSH gate is shut for a dormant host, and stop/rm are best-effort). Waking it is the cost of
+    // a removal that really happens; a host that never answers makes the teardown fail, honestly.
+    await hostPool.readyForBox(session, `destroy ${session}`);
     // `force` (a deliberate Destroy of a kept box) travels through this lane too.
     await rawTeardown(c, session, opts);
     watchHub.drop(session);
