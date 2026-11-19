@@ -480,6 +480,26 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
   });
   registerSleepResolver((cfg) => sleepFacade((cfg.hostId && runtimes.get(cfg.hostId)) || primary()));
 
+  // Which host a box is on: the map, then the hosts' last listings. A box listed by a host whose
+  // row the table lost (seen live 2026-11-19: two boxes on a paused Freestyle host had no row, so
+  // every command for them went to the primary and a Destroy answered "ok" with nothing removed)
+  // is mapped again from the listing, and the table is told.
+  const hostOf = (box: string): string | undefined => {
+    const id = boxHost.get(box);
+    if (id && runtimes.has(id)) return id;
+    for (const h of runtimes.values()) {
+      if (!h.lastBoxes.some((b) => b.name === box)) continue;
+      boxHost.set(box, h.spec.id);
+      try {
+        rememberBoxHost(db, box, h.spec.id, now());
+      } catch {
+        /* the map answers */
+      }
+      return h.spec.id;
+    }
+    return undefined;
+  };
+
   const pool: HostPool = {
     hosts,
     enabled,
@@ -492,9 +512,9 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     get,
     primary,
     cfgFor: (id) => (get(id) ?? primary()).cfg,
-    hostOfBox: (box) => boxHost.get(box),
+    hostOfBox: (box) => hostOf(box),
     cfgForBox: (box) => {
-      const id = boxHost.get(box);
+      const id = hostOf(box);
       return (id && runtimes.get(id)?.cfg) || primary().cfg;
     },
     rememberBox: (box, hostId) => {
@@ -507,6 +527,11 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     },
     forgetBox: (box) => {
       boxHost.delete(box);
+      placedAt.delete(box);
+      misses.delete(box);
+      // Out of every host's last listing too: a host that is paused is served from that memory,
+      // and a box destroyed a moment ago must not come back from it on the next sweep.
+      for (const h of runtimes.values()) if (h.lastBoxes.some((b) => b.name === box)) h.lastBoxes = h.lastBoxes.filter((b) => b.name !== box);
       try {
         forgetBoxHost(db, box);
       } catch {
@@ -797,7 +822,7 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       return p;
     },
     readyForBox: async (box, reason) => {
-      const id = boxHost.get(box);
+      const id = hostOf(box);
       const h = (id && runtimes.get(id)) || primary();
       if (dormant(h) || h.unreachableSince) await pool.ready(h.spec.id, reason ?? `box ${box}`);
       return h.cfg;

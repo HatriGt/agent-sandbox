@@ -118,7 +118,8 @@ import { listRepoSkills, fetchRepoFileWithSource, fetchRepoSkillDir, resolveSkil
 import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor, isPlumbingError } from "./redact.js";
 import { isSecretKey, probeMcpServer, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
-import type { BoxView, WatchSnapshot } from "./monitor.js";
+import { parseDurationSec, type BoxView, type WatchSnapshot } from "./monitor.js";
+import { shouldNap } from "./nap.js";
 import { listChanges, readDiff, readFullDiff, discardChange, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta, forgetRunMetas, loadRunMetasLocal, saveRunMetaLocal, forgetRunMetaLocal, type RunMeta } from "./run-memory.js";
 import { contentDisposition, readArtifact } from "./artifact.js";
@@ -179,7 +180,17 @@ const hostPool = configureHostPool(
     },
   })
 );
-const hcfg = (box: string): Config => hostPool.cfgForBox(box);
+// A box the pool cannot place (its box_hosts row lost, its host paused so no listing names it) is
+// placed by its thread row: the thread remembers the host it ran on. Without this, every command
+// for such a box went to the primary host, and a Destroy answered "ok" with nothing removed (seen
+// live 2026-11-19 on two boxes of a paused Freestyle host).
+const hcfg = (box: string): Config => {
+  if (!hostPool.hostOfBox(box)) {
+    const th = getThread(db, box)?.host;
+    if (th && hostPool.get(th)) hostPool.rememberBox(box, th);
+  }
+  return hostPool.cfgForBox(box);
+};
 // The primary host's sleep clock, for the health payload and the loops that go quiet when every host does.
 const hostSleep = {
   get enabled() {
@@ -568,6 +579,8 @@ const retriesOf = (box: string) => verifyRetrier?.retriesOf(box) ?? 0;
     await hostPool.readyForBox(session, `destroy ${session}`);
     // `force` (a deliberate Destroy of a kept box) travels through this lane too.
     await rawTeardown(c, session, opts);
+    // Gone from the pool's memory of its host as well: a paused host is served from that memory.
+    hostPool.forgetBox(session);
     watchHub.drop(session);
     inbox.clear(session);
     boxModels.delete(session);
@@ -1240,6 +1253,37 @@ const maybePark = (boxes: Array<{ name: string; runState?: string; boxStatus?: s
   for (const k of [...waitingSince.keys()]) if (!boxes.some((b) => b.name === k)) waitingSince.delete(k);
 };
 
+/**
+ * The idle nap is the controller's (2026-11-19). The runtime's own `--idle-timeout` counts the
+ * sweep's reads as activity, so a finished box sat "sleeps any moment" for as long as the dashboard
+ * watched it. Now a session box that is done and has been quiet for the idle timeout by the agent
+ * log's clock is stopped here, and the dashboard's countdown is this rule, exact to the sweep. A
+ * box whose turn the controller just started is left alone until the agent writes (shouldNap).
+ */
+const napInFlight = new Set<string>();
+const maybeNap = (boxes: BoxView[], claims: Map<string, number>, nowMs: number) => {
+  const idleTimeoutSec = parseDurationSec(cfg.idleTimeout);
+  if (!idleTimeoutSec) return;
+  for (const b of boxes) {
+    if (napInFlight.has(b.name)) continue;
+    // A paused host's listing is memory: nothing is stopped on it until it is up for something else.
+    if (hostPool.dormant(hostPool.hostOfBox(b.name) ?? PRIMARY_HOST_ID)) continue;
+    const verdict = shouldNap({ role: b.role, boxStatus: b.boxStatus, runState: b.runState, lastOutputAtSec: b.lastOutputAt, idleTimeoutSec, nowMs, turnStartedAtMs: turnStarted.get(b.name) });
+    if (!verdict) continue;
+    napInFlight.add(b.name);
+    const quiet = Math.round((nowMs / 1000 - (b.lastOutputAt ?? nowMs / 1000)) / 60);
+    void stopBox(hcfg(b.name), b.name)
+      .then(async () => {
+        noteStopped(b.name);
+        console.error(`[nap] ${b.name}: quiet for ${quiet}m, stopped (a reply wakes it)`);
+        // The sleep TTL counts from the nap (see the Running → Stopped re-stamp in the sweep).
+        await (claims.has(b.name) ? touchClaimed(hcfg(b.name), b.name) : markClaimed(hcfg(b.name), b.name)).catch(() => {});
+      })
+      .catch((e) => console.error(`[nap] ${b.name}: stop failed: ${String((e as Error).message ?? e).slice(0, 160)}`))
+      .finally(() => napInFlight.delete(b.name));
+  }
+};
+
 const lastSeenStatus = new Map<string, boolean>();
 /**
  * The harness a box started on, as the thread header shows it ("Bug fixer · asks before guessing ·
@@ -1337,6 +1381,7 @@ const readFleet = makeFleetReader(
       lastSeenStatus.set(b.name, runningNow);
     }
     for (const k of [...lastSeenStatus.keys()]) if (!boxes.some((b) => b.name === k)) lastSeenStatus.delete(k);
+    maybeNap(boxes, claims, sweepAt);
     // Walk-away notifications: diff this sweep against the last one and push the edges (waiting /
     // done / failed) to the box owner's webhook. Fire-and-forget — a webhook must never slow or
     // fail the fleet read the dashboard is polling on.

@@ -3160,7 +3160,16 @@ export async function teardown(cfg: Config, box: string, stagingDir?: string, op
   const refusal = await removalRefusal(cfg, box, opts.force);
   if (refusal) throw refusal;
   await msb(cfg, ["stop", box], false);
-  await msb(cfg, ["rm", "--force", box], false);
+  const rm = await msb(cfg, ["rm", "--force", box], false);
+  // Confirmed, not assumed: stop and rm are best-effort, and a Destroy used to answer "ok" while the
+  // box stayed (a command that went to the wrong host, or a host that could not be reached). The
+  // listing after the rm is the word; a box it still names is an error the caller sees.
+  const ls = await msb(cfg, ["ls", "--format", "json"], false);
+  if (ls.code !== 0) throw new Error(`${box}: the removal could not be confirmed (msb ls failed: ${ls.stderr.trim().slice(0, 160) || `exit ${ls.code}`})`);
+  if (parseLsJson(ls.stdout).some((e) => e.name === box)) {
+    const why = rm.stderr.trim().slice(0, 160);
+    throw new Error(`${box} is still on the host after rm${why ? ` (${why})` : ""}`);
+  }
   // The box's rewind snapshot (if any) dies with it — snapshots are per-box, never shared.
   await msb(cfg, ["snapshot", "rm", askSnapName(box)], false);
   await unmarkClaimed(cfg, box);
