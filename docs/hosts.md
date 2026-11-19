@@ -265,6 +265,19 @@ with more allowance left. A VPS of your own is "unmetered": always awake, never 
 
 Both are one number per host in the edit dialog, changed at any time.
 
+### Choosing the host for one task (admins)
+
+An admin can pin a new task to a host instead of taking the picker's choice: in the new-task
+composer, **More options → Box host** lists every enabled host with what it is doing ("asleep ·
+woken first · 0 of 3 slots busy", "unreachable"), "Automatic" on top; the choice shows as an
+"on <host>" chip and is cleared once the task starts. Over HTTP it is `host: "<id>"` on
+`POST /delegate.json` (attempts too: every attempt lands on it). The run is placed on that host
+alone: woken if asleep, refused up front with the reason when the host is full, disabled,
+unreachable or unknown (`The chosen box host X cannot take this run: it is full (x 3/3).`), and
+never moved to another host when its boot fails. Non-admins who send `host` get a 403; a blank or
+absent `host` is the picker's choice as ever. Replies stay on the thread's box; this is for where
+a thread starts.
+
 ## Managing hosts
 
 Admins only. **Fleet view → Box hosts** lists every host with its state (working, idle, asleep

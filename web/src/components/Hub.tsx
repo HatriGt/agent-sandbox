@@ -27,7 +27,7 @@ import { ComposerToolbar, HarnessMenu, ModelMenu, WorkflowMenu, MoreMenu, PlusMe
 import { SkillMenu } from "@/components/thread/SkillMenu";
 import { slashAt, type SlashState } from "@/lib/slash";
 import { useInlineTags } from "@/hooks/useInlineTags";
-import type { HarnessView, WorkflowView } from "@/lib/api";
+import type { HarnessView, HostView, WorkflowView } from "@/lib/api";
 import { useProviders } from "@/components/Providers";
 import { useAgentChoice } from "@/components/DriverPicker";
 import { AnimatePresence, motion } from "motion/react";
@@ -275,6 +275,19 @@ export function Hub({
   const [harnesses, setHarnesses] = React.useState<HarnessView[]>([]);
   const [workflow, setWorkflow] = React.useState<string | null>(() => prefill.current?.workflow ?? null);
   const [workflows, setWorkflows] = React.useState<WorkflowView[]>([]);
+  // Box hosts, for an admin to pin the run to one; everyone else gets the picker's choice and no row.
+  const admin = getMe()?.role === "admin";
+  const [hosts, setHosts] = React.useState<HostView[]>([]);
+  const [hostPick, setHostPick] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!admin) return;
+    const ctrl = new AbortController();
+    api
+      .hosts(ctrl.signal)
+      .then((r) => setHosts(r.hosts.filter((h) => h.enabled)))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [admin]);
   React.useEffect(() => {
     const ctrl = new AbortController();
     api
@@ -474,6 +487,7 @@ export function Hub({
         // The agent chip shows "partial" before the pick is sent, so choosing it IS the acknowledgement.
         ...(agent.picked ? { agent: agent.picked, ...(agent.current?.supervised === false ? { allowPartialSupervision: true } : {}) } : {}),
         ...(attempts > 1 ? { attempts } : {}),
+        ...(hostPick ? { host: hostPick } : {}),
         ...(harness ? { harness } : {}),
         ...(workflow ? { workflow } : {}),
         ...(verify && verifyActive ? { verify: verify.mode === "command" ? { command: verify.text.trim() } : { criterion: verify.text.trim() } } : {}),
@@ -489,6 +503,7 @@ export function Hub({
         tags.reset();
         clearVerify();
         setAttempts(1);
+        setHostPick(null);
         // Repos inferred from the task ride along to render INLINE in the booting pane/thread —
         // right under the task, where the reader is looking — not as a toast over a random corner.
         onStarted(res.box, t, res.inferred);
@@ -545,9 +560,10 @@ export function Hub({
     agent: { choices: agent.choices, current: agent.current, defaultId: agent.defaultId, onPick: agent.pick },
     attempts: { value: attempts, onChange: setAttempts },
     verify: { value: verify, onChange: setVerify },
+    ...(admin && hosts.length > 1 ? { host: { list: hosts, value: hostPick, onChange: setHostPick } } : {}),
   };
   // The model is not a chip: the Model button always names what will run.
-  const chipsSet = !!harness || (agent.current && agent.current.id !== agent.defaultId) || attempts > 1 || verifyActive;
+  const chipsSet = !!harness || (agent.current && agent.current.id !== agent.defaultId) || attempts > 1 || verifyActive || !!hostPick;
   const openChip = (key: ChipKey) => menus.set(key === "harness" ? "harness" : key === "model" ? "model" : "more");
 
   const go = useGo();
@@ -714,7 +730,7 @@ export function Hub({
                   </motion.span>
                 ))}
                 </AnimatePresence>
-                <RunOptionChips onOpen={openChip} harness={runOptions.harness} agent={runOptions.agent} attempts={runOptions.attempts} verify={runOptions.verify} />
+                <RunOptionChips onOpen={openChip} harness={runOptions.harness} agent={runOptions.agent} attempts={runOptions.attempts} verify={runOptions.verify} host={runOptions.host} />
               </div>
             )}
 
@@ -737,7 +753,7 @@ export function Hub({
                       <HarnessMenu {...menus.props("harness")} side="bottom" harness={runOptions.harness} />
                       <WorkflowMenu {...menus.props("workflow")} side="bottom" list={workflows} value={workflow} onChange={setWorkflow} />
                       <ModelMenu {...menus.props("model")} side="bottom" model={runOptions.model} />
-                      <MoreMenu {...menus.props("more")} side="bottom" agent={runOptions.agent} attempts={runOptions.attempts} verify={runOptions.verify} />
+                      <MoreMenu {...menus.props("more")} side="bottom" agent={runOptions.agent} attempts={runOptions.attempts} verify={runOptions.verify} host={runOptions.host} />
                     </>
                   }
                   right={

@@ -1,8 +1,8 @@
 import * as React from "react";
-import { Check, Layers, Search, ShieldCheck, X } from "lucide-react";
+import { Check, Layers, Search, Server, ShieldCheck, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
-import type { AgentChoice, AgentId, HarnessView } from "@/lib/api";
+import type { AgentChoice, AgentId, HarnessView, HostView } from "@/lib/api";
 import type { ModelChoice } from "./ModelPicker";
 import { Segmented } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
@@ -36,6 +36,66 @@ export interface RunSettingsProps {
   agent?: { choices: AgentChoice[]; current: AgentChoice | null; defaultId: AgentId; onPick: (id: AgentId | null) => void };
   attempts?: { value: Attempts; onChange: (n: Attempts) => void };
   verify?: { value: VerifySpec | null; onChange: (v: VerifySpec | null) => void };
+  /** Admins only: the box host the run must land on; null lets the picker choose. */
+  host?: { list: HostView[]; value: string | null; onChange: (id: string | null) => void };
+}
+
+/** What a host is doing right now, for the picker's second line. */
+export function hostStateLine(h: HostView): string {
+  const slots = `${h.running + h.reserved} of ${h.maxBoxes} slots busy`;
+  if (!h.enabled) return "disabled";
+  if (h.unreachable) return "unreachable";
+  if (h.asleep) return `asleep · woken first · ${slots}`;
+  return slots;
+}
+
+/** One row per box host, "Automatic" on top; a full or unreachable host is listed but cannot be picked. */
+export function HostList({ list, value, onChange }: { list: HostView[]; value: string | null; onChange: (id: string | null) => void }) {
+  const ordered = React.useMemo(() => [...list].sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name)), [list]);
+  const rows: (HostView | null)[] = [null, ...ordered];
+  const active = rows.findIndex((h) => (h?.id ?? null) === value);
+  const rov = useRoving(rows.length, active);
+  const blocked = (h: HostView | null) => !!h && (!h.enabled || h.unreachable || h.running + h.reserved >= h.maxBoxes);
+  return (
+    <div role="radiogroup" aria-label="Box host">
+      {rows.map((h, i) => {
+        const on = (h?.id ?? null) === value;
+        const disabled = blocked(h);
+        return (
+          <button
+            key={h?.id ?? "auto"}
+            ref={(el) => {
+              rov.refs.current[i] = el;
+            }}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            tabIndex={rov.tabIndex(i)}
+            disabled={disabled}
+            title={h ? `${h.provider} · ${h.ssh}` : "The picker's choice: order, then the emptiest awake host"}
+            onKeyDown={rov.onKeyDown(i, (j) => !blocked(rows[j]) && onChange(rows[j]?.id ?? null))}
+            onClick={() => onChange(h?.id ?? null)}
+            className={cn(
+              "hover:bg-muted/60 flex min-h-9 w-full cursor-pointer items-start gap-2.5 px-3 py-1.5 text-left transition-colors outline-none focus-visible:bg-muted/60",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+              on && "bg-muted/40"
+            )}
+          >
+            <span className="mt-0.5 grid size-4 shrink-0 place-items-center">
+              {on ? <Check className="text-foreground size-3.5" strokeWidth={2.5} aria-hidden /> : <span className="border-line-strong size-3 rounded-full border" aria-hidden />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="text-foreground block truncate text-meta">
+                {h ? h.name : "Automatic"}
+                {h?.primary && <span className="text-faint ml-1.5 text-micro">primary</span>}
+              </span>
+              <span className="text-faint block truncate text-micro">{h ? hostStateLine(h) : "Order, then the emptiest awake host"}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 // Amber is reserved for "action needed" everywhere on the console — Haiku's dot is grey, not amber.
@@ -239,9 +299,9 @@ export function VerifyRow({ value, onChange }: { value: VerifySpec | null; onCha
  * What is off its default, as removable chips. Click the body to open that option's menu; × resets that
  * one option. Nothing renders when everything is default — the quiet state IS the default state.
  */
-export type ChipKey = "harness" | "model" | "agent" | "attempts" | "verify";
+export type ChipKey = "harness" | "model" | "agent" | "attempts" | "verify" | "host";
 
-export function RunOptionChips({ onOpen, harness, model, agent, attempts, verify, className }: RunSettingsProps & { onOpen: (key: ChipKey) => void; className?: string }) {
+export function RunOptionChips({ onOpen, harness, model, agent, attempts, verify, host, className }: RunSettingsProps & { onOpen: (key: ChipKey) => void; className?: string }) {
   const still = useReducedMotion();
   const chips: { key: ChipKey; icon?: React.ReactNode; label: string; title?: string; remove: () => void }[] = [];
   const cur = harness?.list.find((h) => h.id === harness.value);
@@ -250,6 +310,8 @@ export function RunOptionChips({ onOpen, harness, model, agent, attempts, verify
     chips.push({ key: "model", icon: <span className={cn("size-1.5 rounded-full", TIER_TINT[model.current.tier])} aria-hidden />, label: model.current.label, title: `Model: ${model.current.id}`, remove: model.onReset });
   if (agent?.current && agent.current.id !== agent.defaultId) chips.push({ key: "agent", label: agent.current.label, title: "Coding agent", remove: () => agent.onPick(null) });
   if (attempts && attempts.value > 1) chips.push({ key: "attempts", label: `${attempts.value} attempts`, title: "Run the task in parallel; the best attempt gets the PR", remove: () => attempts.onChange(1) });
+  const chosenHost = host?.value ? host.list.find((h) => h.id === host.value) : undefined;
+  if (host && chosenHost) chips.push({ key: "host", icon: <Server className="size-3" aria-hidden />, label: `on ${chosenHost.name}`, title: `Box host: ${chosenHost.name} (${hostStateLine(chosenHost)})`, remove: () => host.onChange(null) });
   if (verify?.value && verify.value.text.trim())
     chips.push({ key: "verify", icon: <ShieldCheck className="size-3" aria-hidden />, label: `Verify · ${verify.value.text.trim()}`, title: verify.value.mode === "command" ? "Verification command" : "Verification criterion", remove: () => verify.onChange(null) });
   if (!chips.length) return null;

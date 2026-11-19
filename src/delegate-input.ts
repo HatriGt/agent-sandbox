@@ -100,6 +100,8 @@ export interface DelegatePlan {
   setup?: Record<string, import("./setup-profile.js").SetupProfile>;
   /** Vault secrets (src/secrets-store.ts) granted to this run, resolved by the route; -e flags on the first turn. */
   secrets?: Record<string, string>;
+  /** A box host id an admin chose for this run (src/host-pool.ts placeRun): placed there alone, no failover. */
+  host?: string;
   /** Back-compat accessor: the first repo's identifier. */
   repo: string;
   /** Back-compat accessor: the first repo's ref. */

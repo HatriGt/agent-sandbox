@@ -1275,6 +1275,8 @@ export const api = {
     attemptSpecs?: Array<{ agent?: string; model?: string; provider?: string; harness?: string }>;
     /** Minted by the tab (lib/launch newLaunchId): the launch's stages stream on /launch.sse under it. */
     launchId?: string;
+    /** A box host id (admins): the run lands on that host or is refused; omit for the picker's choice. */
+    host?: string;
   }) =>
     post<{ ok: true; box: string; warm: boolean; output: string; inferred?: string[]; harness?: { id: string; name: string; applied: string[] }; attemptGroup?: { id: string; attempts: Array<{ index: number; box: string | null; label: string; branch: string; error?: string }> } } | { ok: false; question: string }>(
       "/delegate.json",

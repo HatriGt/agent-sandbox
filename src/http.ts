@@ -5383,9 +5383,26 @@ const delegateOnce = async (body: Record<string, unknown>, principal: Principal,
   }
 };
 
+/**
+ * `host` on a delegate body: the box host the run must land on. Admins only (where boxes boot is
+ * the operator's business, as /hosts.json is); the id must be a registered, enabled host. Blank or
+ * absent means the picker's choice, as ever.
+ */
+const hostChoice = (body: Record<string, unknown>, principal: Principal): { host?: string } | { status: number; error: string } => {
+  if (body.host === undefined || body.host === null || body.host === "") return {};
+  if (typeof body.host !== "string") return { status: 400, error: "host must be a box host id." };
+  if (!isAdmin(principal)) return { status: 403, error: "Choosing the box host is for admins." };
+  const h = hostPool.get(body.host);
+  if (!h) return { status: 404, error: `no such box host: ${body.host}` };
+  if (!h.spec.enabled) return { status: 400, error: `Box host ${h.spec.name} is disabled.` };
+  return { host: h.spec.id };
+};
+
 const delegateOnceInner = async (body0: Record<string, unknown>, principal: Principal, attempt: { groupId: string; index: number } | undefined, launch: LaunchReporter | undefined): Promise<DelegateReply> => {
   let body = body0;
   if (typeof body.task !== "string" || !body.task.trim()) return { status: 400, json: { error: "task is required" } };
+  const chosen = hostChoice(body, principal);
+  if ("error" in chosen) return { status: chosen.status, json: { error: chosen.error } };
   const rawTask = body.task;
   {
     // A saved harness (src/harness.ts) fills the fields this body leaves out; explicit fields win.
@@ -5566,6 +5583,7 @@ const delegateOnceInner = async (body0: Record<string, unknown>, principal: Prin
       ...(allowDomains?.length ? { allowDomains } : {}),
       ...(skills ? { skills } : {}),
       ...(harnessRules ? { rules: harnessRules } : {}),
+      ...(chosen.host ? { host: chosen.host } : {}),
       // The browser needs only the box name (the thread attaches over SSE); blocking this response
       // on the interactive wait window made task starts ~50s slower than the box actually was.
       detach: true,
@@ -5633,6 +5651,9 @@ const sweepAttempts = (force = false) => {
 const delegateAttempts = async (body: Record<string, unknown>, principal: Principal, n: number, given: AttemptSpec[] | undefined, startedBy: StartedBy): Promise<DelegateReply> => {
   if (typeof body.task !== "string" || !body.task.trim()) return { status: 400, json: { error: "task is required" } };
   if (body.compareId) return { status: 400, json: { error: "attempts cannot join a harness compare." } };
+  // Refused here, before any attempt starts; each attempt's body carries the choice to delegateOnce.
+  const chosen = hostChoice(body, principal);
+  if ("error" in chosen) return { status: chosen.status, json: { error: chosen.error } };
   const owner = principal.kind === "user" ? principal.userId : OPERATOR_OWNER;
   // Fleet + per-user quota for ALL attempts up front: a group is never half-started on purpose.
   const live = await deps.countBoxes(cfg);

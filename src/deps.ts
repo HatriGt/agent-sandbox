@@ -505,7 +505,7 @@ export const deps: HandlerDeps = {
       (hostCfg, onAcquired) => runOnHost(prepareRunCfg(hostCfg, plan, allowDomains), hostCfg, plan, allowDomains, creds, interact, onAcquired),
       undefined,
       // The controller's own canary checks what is up; it never wakes a paused VM for that.
-      { awakeOnly: isCanaryTask(plan.task), onWaking: (host) => interact?.phase?.("host", host) }
+      { awakeOnly: isCanaryTask(plan.task), onWaking: (host) => interact?.phase?.("host", host), host: plan.host }
     );
   },
 

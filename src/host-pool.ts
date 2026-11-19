@@ -163,7 +163,7 @@ export interface HostPool {
   forgetBox(box: string): void;
   /** Hosts that keep warm boxes, as bound configs (for the pool refill loops). */
   warmCfgs(): Config[];
-  pick(opts?: { warmReady?: (h: HostRuntime) => boolean; minAllowanceHours?: number; exclude?: readonly string[]; awakeOnly?: boolean }): PickResult & { host?: HostRuntime; release: () => void };
+  pick(opts?: { warmReady?: (h: HostRuntime) => boolean; minAllowanceHours?: number; exclude?: readonly string[]; awakeOnly?: boolean; /** This host or nothing (an admin's choice for the run). */ only?: string }): PickResult & { host?: HostRuntime; release: () => void };
   /**
    * The host is awake and answering before a run is launched on it: wakes the clock, starts a paused
    * VM through its provider and waits for "running", then for one probe to get through (a resumed VM
@@ -205,6 +205,8 @@ export interface HostPool {
  * did not wake, SSH died, msb refused) is the host's fault, not the task's, so that host is marked
  * unreachable and the run is attempted on the next one; once `onAcquired` has been called the
  * run stays where it is and its error is the caller's. Without a pool the attempt runs on `cfg`.
+ * With `o.host` (an admin's choice) the run goes to that host or nowhere: it is woken if asleep,
+ * refused with the reason if it is full, disabled or unreachable, and never moved to another.
  */
 export async function placeRun<T>(
   pool: HostPool | null,
@@ -212,12 +214,13 @@ export async function placeRun<T>(
   label: string,
   attempt: (hostCfg: Config, onAcquired: (box?: string) => void) => Promise<T>,
   log: (m: string) => void = (m) => console.error(m),
-  o: { awakeOnly?: boolean; /** The picked host is paused and is being resumed first; called with its name. */ onWaking?: (host: string) => void } = {}
+  o: { awakeOnly?: boolean; /** The picked host is paused and is being resumed first; called with its name. */ onWaking?: (host: string) => void; /** This host and no other. */ host?: string } = {}
 ): Promise<T> {
   const tried: string[] = [];
   for (;;) {
-    const picked = pool?.pick({ minAllowanceHours: 1, exclude: tried, awakeOnly: o.awakeOnly });
+    const picked = pool?.pick({ minAllowanceHours: 1, exclude: tried, awakeOnly: o.awakeOnly, only: o.host });
     if (picked && !picked.host) {
+      if (o.host) throw new Error(`The chosen box host ${pool?.get(o.host)?.spec.name ?? o.host} cannot take this run: ${picked.reason}.`);
       throw new Error(tried.length ? `No other box host can take this run after ${tried.join(", ")} failed: ${picked.reason}.` : `No box host can take this run: ${picked.reason}.`);
     }
     const hostCfg: Config = picked?.host ? { ...cfg, ...picked.host.cfg } : cfg;
@@ -228,10 +231,10 @@ export async function placeRun<T>(
         // run, 75 s when an awake host with room is standing by (the run goes there, and the VM,
         // started meanwhile, is up for the next one). The picker decides what "standing by" means,
         // so a host sitting out a cooldown or out of allowance is not counted on.
-        const alt = pool.pick({ minAllowanceHours: 1, exclude: [...tried, picked.host.spec.id], awakeOnly: true });
-        alt.release();
+        const alt = o.host ? undefined : pool.pick({ minAllowanceHours: 1, exclude: [...tried, picked.host.spec.id], awakeOnly: true });
+        alt?.release();
         if (pool.dormant(picked.host.spec.id)) o.onWaking?.(picked.host.spec.name);
-        await pool.ready(picked.host.spec.id, label, { patienceMs: alt.host ? 75_000 : 150_000 });
+        await pool.ready(picked.host.spec.id, label, { patienceMs: alt?.host ? 75_000 : 150_000 });
       }
       return await attempt(hostCfg, (box) => {
         acquired = true;
@@ -246,7 +249,8 @@ export async function placeRun<T>(
       const msg = String((e as Error).message ?? e);
       // A bad ref, a patch that does not apply, a clone the token cannot see: the task's, however
       // early it failed. Marking the host dead for it would knock every host out, one per attempt.
-      if (acquired || !id || !others || isTaskFault(msg)) throw e;
+      // A chosen host is the whole choice: its failure is reported, not routed around.
+      if (acquired || !id || !others || o.host || isTaskFault(msg)) throw e;
       log(`[hosts] boot on ${id} failed before the box existed, trying another host: ${msg.slice(0, 200)}`);
       pool!.noteSweepError(id, `boot failed: ${msg.slice(0, 200)}`);
       tried.push(id);
@@ -547,10 +551,13 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
     pick: (o = {}) => {
       const skip = new Set(o.exclude ?? []);
       // awakeOnly: the controller's own canary never wakes a paused VM; it checks what is up.
-      const all = candidates(o.warmReady, o.minAllowanceHours).filter((c) => !skip.has(c.id));
+      const all = candidates(o.warmReady, o.minAllowanceHours).filter((c) => !skip.has(c.id) && (!o.only || c.id === o.only));
       const r = pickHost(all.filter((c) => !(o.awakeOnly && c.asleep)));
       const host = r.id ? get(r.id) : undefined;
       if (!host) {
+        if (o.only && !all.length) return { ...r, reason: `no such box host: ${o.only}`, release: () => {} };
+        // The reasons name "every box host"; with one host in the running they read as that host's.
+        if (o.only && r.reason) return { ...r, reason: r.reason.replace(/^every box host( with room)?/, "it"), release: () => {} };
         // The refusal names what was really in the way: "no box host is configured" would be wrong
         // when every host is merely asleep and this caller does not wake one.
         if (o.awakeOnly && all.some((c) => c.asleep && c.enabled)) return { ...r, reason: "every box host is asleep, and this run does not wake one", release: () => {} };

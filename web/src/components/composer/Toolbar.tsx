@@ -8,7 +8,7 @@ import { useCached } from "@/lib/cache";
 import { SkillMark } from "@/lib/skillGlyph";
 import { Segmented } from "@/components/ui/segmented";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { HarnessList, ModelList, Row, TIER_TINT, VerifyRow, useRoving, type Attempts, type RunSettingsProps } from "@/components/thread/RunSettings";
+import { HarnessList, HostList, ModelList, Row, TIER_TINT, VerifyRow, hostStateLine, useRoving, type Attempts, type RunSettingsProps } from "@/components/thread/RunSettings";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { ModelChoice } from "@/components/thread/ModelPicker";
 import { BASE } from "@/lib/route";
@@ -414,16 +414,20 @@ export function ModelMenu({ model, disabled, ...shell }: Shell & { model: NonNul
 }
 
 /** ⋯ — the rarely touched options: coding agent, attempts, verification. */
-export function MoreMenu({ agent, attempts, verify, ...shell }: Shell & Pick<RunSettingsProps, "agent" | "attempts" | "verify">) {
+export function MoreMenu({ agent, attempts, verify, host, ...shell }: Shell & Pick<RunSettingsProps, "agent" | "attempts" | "verify" | "host">) {
   const showAgent = !!(agent && agent.choices.length > 1 && agent.current);
-  if (!showAgent && !attempts && !verify) return null;
-  const set = (agent?.current && agent.current.id !== agent.defaultId) || (attempts && attempts.value > 1) || !!verify?.value?.text.trim();
+  // The host row is an admin's (the Hub passes it only then) and only worth a choice between two.
+  const showHost = !!host && host.list.length > 1;
+  if (!showAgent && !attempts && !verify && !showHost) return null;
+  const chosenHost = showHost && host!.value ? host!.list.find((h) => h.id === host!.value) : undefined;
+  const set = (agent?.current && agent.current.id !== agent.defaultId) || (attempts && attempts.value > 1) || !!verify?.value?.text.trim() || !!chosenHost;
+  const what = [showAgent && "agent", attempts && "attempts", verify && "verify", showHost && "box host"].filter(Boolean).join(", ");
   return (
     <ToolMenu
       {...shell}
       title="More options"
       width="w-[22rem]"
-      trigger={{ icon: <MoreHorizontal />, "aria-label": "More options: agent, attempts, verify", title: "Agent, attempts, verify", menu: "more", dot: !!set }}
+      trigger={{ icon: <MoreHorizontal />, "aria-label": `More options: ${what}`, title: what.replace(/^./, (c) => c.toUpperCase()), menu: "more", dot: !!set }}
     >
       <div className="flex flex-col gap-1 px-3 py-1.5">
         {showAgent && agent?.current && (
@@ -451,6 +455,13 @@ export function MoreMenu({ agent, attempts, verify, ...shell }: Shell & Pick<Run
           </Row>
         )}
         {verify && <VerifyRow value={verify.value} onChange={verify.onChange} />}
+        {showHost && (
+          <Row label="Box host" hint={chosenHost ? `${chosenHost.name}: ${hostStateLine(chosenHost)}. The run lands there or is refused; it is not moved elsewhere.` : undefined}>
+            <div className="-mx-3">
+              <HostList list={host!.list} value={host!.value} onChange={host!.onChange} />
+            </div>
+          </Row>
+        )}
       </div>
     </ToolMenu>
   );

@@ -34,6 +34,8 @@ export interface DelegateFlowInput {
   model?: string;
   /** Coding agent for this thread ("claude" | "omp"); validated by validateDelegateInput. */
   agent?: string;
+  /** A box host id an admin chose (validated by the route against the registry). */
+  host?: string;
   /**
    * Verified-outcomes clause (src/verify.ts), already validated by the route via verifyPlanOf.
    * The flow itself does not run it — a browser delegate returns before the run finishes, so the
@@ -89,6 +91,7 @@ export async function runDelegateFlow(
   });
   if (!v.ok) return { ok: false, question: v.question };
   if (input.attachments?.length) v.plan.attachments = input.attachments;
+  if (input.host) v.plan.host = input.host;
   if (input.provider) {
     const driver = v.plan.agent ?? "claude";
     if (!providerFitsDriver(input.provider, driver)) {
