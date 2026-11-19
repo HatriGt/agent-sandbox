@@ -91,20 +91,6 @@ only one is streamed.
 
 ## What was verified live (2026-11-19)
 
-A second account (`instabox-b`, machine `m_agq7j4ryfmtnbd6lneogxmqj4y`) was provisioned from its
-key alone through the deployed controller: the first attempt showed that the readiness probe
-dialled the gateway on port 22 and that the rollback delete lacked its Idempotency-Key (fixed in
-191a702, the stray machine deleted by hand), the second created the machine, minted the token
-and proved SSH in 6 s; the failing first check did not start the preparation (fixed next: a
-missing `msb` is now the cue), so it was started from the row's Prepare button. That
-preparation installed the shim and began streaming the claude image, then the sleep gate found
-the host "quiet for 5m" and suspended it under the stream: the ssh died, `msb load` closed, the
-pipe into it broke and the controller went down on an unhandled EPIPE. Fixed in one go: the
-stream's pipe handles the error (the preparation fails at that step, the controller stays up),
-a running preparation holds its host awake and renews the hold every five minutes, and it waits
-for the pool's `ready` (API start, then a probe) before its first ssh, since the gateway refuses
-a suspended machine.
-
 Against machine `m_agq5uelpl6qyy44ht6hbqm247i` ("sandbox", agent-browser template): every verb
 above with the controller's real flags, a `--copy-dir` run, exec with stdin, env and exit code,
 exec on a stopped box (boots, runs, stops), snapshot create / boot from / rm, modify memory with
@@ -116,6 +102,46 @@ machine id and key alone, token minted, check 2.5 s, prepare in 4m27s (shim rein
 image present, omp image streamed), then one delegated run: the machine resumed from the
 provider's own pause, the box ran as a container (hostname a container id, 4 CPUs, no
 /dev/kvm), the run finished and was torn down, 56 s end to end.
+
+### The second account, from its key alone (2026-11-19, later the same day)
+
+`instabox-b` (machine `m_agq7j4ryfmtnbd6lneogxmqj4y`, a second free account) was the first
+Instabox host built through `POST /hosts/provision.json`, and the first live run of that route
+found four faults in a row, each fixed and deployed before the next step:
+
+1. **The readiness probe dialled port 22.** The probe in the provision route used the
+   controller's SSH options but not the adapter's (`-p 2222`), knocked on the gateway's port 22
+   and gave up after two minutes. Fixed in 191a702: the adapter's options come first.
+2. **The rollback left the machine behind.** The undo `DELETE` carried no Idempotency-Key, which
+   the API answers with 400, so the fresh machine stayed on the account (`could not delete
+   machine …; remove it by hand`; it was deleted by hand). Fixed in 191a702: every machine
+   delete carries the key.
+3. **The failing first check stopped the preparation.** The second attempt created the machine,
+   minted the token and proved SSH in 6 s, but the row's first check failed (`msb … not found`,
+   as a stock machine must) and that failure used to skip the auto-prepare, so the row sat at
+   "unreachable" until the Prepare button. Fixed in fb70812: a failure preparation cures starts
+   it (`prepareCuresCheck`), and the host is checked again when it ends well.
+4. **The sleep gate suspended the host under the stream.** That preparation installed the shim
+   and began streaming the claude image; five quiet minutes later the gate logged "quiet for 5m:
+   letting the host sleep", suspended the machine, the ssh died, `msb load` closed, the pipe into
+   it broke and the controller went down on an unhandled EPIPE (`node:events … write EPIPE`),
+   the report with it. Fixed in 175981a: the load's stdin has an error handler (the step fails
+   with "the host stopped taking the image", the process lives), a running preparation holds its
+   host awake for 15 minutes and renews the hold every five, and it awaits the pool's `ready`
+   before its first ssh, since the gateway refuses a suspended machine outright.
+
+On 175981a the preparation ran end to end from the Prepare button: `held awake 15m: preparing
+instabox-b`, `start instabox-b: starting`, shim and rsync, agent-claude in 3m47s, agent-omp in
+5m07s, 9 minutes in all, the row reachable at the end without a Check. Then
+`.shots/live-host-choice.mjs --host=instabox-b`: an unknown id refused with 404, a non-string
+host with 400, one delegated run pinned to instabox-b started in 47 s, carried `host:
+instabox-b` in the fleet, finished (`done`, exit 0) 63 s after the call, and was torn down. The
+pool is five hosts and 19 slots: freestyle-a, freestyle-b, instabox-a, instabox-b at order 0,
+the VPS at 10.
+
+Disk on the fresh machine before the images: 11 GB free of 16 on `/`, 16 GB free of 20 on
+`/data`. A temporary SSH token minted to look at the machine during the post-mortem was revoked
+afterwards; only the controller's token remains on the account.
 
 ## Not covered
 

@@ -318,14 +318,17 @@ What it does, in order, through the same REST API the `freestyle` CLI uses:
    `ASB_FREESTYLE_SNAPSHOT` from the controller's env, else the stock `freestyle/ubuntu`).
 2. Creates an identity, grants it root on that VM only, mints a token with no expiry.
 3. Builds the SSH target `<id>+root:<token>@beta-ssh.freestyle.sh` and proves it with a plain
-   `ssh … true` through the proxy (up to two minutes; a resumed or cold VM takes a while to
-   answer).
+   `ssh … true` through the proxy, with the provider's own SSH options in front (`-p 2222` on
+   Instabox; without them the probe knocked on the gateway's port 22 and timed out, 2026-11-19),
+   for up to two minutes; a resumed or cold VM takes a while to answer.
 4. Saves the row with `cloud: {vmId, apiKey, slug, identityId, tokenId}`, runs the inline check
    and the host-guard learn like any added host.
 
 A failure at any step deletes what the earlier steps made (the identity, then the VM) and comes
 back as one line (`create VM → 402: …`, `SSH never answered: …`) with the step log; nothing is
-saved. One provision runs at a time. The key and the token are never logged.
+saved. One provision runs at a time. The key and the token are never logged. The rollback
+delete is a lifecycle call like the others (an Idempotency-Key on Instabox); when it fails the
+log says `could not delete machine …; remove it by hand`, and the machine is still there.
 
 What it does **not** do: a VM from the stock image has no `msb` and no box images, so a run
 placed there would fail at boot until the runbook steps in [freestyle-host.md](freestyle-host.md)
@@ -346,26 +349,44 @@ and the VPS at 10, runs go to the accounts first and share between them.
 An Instabox machine (instabox.sh) is a Firecracker microVM with no `/dev/kvm`, so microsandbox
 cannot run on it. The controller drives it anyway: a Python shim with the `msb` verbs the
 controller uses sits at `/usr/local/bin/msb` and runs every box as a Docker container of the
-same image (`src/host-shim/msb-docker.py`). **Add host → An existing machine**, provider
-"Instabox sandbox", a name, the machine id (`m_…` from the dashboard or `GET /v1/machines`) and
-the account's API key; the SSH target may be left blank. The controller then
+same image (`src/host-shim/msb-docker.py`). An account with no machine yet is one call: **Add
+host → From an API key**, provider "Instabox sandbox", a name, the key (or
+`POST /hosts/provision.json {provider:"instabox", name, apiKey, …}`); a machine that exists
+already is **Add host → An existing machine** with the machine id (`m_…` from the dashboard or
+`GET /v1/machines`) and the key, SSH target left blank. The controller then
 
-1. mints an SSH token for the machine through the API (`POST /v1/machines/{id}/ssh-tokens`,
-   never expiring, labelled "agent-sandbox controller") and stores `ibssh_TOKEN@ssh.instabox.sh`
-   as the row's target, port 2222;
-2. checks the host over SSH as for any other row;
-3. **prepares** it in the background: sends the shim over SSH and installs it (with `sudo -n`
-   when the login user is not root), installs rsync if missing, makes the staging and home
-   directories, then streams every box image the primary boots from (`MSB_CLAUDE_IMAGE`,
-   `MSB_OMP_IMAGE`) with `msb save --format docker` on the primary piped into `msb load` on the
-   host (the 1.9 GB claude image took 2m48s from hostbrr on 2026-11-19).
+1. (from a key) creates the machine from the `agent-browser` template, running, tagged
+   `agent-sandbox: box-host`; the free plan refuses an idle timeout other than its own 30 min,
+   which is logged and left;
+2. mints an SSH token for the machine through the API (`POST /v1/machines/{id}/ssh-tokens`,
+   never expiring, labelled "agent-sandbox controller"), stores `ibssh_TOKEN@ssh.instabox.sh`
+   as the row's target, port 2222, and (from a key) proves it with one `ssh -p 2222 … true`
+   through the gateway: about 6 s from the call to a saved row on 2026-11-19;
+3. checks the host over SSH as for any other row. On a stock machine that check **fails** with
+   `msb ls failed (exit 127): … /usr/local/bin/msb: not found`, which is the cue, not the end:
+   a failure preparation would cure (no `msb`) starts it; one it would not (no SSH, a wrong
+   token, a broken shim) leaves the row at "unreachable" with the reason;
+4. **prepares** it in the background: holds the host awake (15 minutes, renewed every five, so
+   the sleep gate cannot suspend the machine under the stream), waits for the pool's `ready`
+   (API start, then a probe: the gateway refuses SSH to a suspended machine instead of resuming
+   it), sends the shim over SSH and installs it (with `sudo -n` when the login user is not
+   root), installs rsync if missing, makes the staging and home directories, then streams every
+   box image the primary boots from (`MSB_CLAUDE_IMAGE`, `MSB_OMP_IMAGE`) with
+   `msb save --format docker` on the primary piped into `msb load` on the host (from hostbrr on
+   2026-11-19: the 1.9 GB claude image in 2m48s to instabox-a and 3m47s to instabox-b, the 2.6 GB
+   omp image in 5m07s), and checks the host again when it ends well, so the row drops
+   "unreachable" on its own.
 
 The host row shows the preparation as it goes ("agent-claude:… streamed from the primary in
-2m48s") and its failure if it fails; the **Prepare** button on the row (or
-`POST /hosts.json {action:"prepare", id}`) runs it again and skips what is in place. Pause and
-wake go through the machine's suspend and start calls; a paused machine resumes in a few seconds.
-`POST /hosts/provision.json {provider:"instabox", …}` creates a machine from the `agent-browser`
-template, mints the token, and prepares it the same way (the free plan allows one machine).
+2m48s") and its failure if it fails (a host that stops taking the image mid-stream fails that
+step with `EPIPE: the host stopped taking the image`; the controller stays up); the **Prepare**
+button on the row (or `POST /hosts.json {action:"prepare", id}`) runs it again and skips what
+is in place. Pause and wake go through the machine's suspend and start calls; a paused machine
+resumes in about ten seconds through `start`, and only through `start`: an SSH to a suspended
+machine is refused by the gateway ("administratively prohibited … start it in the instabox
+dashboard"), so every path that reaches a dormant Instabox host goes through the pool's `ready`
+first. The free plan allows one machine per account, so a second account is a second row
+(prod: `instabox-a` and `instabox-b`, both order 0, 3 boxes, 5-minute sleep, 2026-11-19).
 The direct route (above) logs in as `user` on port 22 inside the VM, past the gateway. What the
 shim does not do: the egress allowlist (every container has the machine's full egress, as prod
 runs with `EGRESS_ALLOW_ALL=1` anyway), a root-disk size, and `--idle-timeout` (the controller's

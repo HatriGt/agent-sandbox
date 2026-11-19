@@ -392,10 +392,11 @@ function summarizeError(body: string): string {
 // ---- Instabox -----------------------------------------------------------------------------------
 //
 // An Instabox sandbox (instabox.sh) is a Firecracker microVM: Debian, Docker, 4 vCPU / 8 GiB on
-// the free plan, idle-paused by the provider (memory kept) and resumed by the next exec, SSH or
-// API call. It has NO /dev/kvm, so microsandbox cannot boot its microVMs inside it; the box images
-// run as Docker containers through the msb-compatible shim instead (src/host-shim/msb-docker.py),
-// which `prepare` installs as the host's msb. SSH goes through the provider's gateway with a
+// the free plan, idle-paused by the provider (memory kept) and resumed only by `start` (the
+// gateway refuses SSH to a suspended machine: "administratively prohibited … start it in the
+// dashboard", so the pool's `ready` goes first). It has NO /dev/kvm, so microsandbox cannot boot
+// its microVMs inside it; the box images run as Docker containers through the msb-compatible
+// shim instead (src/host-shim/msb-docker.py), which `prepare` installs as the host's msb. SSH goes through the provider's gateway with a
 // machine token as the user name (`ibssh_…@ssh.instabox.sh`, port 2222); the machine's own sshd
 // listens on 22 for the direct route, as `user`. The REST API (X-API-Key) reads the machine
 // (`state`: running / suspended / stopped / …), suspends, starts, creates, snapshots and deletes it;

@@ -445,10 +445,11 @@ The container drives `msb` on the VPS **host** over SSH (msb needs KVM on the ho
 as `host.docker.internal`. Everything site-specific lives in `.env`; the repo ships no secrets.
 
 That VPS is the **primary box host**. More hosts can be added from the dashboard (Fleet view →
-Box hosts) without touching `.env`: Freestyle VMs that pause themselves between runs, or any
-machine with `msb` that answers SSH. Runs are routed across them by order number, warmth,
-wakefulness and monthly allowance, and a host that is down or spent is skipped. See
-[`docs/hosts.md`](docs/hosts.md).
+Box hosts) without touching `.env`: Freestyle VMs and Instabox machines that pause themselves
+between runs (built from the account's API key alone, prepared with the shim and the box images
+in the background), or any machine with `msb` that answers SSH. Runs are routed across them by
+order number, warmth, wakefulness and monthly allowance, and a host that is down or spent is
+skipped. See [`docs/hosts.md`](docs/hosts.md) and [`docs/instabox-host.md`](docs/instabox-host.md).
 
 
 ## Multi-user mode
