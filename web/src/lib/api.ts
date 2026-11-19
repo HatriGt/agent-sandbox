@@ -570,6 +570,20 @@ export interface HostProviderInfo {
   canProvision: boolean;
   canSnapshot: boolean;
   metered: boolean;
+  /** The SSH target may be left blank: the controller mints one from the API key and the machine id. */
+  sshOptional?: boolean;
+  /** "docker": boxes are containers through the msb shim the controller installs; the host is prepared in the background. */
+  boxRuntime?: "msb" | "docker";
+}
+
+/** What the background preparation of a host (the shim, the box images from the primary) has done so far. */
+export interface HostPrepare {
+  running: boolean;
+  ok?: boolean;
+  steps: string[];
+  error?: string;
+  startedAt: number;
+  endedAt?: number;
 }
 
 /** One box host as /hosts.json and /health.json describe it (src/host-pool.ts HostStateView). */
@@ -598,6 +612,7 @@ export interface HostView {
   allowance?: { vcpuHours: number; vcpu: number; resetDay: number; month: string; usedHours: number; leftHours: number; pct: number };
   providerState?: { state: string; detail?: string; at: number };
   check?: { ok: boolean; ms: number; detail: string; at: number };
+  prepare?: HostPrepare;
   disk?: { reading?: { totalMib: number; usedMib: number; availMib: number; usedPct: number }; at: number; error?: string };
   /** The provider's handles with the secrets as "is set" flags; absent on a static host. */
   cloud?: { vmId: string; hasApiKey: boolean } & Record<string, string | boolean>;
@@ -1313,8 +1328,8 @@ export const api = {
   hostSnapshot: (id: string, slug?: string) => post<{ ok: boolean; snapshotId: string; slug?: string; hint?: string }>("/hosts/snapshot.json", { id, ...(slug ? { slug } : {}) }),
   /** A run is probably coming (the composer got focus): start the box's host, or the one a new task would take, if it is paused. */
   prewake: (box?: string) => post<{ ok: true; starting: boolean; host?: string }>("/hosts/prewake.json", box ? { box } : {}),
-  hostAction: (body: { action: "upsert"; id?: string; spec: HostSpecInput } | { action: "remove" | "check" | "wake" | "pause"; id: string }) =>
-    post<{ ok: boolean; host?: HostView; hosts?: HostView[]; capacity?: number; check?: HostView["check"]; providerState?: HostView["providerState"] }>("/hosts.json", body),
+  hostAction: (body: { action: "upsert"; id?: string; spec: HostSpecInput } | { action: "remove" | "check" | "wake" | "pause" | "prepare"; id: string }) =>
+    post<{ ok: boolean; host?: HostView; hosts?: HostView[]; capacity?: number; check?: HostView["check"]; providerState?: HostView["providerState"]; prepare?: HostPrepare }>("/hosts.json", body),
   memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean; repo?: string }, org?: string) =>
     post<MemoryNotesResponse>("/memory-notes.json", scoped(body, org)),
   /** Add a preference/rule by hand (the composer on the Memory page). */

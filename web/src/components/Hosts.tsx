@@ -1,7 +1,7 @@
 import * as React from "react";
-import { Activity, Camera, Moon, Pencil, Plus, Server, Sun, Trash2 } from "lucide-react";
+import { Activity, Camera, Loader2, Moon, Pencil, Plus, Server, Sun, Trash2, Wrench } from "lucide-react";
 import { toast } from "sonner";
-import { api, type HostProviderInfo, type HostSpecInput, type HostView, type HealthResponse } from "@/lib/api";
+import { api, type HostPrepare, type HostProviderInfo, type HostSpecInput, type HostView, type HealthResponse } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { fmtAgo } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -56,7 +56,7 @@ export function HostsPanel({ onChanged }: { onChanged?: () => void }) {
   const hosts = data.hosts;
   const providers = data.providers?.length ? data.providers : FALLBACK_PROVIDERS;
 
-  const act = async (host: HostView, action: "check" | "wake" | "pause" | "remove" | "snapshot") => {
+  const act = async (host: HostView, action: "check" | "wake" | "pause" | "remove" | "snapshot" | "prepare") => {
     setBusy((b) => ({ ...b, [host.id]: action }));
     try {
       if (action === "snapshot") {
@@ -69,6 +69,7 @@ export function HostsPanel({ onChanged }: { onChanged?: () => void }) {
         if (r.check?.ok) toast.success(`${host.name} answers`, { description: `${r.check.detail} · ${(r.check.ms / 1000).toFixed(1)} s` });
         else toast.error(`${host.name} did not answer`, { description: r.check?.detail });
       } else if (action === "remove") toast.success(`${host.name} removed`);
+      else if (action === "prepare") toast.success(`${host.name} is being prepared`, { description: "The msb shim, rsync and the box images from the primary; a few minutes. The row shows each step." });
       else toast.success(`${host.name}: ${r.providerState?.state ?? "done"}`, { description: r.providerState?.detail });
       await refresh();
       onChanged?.();
@@ -206,8 +207,23 @@ function HostCell({ host: h, providers }: { host: HostView; providers: HostProvi
         )}
       </span>
       {h.check && !h.check.ok && <p className="text-destructive mt-0.5 truncate text-micro">{h.check.detail}</p>}
+      {h.prepare && <PrepareLine prepare={h.prepare} />}
     </div>
   );
+}
+
+/** One line under the host while it is being prepared, and the outcome after: the last step, or what failed. */
+function PrepareLine({ prepare: p }: { prepare: HostPrepare }) {
+  const last = p.steps[p.steps.length - 1];
+  if (p.running)
+    return (
+      <p className="text-muted-foreground mt-0.5 flex items-center gap-1.5 truncate text-micro" aria-live="polite">
+        <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden />
+        <span className="truncate">preparing{last ? ` · ${last}` : "…"}</span>
+      </p>
+    );
+  if (p.ok === false) return <p className="text-destructive mt-0.5 truncate text-micro">prepare failed: {p.error}</p>;
+  return <p className="text-muted-foreground mt-0.5 truncate text-micro">prepared · {p.steps.join(" · ")}</p>;
 }
 
 function MachinesCell({ host: h }: { host: HostView }) {
@@ -249,10 +265,20 @@ function AllowanceCell({ host: h }: { host: HostView }) {
   );
 }
 
-function HostActions({ host: h, provider, busy, onAct, onEdit }: { host: HostView; provider?: HostProviderInfo; busy?: string; onAct: (a: "check" | "wake" | "pause" | "remove" | "snapshot") => void; onEdit: () => void }) {
+function HostActions({ host: h, provider, busy, onAct, onEdit }: { host: HostView; provider?: HostProviderInfo; busy?: string; onAct: (a: "check" | "wake" | "pause" | "remove" | "snapshot" | "prepare") => void; onEdit: () => void }) {
   const metered = h.provider !== "static" && h.cloud?.hasApiKey;
   return (
     <div className="flex items-center justify-end gap-0.5" onClick={stopRow} onKeyDown={stopRow}>
+      {provider?.boxRuntime === "docker" && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="icon-sm" variant="ghost" aria-label={`Prepare ${h.name}`} loading={busy === "prepare" || !!h.prepare?.running} onClick={() => onAct("prepare")} className="text-muted-foreground">
+              <Wrench />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Prepare: install the msb shim and rsync, stream the box images from the primary (only what is missing)</TooltipContent>
+        </Tooltip>
+      )}
       <Tooltip>
         <TooltipTrigger asChild>
           <Button size="icon-sm" variant="ghost" aria-label={`Check ${h.name}`} loading={busy === "check"} onClick={() => onAct("check")} className="text-muted-foreground">
@@ -362,7 +388,9 @@ function HostDialog({ host, providers, onClose, onSaved }: { host: HostView | nu
   const provider = providers.find((p) => p.id === f.provider) ?? providers[0];
   const needsVm = !!provider?.needs.includes("vmId");
   const hasKeyField = !!provider?.secrets.includes("apiKey");
-  const can = !!f.name.trim() && (primary || (provision ? !!f.apiKey.trim() : !!f.ssh.trim() && (!needsVm || !!f.vmId.trim())));
+  // An SSH target, or (where the provider mints one) the API key and the machine id instead.
+  const sshGiven = !!f.ssh.trim() || (!!provider?.sshOptional && (!!f.apiKey.trim() || !!host?.cloud?.hasApiKey) && !!f.vmId.trim());
+  const can = !!f.name.trim() && (primary || (provision ? !!f.apiKey.trim() : sshGiven && (!needsVm || !!f.vmId.trim())));
   const submit = async () => {
     if (!can || busy) return;
     setBusy(true);
@@ -415,6 +443,7 @@ function HostDialog({ host, providers, onClose, onSaved }: { host: HostView | nu
       }
       const r = await api.hostAction({ action: "upsert", ...(host ? { id: host.id } : {}), spec });
       if (r.check && !r.check.ok) toast.warning(`${spec.name} ${host ? "updated" : "added"}, but it does not answer: ${r.check.detail}`, { duration: 12_000 });
+      else if (r.host?.prepare?.running) toast.success(`${spec.name} ${host ? "updated" : "added"}${r.check ? ` · ${r.check.detail}` : ""}`, { description: "Being prepared in the background: the msb shim, rsync, then the box images from the primary (a few minutes). The row shows each step.", duration: 15_000 });
       else toast.success(`${spec.name} ${host ? "updated" : "added"}${r.check ? ` · ${r.check.detail}` : ""}`);
       await onSaved();
       onClose();
@@ -473,7 +502,7 @@ function HostDialog({ host, providers, onClose, onSaved }: { host: HostView | nu
               </div>
             ) : (
               <>
-                <Field label="SSH target" hint={provider?.sshHint}>
+                <Field label="SSH target" optional={!!provider?.sshOptional} hint={provider?.sshHint}>
                   {(w) => <Input {...w} mono value={f.ssh} onChange={(e) => set("ssh", e.target.value)} placeholder={provider?.sshPlaceholder} spellCheck={false} />}
                 </Field>
                 {(needsVm || hasKeyField) && (

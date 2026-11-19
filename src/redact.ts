@@ -20,6 +20,8 @@ const SHAPES: RegExp[] = [
   // Freestyle proxy authenticates the session by that token). It is the argv of every ssh the
   // controller runs there, so it rode along in every "Command timed out" line of the log.
   /((?:^|[\s"'=])[A-Za-z0-9._+-]+:)([A-Za-z0-9._~-]{12,})(@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)/g,
+  // An Instabox SSH token: the whole user part of `ibssh_TOKEN@ssh.instabox.sh` (the gateway authenticates by it).
+  /\b(ibssh_)([A-Za-z0-9_-]{8,})\b/g,
   // GitHub: classic/OAuth/app/refresh tokens and fine-grained PATs.
   /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,

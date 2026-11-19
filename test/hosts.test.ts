@@ -115,7 +115,7 @@ test("normalizeHostSpec: validates, keeps a stored key on an edit, redacts for t
   assert.deepEqual(builtEdit.cloud, { vmId: "vm-b", apiKey: "k", identityId: "idn-1", tokenId: "tok-1", slug: "built", nested: "[object Object]" });
   assert.deepEqual(publicHostSpec(built).cloud, { vmId: "vm-b", hasApiKey: true, identityId: "idn-1", tokenId: "tok-1", slug: "built", nested: "[object Object]" });
   assert.equal(normalizeHostSpec({ id: built.id, cloud: null as never, provider: "static" }, built).cloud, undefined, "null clears the block");
-  assert.throws(() => normalizeHostSpec({ name: "x", ssh: "root@x", provider: "nope" as never }), /unknown provider "nope" \(one of static, freestyle\)/);
+  assert.throws(() => normalizeHostSpec({ name: "x", ssh: "root@x", provider: "nope" as never }), /unknown provider "nope" \(one of static, freestyle, instabox\)/);
   assert.equal(redactSshTarget("root@vps"), "root@vps");
   const off = normalizeHostSpec({ id: a.id, allowance: null as never, enabled: false }, a);
   assert.equal(off.allowance, undefined);

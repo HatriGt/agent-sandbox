@@ -108,14 +108,21 @@ export function primaryHostSpec(cfg: Config): HostSpec {
  */
 export function configForHost(base: Config, spec: HostSpec): Config {
   if (spec.id === PRIMARY_HOST_ID) return { ...base, hostId: PRIMARY_HOST_ID };
+  // What the provider knows about every machine of its kind (a gateway port, the shim's path, where
+  // a non-root user can stage) fills in whatever the row left blank; the primary's values are for
+  // a machine like the primary.
+  const adapter = providerFor(spec);
+  const defaults = adapter.hostDefaults ?? {};
+  const extra = spec.sshExtraOpts ?? base.sshExtraOpts ?? [];
   return {
     ...base,
     hostId: spec.id,
     vpsSsh: spec.ssh,
-    sshExtraOpts: spec.sshExtraOpts ?? base.sshExtraOpts,
-    msb: spec.msb || base.msb,
-    msbHome: (spec.msbHome || base.msbHome).replace(/\/+$/, ""),
-    vpsStagingDir: spec.stagingDir || base.vpsStagingDir,
+    sshExtraOpts: adapter.sshOpts?.length ? [...adapter.sshOpts, ...extra] : spec.sshExtraOpts ?? base.sshExtraOpts,
+    ...(adapter.directUser ? { sshDirectUser: adapter.directUser } : {}),
+    msb: spec.msb || defaults.msb || base.msb,
+    msbHome: (spec.msbHome || defaults.msbHome || base.msbHome).replace(/\/+$/, ""),
+    vpsStagingDir: spec.stagingDir || defaults.stagingDir || base.vpsStagingDir,
     maxBoxes: spec.maxBoxes ?? base.maxBoxes,
     hostSleepAfterMs: spec.sleepAfterMs,
     poolSize: spec.warm ? base.poolSize : 0,
@@ -144,7 +151,9 @@ export function normalizeHostSpec(raw: Partial<HostSpec> & { id?: string }, exis
   const provider = raw.provider ?? existing?.provider ?? "static";
   if (!knownProvider(provider)) throw new Error(`unknown provider "${String(provider)}" (one of ${listProviders().map((p) => p.id).join(", ")})`);
   const adapter = providerFor({ provider });
-  const ssh = String(raw.ssh ?? existing?.ssh ?? "").trim();
+  let ssh = String(raw.ssh ?? existing?.ssh ?? "").trim();
+  // The dashboard only ever sees the redacted target; an edit that sends it back means "unchanged".
+  if (existing && ssh && ssh === redactSshTarget(existing.ssh)) ssh = existing.ssh;
   if (!ssh || /\s/.test(ssh)) throw new Error("ssh target is required (user@host, no spaces)");
   if (ssh.startsWith("-")) throw new Error("ssh target cannot start with a dash");
   const name = String(raw.name ?? existing?.name ?? id).trim().slice(0, 60) || id;
@@ -238,9 +247,9 @@ export function publicHostSpec(spec: HostSpec): Omit<HostSpec, "freestyle" | "cl
   return { ...rest, ssh: redactSshTarget(ssh), cloud: { ...pub, vmId: cloud.vmId, hasApiKey: !!cloud.apiKey } };
 }
 
-/** `box+user:TOKEN@proxy` → `box+user:…@proxy`; a plain `user@host` is unchanged. */
+/** `box+user:TOKEN@proxy` → `box+user:…@proxy`, `ibssh_TOKEN@gateway` → `ibssh_…@gateway`; a plain `user@host` is unchanged. */
 export function redactSshTarget(ssh: string): string {
-  return ssh.replace(/^([^:@\s]+):([^@\s]+)@/, "$1:…@");
+  return ssh.replace(/^([^:@\s]+):([^@\s]+)@/, "$1:…@").replace(/^(ibssh_)[^@\s]+@/, "$1…@");
 }
 
 // --- storage --------------------------------------------------------------------------------------

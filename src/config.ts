@@ -12,6 +12,8 @@ export interface Config {
   /** The host this config is bound to (src/host-pool.ts); unset = the primary host from .env. */
   hostId?: string;
   vpsSsh: string;
+  /** The user the host's own sshd knows when the target's user part is a gateway token (src/ssh-tunnel.ts logs in as it on the direct route). */
+  sshDirectUser?: string;
   /** Base dir on the VPS where each delegation's working tree is staged before --copy-dir. */
   vpsStagingDir: string;
   /** IDE-provided open workspace path (local delegate falls back to this when no repo is given).

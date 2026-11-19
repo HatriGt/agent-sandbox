@@ -64,6 +64,7 @@ test("the registry: what the form is told, the proxy each provider sits behind, 
     [
       ["static", "My own machine", [], [], false, false, false],
       ["freestyle", "Freestyle VM", ["vmId"], ["apiKey"], true, true, true],
+      ["instabox", "Instabox sandbox", ["vmId"], ["apiKey"], true, true, true],
     ]
   );
   assert.ok(list.every((p) => p.hint && p.sshHint && p.sshPlaceholder));

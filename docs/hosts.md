@@ -17,9 +17,9 @@ and with no other row the controller behaves exactly as before.
 | Field | Meaning |
 | --- | --- |
 | `id`, `name` | The id is a slug made from the name; the primary host is always `primary`. |
-| `provider` | An adapter id from `src/host-providers.ts`: `static` (a machine of your own; nothing to pause) or `freestyle` (a VM the controller can pause, start and build through the API). Open: a new provider is one adapter, and the add-host form offers whatever the controller lists. |
-| `ssh` | The target, `user@host` or `vm+user:TOKEN@<proxy>` for a VM behind its provider's SSH proxy (Freestyle: `beta-ssh.freestyle.sh`). Shown redacted everywhere (`vm+user:…@proxy`). |
-| `sshExtraOpts`, `msb`, `msbHome`, `stagingDir` | Per-host overrides of the `.env` values; blank means the primary's. |
+| `provider` | An adapter id from `src/host-providers.ts`: `static` (a machine of your own; nothing to pause), `freestyle` (a VM the controller can pause, start and build through the API) or `instabox` (an Instabox machine, no KVM, boxes are Docker containers behind an `msb`-shaped shim; see [instabox-host.md](instabox-host.md)). Open: a new provider is one adapter, and the add-host form offers whatever the controller lists. |
+| `ssh` | The target, `user@host` or `vm+user:TOKEN@<proxy>` for a VM behind its provider's SSH proxy (Freestyle: `beta-ssh.freestyle.sh`; Instabox: `ibssh_TOKEN@ssh.instabox.sh`, minted by the controller when left blank). Shown redacted everywhere (`vm+user:…@proxy`, `ibssh_…@ssh.instabox.sh`). |
+| `sshExtraOpts`, `msb`, `msbHome`, `stagingDir` | Per-host overrides of the `.env` values; blank means the provider's defaults where it has them (Instabox: the shim at `/usr/local/bin/msb`, home `/data`, staging under `/data/home`), else the primary's. The provider's own SSH options (Instabox: `-p 2222`) always come first. |
 | `maxBoxes` | Slots on this host; blank means the primary's `MAX_BOXES`. |
 | `priority` | Lower runs first. The primary seeds at 0; a metered VM is sensibly 10. |
 | `sleepAfterMs` | The host's own quiet delay (src/host-sleep.ts); 0 never sleeps. |
@@ -283,7 +283,7 @@ The same over HTTP, admin bearer:
 ```
 GET  /hosts.json                      → { hosts: HostView[], capacity, providers: ProviderInfo[] }
 POST /hosts.json  {action:"upsert", id?, spec:{...}}
-POST /hosts.json  {action:"remove" | "check" | "wake" | "pause", id}
+POST /hosts.json  {action:"remove" | "check" | "wake" | "pause" | "prepare", id}
 POST /hosts/provision.json {provider, name, apiKey, snapshotId?, priority?, sleepAfterMs?, maxBoxes?, warm?, enabled?, allowance?}
 POST /hosts/snapshot.json  {id, slug?}   → { snapshotId, slug, hint }
 ```
@@ -327,6 +327,36 @@ The old way still works: create the VM with the CLI, do the runbook, and **Add h
 existing machine** with the SSH target, the VM id and the key. Either way, the controller checks
 the host at once and starts routing to it by the rules above. With the Freestyle hosts at order 0
 and the VPS at 10, runs go to the accounts first and share between them.
+
+## Adding an Instabox machine
+
+An Instabox machine (instabox.sh) is a Firecracker microVM with no `/dev/kvm`, so microsandbox
+cannot run on it. The controller drives it anyway: a Python shim with the `msb` verbs the
+controller uses sits at `/usr/local/bin/msb` and runs every box as a Docker container of the
+same image (`src/host-shim/msb-docker.py`). **Add host → An existing machine**, provider
+"Instabox sandbox", a name, the machine id (`m_…` from the dashboard or `GET /v1/machines`) and
+the account's API key; the SSH target may be left blank. The controller then
+
+1. mints an SSH token for the machine through the API (`POST /v1/machines/{id}/ssh-tokens`,
+   never expiring, labelled "agent-sandbox controller") and stores `ibssh_TOKEN@ssh.instabox.sh`
+   as the row's target, port 2222;
+2. checks the host over SSH as for any other row;
+3. **prepares** it in the background: sends the shim over SSH and installs it (with `sudo -n`
+   when the login user is not root), installs rsync if missing, makes the staging and home
+   directories, then streams every box image the primary boots from (`MSB_CLAUDE_IMAGE`,
+   `MSB_OMP_IMAGE`) with `msb save --format docker` on the primary piped into `msb load` on the
+   host (the 1.9 GB claude image took 2m48s from hostbrr on 2026-11-19).
+
+The host row shows the preparation as it goes ("agent-claude:… streamed from the primary in
+2m48s") and its failure if it fails; the **Prepare** button on the row (or
+`POST /hosts.json {action:"prepare", id}`) runs it again and skips what is in place. Pause and
+wake go through the machine's suspend and start calls; a paused machine resumes in a few seconds.
+`POST /hosts/provision.json {provider:"instabox", …}` creates a machine from the `agent-browser`
+template, mints the token, and prepares it the same way (the free plan allows one machine).
+The direct route (above) logs in as `user` on port 22 inside the VM, past the gateway. What the
+shim does not do: the egress allowlist (every container has the machine's full egress, as prod
+runs with `EGRESS_ALLOW_ALL=1` anyway), a root-disk size, and `--idle-timeout` (the controller's
+own nap stops a quiet finished box). Details and the disk budget in [instabox-host.md](instabox-host.md).
 
 ## Adding any other machine
 

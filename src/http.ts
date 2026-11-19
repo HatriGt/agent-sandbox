@@ -52,6 +52,7 @@ import { closeSshMasters } from "./ssh.js";
 import { PRIMARY_HOST_ID, boxHostOf, slugify as hostSlug } from "./hosts.js";
 import { ATTENTION_HOLD_MS } from "./host-sleep.js";
 import { listProviders, providerFor } from "./host-providers.js";
+import { prepareStatus, startPrepare } from "./host-prepare.js";
 import { sweepHosts } from "./host-sweep.js";
 import { countBoxes as countBoxesOnHost } from "./msb.js";
 import { BAKED_MCP_PACKAGES, BASE_PACKAGES, fetchLatestVersions, imageChanges, packageNameOf, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
@@ -6010,8 +6011,20 @@ app.get("/hosts.json", (req: Request, res: Response) => {
     res.status(403).json({ error: "admins only" });
     return;
   }
-  res.json({ hosts: hostPool.state(), capacity: hostPool.capacity(), providers: listProviders() });
+  res.json({ hosts: hostsWithPrepare(), capacity: hostPool.capacity(), providers: listProviders() });
 });
+/** The host rows with what the background preparation of each (src/host-prepare.ts) has done so far. */
+const hostsWithPrepare = () => hostPool.state().map((h) => ({ ...h, ...(prepareStatus(h.id) ? { prepare: prepareStatus(h.id) } : {}) }));
+/**
+ * A host whose kind the controller can set up itself (the msb shim on a Docker host, the box images
+ * from the primary) is prepared in the background once it answers; the row shows the progress.
+ */
+const prepareIfNeeded = (id: string, checkOk: boolean | undefined): void => {
+  const h = hostPool.get(id);
+  if (!h || checkOk === false) return;
+  if (!providerFor(h.spec).prepare) return;
+  startPrepare(cfg, hostPool.cfgFor(id), h.spec, { log: (m) => console.error(m) });
+};
 app.post("/hosts.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   if (!isAdmin(principalOf(res))) {
@@ -6024,7 +6037,24 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
     switch (body.action) {
       case "upsert": {
         const before = hostPool.get(id)?.spec;
-        const spec = hostPool.upsert({ ...(body.spec ?? {}), ...(id ? { id } : {}) } as Parameters<typeof hostPool.upsert>[0]);
+        const raw = { ...(body.spec ?? {}), ...(id ? { id } : {}) } as Record<string, unknown> & { ssh?: unknown; cloud?: Record<string, unknown>; freestyle?: Record<string, unknown>; provider?: unknown };
+        // No SSH target given for a machine whose provider can mint one (Instabox: an SSH token from
+        // the API key and the machine id): minted here, before the row is validated and saved.
+        const minter = providerFor({ provider: String(raw.provider ?? before?.provider ?? "static") });
+        if (!String(raw.ssh ?? "").trim() && !before?.ssh && minter.mintSsh) {
+          const given = (raw.cloud ?? raw.freestyle ?? {}) as Record<string, unknown>;
+          const vmId = String(given.vmId ?? "").trim();
+          const apiKey = String(given.apiKey ?? "").trim() || before?.cloud?.apiKey || "";
+          const m = await minter.mintSsh({ ...Object.fromEntries(Object.entries(given).map(([k, v]) => [k, String(v ?? "")])), vmId, apiKey });
+          if (!m.ok) {
+            res.status(400).json({ error: `could not mint an SSH credential: ${m.error}` });
+            return;
+          }
+          raw.ssh = m.ssh;
+          raw.cloud = { ...given, ...m.cloud };
+          delete raw.freestyle;
+        }
+        const spec = hostPool.upsert(raw as Parameters<typeof hostPool.upsert>[0]);
         res.locals.auditAction = `host.upsert:${spec.id}`;
         // A new target, or one switched back on, is checked now (capped by HOST_ANSWER_TIMEOUT_MS): the
         // dialog shows the answer and a dead host is unreachable, so not picked, until a sweep gets through.
@@ -6039,7 +6069,23 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
         const check = spec.enabled && spec.id !== PRIMARY_HOST_ID && connectionChanged ? await hostPool.check(spec.id) : undefined;
         // A new host's own addresses, before any box starts on it (src/host-guard.ts).
         if (spec.enabled) void learnHostGuard(hostPool.cfgFor(spec.id));
-        res.json({ ok: true, host: hostPool.state().find((h) => h.id === spec.id), hosts: hostPool.state(), capacity: hostPool.capacity(), check });
+        if (connectionChanged && spec.enabled && spec.id !== PRIMARY_HOST_ID) prepareIfNeeded(spec.id, check?.ok);
+        res.json({ ok: true, host: hostsWithPrepare().find((h) => h.id === spec.id), hosts: hostsWithPrepare(), capacity: hostPool.capacity(), check });
+        return;
+      }
+      case "prepare": {
+        const h = hostPool.get(id);
+        if (!h) {
+          res.status(404).json({ error: "no such host" });
+          return;
+        }
+        if (!providerFor(h.spec).prepare) {
+          res.status(400).json({ error: `a ${providerFor(h.spec).label} host is prepared by hand (see the runbook)` });
+          return;
+        }
+        const report = startPrepare(cfg, hostPool.cfgFor(id), h.spec, { log: (m) => console.error(m) });
+        res.locals.auditAction = `host.prepare:${id}`;
+        res.json({ ok: true, prepare: report, host: hostsWithPrepare().find((x) => x.id === id) });
         return;
       }
       case "remove": {
@@ -6090,7 +6136,7 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
         return;
       }
       default:
-        res.status(400).json({ error: "action must be upsert, remove, check, wake or pause" });
+        res.status(400).json({ error: "action must be upsert, remove, check, wake, pause or prepare" });
     }
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
@@ -6172,14 +6218,15 @@ app.post("/hosts/provision.json", async (req: Request, res: Response) => {
       warm: body.warm === undefined ? false : !!body.warm,
       enabled: body.enabled === undefined ? true : !!body.enabled,
       ...(num(body.maxBoxes) !== undefined ? { maxBoxes: num(body.maxBoxes) } : {}),
-      allowance: body.allowance === null ? undefined : ((body.allowance as { vcpuHours: number; vcpu: number; resetDay: number } | undefined) ?? { vcpuHours: 200, vcpu: 4, resetDay: 1 }),
+      allowance: body.allowance === null ? undefined : ((body.allowance as { vcpuHours: number; vcpu: number; resetDay: number } | undefined) ?? (provider === "freestyle" ? { vcpuHours: 200, vcpu: 4, resetDay: 1 } : undefined)),
       // A fresh VM has no snapshot of the primary's: boot from the image, or cold.
       snapshot: "",
     } as Parameters<typeof hostPool.upsert>[0]);
     res.locals.auditAction = `host.provision:${spec.id}`;
     const check = await hostPool.check(spec.id);
     if (spec.enabled) void learnHostGuard(hostPool.cfgFor(spec.id));
-    res.json({ ok: true, host: hostPool.state().find((h) => h.id === spec.id), hosts: hostPool.state(), capacity: hostPool.capacity(), check, log: made.log, snapshotId: made.snapshotId });
+    if (spec.enabled) prepareIfNeeded(spec.id, check.ok);
+    res.json({ ok: true, host: hostsWithPrepare().find((h) => h.id === spec.id), hosts: hostsWithPrepare(), capacity: hostPool.capacity(), check, log: made.log, snapshotId: made.snapshotId });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
   } finally {

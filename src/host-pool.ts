@@ -323,9 +323,10 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
 
   const build = (spec: HostSpec, prev?: HostRuntime): HostRuntime => {
     const cfg = configForHost(base, spec);
-    // A host behind its provider's SSH proxy opens one channel at a time (src/exec.ts: the relay
-    // stalls on openings that interleave); a static host runs its commands in parallel as before.
-    setSshLane(sshTargetTag(spec.ssh), providerFor(spec).proxyHost ? 1 : undefined);
+    // A host behind a proxy that stalls on interleaved channel openings (Freestyle) opens one at a
+    // time (src/exec.ts); the adapter says so. A static host, or a gateway that copes with parallel
+    // starts (Instabox), runs its commands in parallel as before.
+    setSshLane(sshTargetTag(spec.ssh), providerFor(spec).sshLaneWidth);
     // A target that changed: the old tunnel points at a machine this host no longer is.
     if (prev && prev.cfg.vpsSsh !== cfg.vpsSsh) tunnel?.drop(prev.cfg);
     const month = monthOf(spec);

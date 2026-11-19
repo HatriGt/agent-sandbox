@@ -64,9 +64,9 @@ export function directPort(target: string): number {
   return 40_000 + (parseInt(sshTargetTag(target).slice(0, 4), 16) % 20_000);
 }
 
-export function routeFor(target: string): DirectRoute {
+export function routeFor(target: string, user?: string): DirectRoute {
   const tag = sshTargetTag(target);
-  return { user: directUser(target), port: directPort(target), alias: `asb-direct-${tag}`, knownHosts: `${SOCK_DIR}/${tag}.known`, tag };
+  return { user: user || directUser(target), port: directPort(target), alias: `asb-direct-${tag}`, knownHosts: `${SOCK_DIR}/${tag}.known`, tag };
 }
 
 /** The `-i <key>` a host is reached with, from its extra ssh options. */
@@ -193,7 +193,8 @@ export function ensureTunnel(cfg: Config, wanted: () => boolean = () => true, io
 }
 
 async function dial(cfg: Config, e: Entry, io: TunnelIO): Promise<boolean> {
-  const route = routeFor(cfg.vpsSsh);
+  // A target whose user part is a gateway token (Instabox) names no Linux user: the provider does (cfg.sshDirectUser).
+  const route = routeFor(cfg.vpsSsh, cfg.sshDirectUser);
   try {
     // Front of the host's ssh lane: once the route is up every command after it is 0.45 s, not 3 s.
     if (!e.keyInstalled) {
