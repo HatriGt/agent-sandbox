@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter } from "@/components/ui/dialog";
 import { Lightbox } from "@/components/ui/lightbox";
-import { highlightHtml, useIsDark } from "@/components/ui/code-block";
+import { highlightTokens, useIsDark, type CodeToken } from "@/components/ui/code-block";
 import { languageOf } from "@/lib/fileIcon";
 import { attachmentTitle, attachmentType, describeAttachment, fileToAttachment, fmtBytes, isLongPaste, MAX_ATTACHMENTS, pastedTextAttachment, PREVIEW_CHARS, type Attachment } from "@/lib/attachments";
 
@@ -272,35 +272,42 @@ export function AttachmentPreview({ list }: { list: AttachmentList }) {
  * The whole text in one scrolling panel — no fold, no header: the dialog is the frame and its
  * title says what this is. Highlighted once the grammar lands; plain until then, and plain for
  * good past 60 KB, where highlighting would stall the main thread.
+ *
+ * The highlight is shiki tokens rendered by React as spans — never an HTML sink. A pasted text or
+ * an uploaded file is untrusted by our own threat model (the page holds the bearer token), and the
+ * console's only raw-HTML sink stays in code-block.tsx, pinned by test/code-highlight-escaping.test.ts
+ * (which greps for the prop name, so it is not written here).
  */
 function TextPreview({ a }: { a: Attachment }) {
   const text = a.text ?? "";
   const cut = text.length > PREVIEW_CHARS;
   const shown = cut ? text.slice(0, PREVIEW_CHARS) : text;
   const dark = useIsDark();
-  const [html, setHtml] = React.useState<string | null>(null);
+  const [tokens, setTokens] = React.useState<CodeToken[][] | null>(null);
   React.useEffect(() => {
     let cancelled = false;
-    setHtml(null);
+    setTokens(null);
     if (shown.length > 60_000) return;
-    highlightHtml(shown, languageOf(a.name), dark)
-      .then((h) => !cancelled && setHtml(h))
+    highlightTokens(shown, languageOf(a.name), dark)
+      .then((t) => !cancelled && setTokens(t))
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [shown, a.name, dark]);
-  const pre = "code-scroll text-[12.5px] leading-[1.6] [&>pre]:!bg-transparent [&>pre]:px-4 [&>pre]:py-3 [&>pre]:whitespace-pre";
   return (
     <div className="bg-muted/40 flex min-h-0 flex-1 flex-col rounded-md border">
       <div className="min-h-0 flex-1 overflow-auto">
-        {html ? (
-          <div className={pre} dangerouslySetInnerHTML={{ __html: html }} />
-        ) : (
-          <div className={pre}>
-            <pre className="font-mono">{shown}</pre>
-          </div>
-        )}
+        <pre className="code-scroll px-4 py-3 font-mono text-[12.5px] leading-[1.6] whitespace-pre">
+          {tokens
+            ? tokens.map((line, i) => (
+                <React.Fragment key={i}>
+                  {line.map((t, k) => (t.color ? <span key={k} style={{ color: t.color }}>{t.content}</span> : t.content))}
+                  {i < tokens.length - 1 && "\n"}
+                </React.Fragment>
+              ))
+            : shown}
+        </pre>
       </div>
       {cut && <p className="text-muted-foreground shrink-0 border-t px-3 py-2 text-micro">Showing the first {fmtBytes(PREVIEW_CHARS)} of {fmtBytes(a.size)}. The whole file is sent.</p>}
     </div>
