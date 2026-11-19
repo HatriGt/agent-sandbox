@@ -62,6 +62,19 @@ export interface PrepareDeps {
   streamImage?: (primary: Config, host: Config, ref: string) => Promise<void>;
   log?: (m: string) => void;
   now?: () => number;
+  /** Called once the run ends, with the report (the caller re-checks the host after a success). */
+  done?: (report: PrepareReport) => void;
+}
+
+/**
+ * A failed check that preparation would cure: the machine answered over SSH but has no `msb`
+ * (exit 127, "not found"), which is what the adapter's step installs. A check that failed for
+ * any other reason (no SSH, a wrong token, a broken shim) is left alone: preparing it would fail
+ * the same way and the row already says why.
+ */
+export function prepareCuresCheck(check: { ok: boolean; detail: string } | undefined): boolean {
+  if (!check || check.ok) return true;
+  return /exit 127\b|not found/i.test(check.detail);
 }
 
 async function hasImageOverSsh(host: Config, ref: string): Promise<boolean> {
@@ -174,6 +187,7 @@ export async function prepareHost(primary: Config, host: Config, spec: HostSpec,
   } finally {
     report.running = false;
     report.endedAt = now();
+    deps.done?.(report);
   }
   return report;
 }

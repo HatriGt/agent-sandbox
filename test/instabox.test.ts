@@ -16,7 +16,7 @@ import {
 import { configForHost, normalizeHostSpec, publicHostSpec, redactSshTarget, type HostSpec } from "../src/hosts.ts";
 import { routeFor } from "../src/ssh-tunnel.ts";
 import { redactShapes } from "../src/redact.ts";
-import { imagesWanted, prepareHost, prepareStatus, resetPrepareForTest, startPrepare } from "../src/host-prepare.ts";
+import { imagesWanted, prepareCuresCheck, prepareHost, prepareStatus, resetPrepareForTest, startPrepare } from "../src/host-prepare.ts";
 
 // A fabricated token in the real shape (never a live credential in the repo).
 const TOKEN = "ibssh_fakeFAKEfake0000000000000000";
@@ -277,6 +277,16 @@ test("an instabox token is redacted everywhere it shows: the row, the log shapes
   assert.equal(changed.ssh, `ibssh_other0000000000@${INSTABOX_SSH_GATEWAY}`);
   const fsSpec: HostSpec = { ...spec, provider: "freestyle", ssh: "a+root:TOK@beta-ssh.freestyle.sh" };
   assert.equal(normalizeHostSpec({ ssh: "a+root:…@beta-ssh.freestyle.sh" }, fsSpec).ssh, fsSpec.ssh);
+});
+
+test("prepareCuresCheck: a fresh machine's missing msb starts the preparation; no SSH or a broken shim does not", () => {
+  assert.ok(prepareCuresCheck(undefined));
+  assert.ok(prepareCuresCheck({ ok: true, detail: "" }));
+  assert.ok(prepareCuresCheck({ ok: false, detail: "msb ls failed (exit 127): sh: 1: /usr/local/bin/msb: not found\n" }));
+  assert.ok(prepareCuresCheck({ ok: false, detail: "msb ls failed (exit 127): ControlSocket already exists, disabling multiplexing\r\nsh: 1: /usr/local/bin/msb: not found" }));
+  assert.ok(!prepareCuresCheck({ ok: false, detail: "msb ls failed (exit 255): Permission denied (publickey)" }));
+  assert.ok(!prepareCuresCheck({ ok: false, detail: "msb ls failed (exit 1): Traceback (most recent call last)" }));
+  assert.ok(!prepareCuresCheck({ ok: false, detail: "ssh timed out after 20000ms" }));
 });
 
 test("prepareHost: the adapter's step, then each missing image streamed from the primary; a failure stops there and says so", async () => {

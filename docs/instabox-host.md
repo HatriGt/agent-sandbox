@@ -50,8 +50,22 @@ and `user` as the direct-route login.
 
 ## Adding one
 
-Dashboard: Fleet → Box hosts → Add host → An existing machine, provider "Instabox sandbox",
-name, the machine id, the API key, SSH left blank. Or:
+From an API key alone (the account has no machine yet): Fleet → Box hosts → Add host → A new
+machine, provider "Instabox sandbox", a name, the key. Or:
+
+```
+POST /hosts/provision.json {"provider":"instabox","name":"instabox-b","apiKey":"ibk_…",
+  "priority":0,"maxBoxes":3,"sleepAfterMs":300000}
+```
+
+The controller creates the machine from the agent-browser template, mints the SSH token, proves
+SSH through the gateway (about 6 s in all), saves the row and checks it. That first check fails
+(no `msb` on a stock machine), which is the cue to prepare: the shim, rsync, directories, then
+the box images streamed from the primary, in the background; the host is checked again when it
+ends. A free account takes one machine, so one row per account.
+
+From a machine that exists already: Fleet → Box hosts → Add host → An existing machine, provider
+"Instabox sandbox", name, the machine id, the API key, SSH left blank. Or:
 
 ```
 POST /hosts.json {"action":"upsert","spec":{"name":"instabox-a","provider":"instabox",
@@ -72,6 +86,13 @@ then restart Docker and run Prepare again), or set the row's `ompImage` to the c
 only one is streamed.
 
 ## What was verified live (2026-11-19)
+
+A second account (`instabox-b`, machine `m_agq7j4ryfmtnbd6lneogxmqj4y`) was provisioned from its
+key alone through the deployed controller: the first attempt showed that the readiness probe
+dialled the gateway on port 22 and that the rollback delete lacked its Idempotency-Key (fixed in
+191a702, the stray machine deleted by hand), the second created the machine, minted the token
+and proved SSH in 6 s; the failing first check did not start the preparation (fixed next: a
+missing `msb` is now the cue), so it was started from the row's Prepare button.
 
 Against machine `m_agq5uelpl6qyy44ht6hbqm247i` ("sandbox", agent-browser template): every verb
 above with the controller's real flags, a `--copy-dir` run, exec with stdin, env and exit code,

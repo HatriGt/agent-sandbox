@@ -52,7 +52,7 @@ import { closeSshMasters } from "./ssh.js";
 import { PRIMARY_HOST_ID, boxHostOf, slugify as hostSlug } from "./hosts.js";
 import { ATTENTION_HOLD_MS } from "./host-sleep.js";
 import { listProviders, providerFor } from "./host-providers.js";
-import { prepareStatus, startPrepare } from "./host-prepare.js";
+import { prepareCuresCheck, prepareStatus, startPrepare } from "./host-prepare.js";
 import { sweepHosts } from "./host-sweep.js";
 import { countBoxes as countBoxesOnHost } from "./msb.js";
 import { BAKED_MCP_PACKAGES, BASE_PACKAGES, fetchLatestVersions, imageChanges, packageNameOf, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
@@ -6040,11 +6040,19 @@ const hostsWithPrepare = () => hostPool.state().map((h) => ({ ...h, ...(prepareS
  * A host whose kind the controller can set up itself (the msb shim on a Docker host, the box images
  * from the primary) is prepared in the background once it answers; the row shows the progress.
  */
-const prepareIfNeeded = (id: string, checkOk: boolean | undefined): void => {
+// A fresh machine fails its first check (no msb on it yet: the shim is what prepare installs),
+// so that failure starts the preparation rather than stopping it; the host is checked again once
+// it ends, so the row stops saying "unreachable" without anyone pressing Check.
+const prepareIfNeeded = (id: string, check: { ok: boolean; detail: string } | undefined): void => {
   const h = hostPool.get(id);
-  if (!h || checkOk === false) return;
+  if (!h || !prepareCuresCheck(check)) return;
   if (!providerFor(h.spec).prepare) return;
-  startPrepare(cfg, hostPool.cfgFor(id), h.spec, { log: (m) => console.error(m) });
+  startPrepare(cfg, hostPool.cfgFor(id), h.spec, {
+    log: (m) => console.error(m),
+    done: (r) => {
+      if (r.ok) void hostPool.check(id).catch(() => undefined);
+    },
+  });
 };
 app.post("/hosts.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
@@ -6090,7 +6098,7 @@ app.post("/hosts.json", async (req: Request, res: Response) => {
         const check = spec.enabled && spec.id !== PRIMARY_HOST_ID && connectionChanged ? await hostPool.check(spec.id) : undefined;
         // A new host's own addresses, before any box starts on it (src/host-guard.ts).
         if (spec.enabled) void learnHostGuard(hostPool.cfgFor(spec.id));
-        if (connectionChanged && spec.enabled && spec.id !== PRIMARY_HOST_ID) prepareIfNeeded(spec.id, check?.ok);
+        if (connectionChanged && spec.enabled && spec.id !== PRIMARY_HOST_ID) prepareIfNeeded(spec.id, check);
         res.json({ ok: true, host: hostsWithPrepare().find((h) => h.id === spec.id), hosts: hostsWithPrepare(), capacity: hostPool.capacity(), check });
         return;
       }
@@ -6247,7 +6255,7 @@ app.post("/hosts/provision.json", async (req: Request, res: Response) => {
     res.locals.auditAction = `host.provision:${spec.id}`;
     const check = await hostPool.check(spec.id);
     if (spec.enabled) void learnHostGuard(hostPool.cfgFor(spec.id));
-    if (spec.enabled) prepareIfNeeded(spec.id, check.ok);
+    if (spec.enabled) prepareIfNeeded(spec.id, check);
     res.json({ ok: true, host: hostsWithPrepare().find((h) => h.id === spec.id), hosts: hostsWithPrepare(), capacity: hostPool.capacity(), check, log: made.log, snapshotId: made.snapshotId });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
