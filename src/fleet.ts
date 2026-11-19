@@ -169,6 +169,8 @@ export interface RunMemoryStore {
   save(meta: Partial<BoxView> & { name: string }): Promise<void>;
   /** Forget a box that left `msb ls`. */
   forget(box: string): Promise<void>;
+  /** Forget many at once (one command per host), when the store can; else `forget` is called for each. */
+  forgetMany?(boxes: string[]): Promise<void>;
   /** True while some source of memory (a host that was asleep or unreachable) has not been read yet. */
   incomplete?(): boolean;
 }
@@ -262,12 +264,18 @@ export function makeFleetReader(
           for (const name of before) if (!memory.has(name)) void opts.store.forget(name).catch(() => {});
           // A box an awake host no longer lists leaves the durable store too: after a restart the
           // thread row speaks for it, instead of a remembered "stopped" on a host that is asleep.
+          // In one go: a host can lose dozens at once, and one SSH each was a storm at its proxy.
+          const gone: string[] = [];
           for (const [name, v] of memory) {
             if (!v.absent) forgotten.delete(name);
             else if (!forgotten.has(name)) {
               forgotten.add(name);
-              void opts.store.forget(name).catch(() => {});
+              gone.push(name);
             }
+          }
+          if (gone.length) {
+            const store = opts.store;
+            void (store.forgetMany ? store.forgetMany(gone) : Promise.all(gone.map((n) => store.forget(n)))).catch(() => {});
           }
         }
         cached = { boxes: opts.decorate ? opts.decorate(merged) : merged, lifecycle: opts.capacity ? { ...lifecycle, capacity: opts.capacity() } : lifecycle, at: now() };

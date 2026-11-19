@@ -65,12 +65,36 @@ export function sshControlPathOf(cmd: string, args: string[]): string | null {
 export function resetSshMasterOnTimeout(cmd: string, args: string[]): void {
   const sock = sshControlPathOf(cmd, args);
   if (!sock) return;
+  // Busy is not dead. A provider's proxy runs sessions one after the other and a cold connection
+  // costs 6-9 s, so a burst of parallel commands overruns its timeouts while the master is fine;
+  // closing it then cuts every command still in flight, and the retries rebuild it cold, again in
+  // a burst (seen live 2026-11-19 07:21: seven timeouts a second, the host unreachable for
+  // minutes). A master that completed a command within the window stays; only one that nothing has
+  // got through lately is the dead channel this exists for.
+  const last = sockLastDone.get(sock);
+  if (last !== undefined && Date.now() - last < MASTER_BUSY_WINDOW_MS) {
+    console.warn(`[ssh] a command through ${sock} timed out, but another finished through it ${Math.round((Date.now() - last) / 1000)}s ago; the master stays (busy, not dead)`);
+    return;
+  }
   console.warn(`[ssh] a command through ${sock} timed out; closing that master so the next command builds a fresh one`);
   const c = execFile("ssh", ["-O", "exit", "-o", `ControlPath=${sock}`, "asb-master"], { timeout: 3_000 }, () => {
     unlink(sock, () => {});
   });
   c.on("error", () => unlink(sock, () => {}));
   noteSshFailure(sock, "timeout");
+}
+
+/** When a command last completed (any exit but 255) through each control socket. */
+const sockLastDone = new Map<string, number>();
+export const MASTER_BUSY_WINDOW_MS = 30_000;
+export function noteSshDone(cmd: string, args: string[], code: number): void {
+  if (code === 255) return;
+  const sock = sshControlPathOf(cmd, args);
+  if (sock) sockLastDone.set(sock, Date.now());
+}
+/** Tests. */
+export function forgetSshDoneForTest(): void {
+  sockLastDone.clear();
 }
 
 /**
@@ -159,6 +183,7 @@ export async function run(
       if (!done()) return; // already rejected by the timeout
       const result: RunResult = { code: code ?? -1, stdout, stderr };
       noteSshExit(cmd, args, result.code);
+      noteSshDone(cmd, args, result.code);
       if (check && result.code !== 0) {
         // The argv is redacted, not omitted (it's what makes ssh failures debuggable) — but it can
         // carry a token-embedded clone URL, and this message flows back to MCP callers verbatim:
@@ -246,6 +271,7 @@ export async function runStream(cmd: string, args: string[], opts: StreamOptions
       if (settled) return;
       settled = true;
       noteSshExit(cmd, args, code ?? -1);
+      noteSshDone(cmd, args, code ?? -1);
       void outDone.then(() => resolve({ code: code ?? -1, stderr, stdout, bytes }));
     });
   });

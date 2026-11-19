@@ -75,6 +75,19 @@ export async function forgetRunMeta(cfg: Config, box: string): Promise<void> {
 }
 
 /**
+ * Forget many at once: one command per batch, not one SSH per box. Seventy boxes gone from a host
+ * used to be seventy parallel SSHs through its proxy, which serialises them; most timed out, the
+ * files stayed, and every restart did it again (2026-11-19).
+ */
+export async function forgetRunMetas(cfg: Config, boxes: readonly string[]): Promise<void> {
+  for (const b of boxes) assertBoxName(b);
+  for (let i = 0; i < boxes.length; i += 100) {
+    const names = boxes.slice(i, i + 100).map((b) => `${shellQuote(b)}.json`);
+    await ssh(cfg, `cd ${DIR} 2>/dev/null && rm -f ${names.join(" ")} || true`);
+  }
+}
+
+/**
  * Every remembered run on the host, keyed by box name. Tolerates a missing dir and malformed files;
  * throws when the host did not answer, so the caller can tell "nothing remembered" from "not read"
  * and try again later instead of treating silence as an empty memory.

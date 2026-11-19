@@ -65,3 +65,23 @@ test("run: ssh exit 255 and a timeout both announce the control socket to the fa
   assert.equal((src.match(/noteSshExit\(cmd, args, /g) ?? []).length, 2, "both run() and runStream() announce an exit 255");
   assert.match(src, /c\.on\("error", \(\) => unlink\(sock, \(\) => \{\}\)\);\s*noteSshFailure\(sock, "timeout"\);/, "a timeout announces too");
 });
+
+test("a timed-out command leaves a master that completed another command within the window (busy, not dead); otherwise the master is reset and the failure announced", async () => {
+  const { forgetSshDoneForTest, noteSshDone, resetSshMasterOnTimeout, sshFailureHooks } = await import("../src/exec.ts");
+  forgetSshDoneForTest();
+  const heard: string[] = [];
+  const hook = (sock: string, why: string) => void heard.push(`${why} ${sock}`);
+  sshFailureHooks.add(hook);
+  try {
+    const busy = ["-o", "ControlPath=/nonexistent/asb/11111111.sock", "host", "true"];
+    const dead = ["-o", "ControlPath=/nonexistent/asb/22222222d.sock", "host", "true"];
+    noteSshDone("ssh", busy, 0);
+    noteSshDone("ssh", dead, 255); // an ssh-level failure is not a completion
+    resetSshMasterOnTimeout("ssh", busy);
+    resetSshMasterOnTimeout("ssh", dead);
+    assert.deepEqual(heard, ["timeout /nonexistent/asb/22222222d.sock"], "only the socket nothing got through is reset and announced");
+  } finally {
+    sshFailureHooks.delete(hook);
+    forgetSshDoneForTest();
+  }
+});

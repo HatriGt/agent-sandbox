@@ -120,7 +120,7 @@ import { makeRedactor, isPlumbingError } from "./redact.js";
 import { isSecretKey, probeMcpServer, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
 import type { BoxView, WatchSnapshot } from "./monitor.js";
 import { listChanges, readDiff, readFullDiff, discardChange, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
-import { loadRunMetas, saveRunMeta, forgetRunMeta, loadRunMetasLocal, saveRunMetaLocal, forgetRunMetaLocal, type RunMeta } from "./run-memory.js";
+import { loadRunMetas, saveRunMeta, forgetRunMeta, forgetRunMetas, loadRunMetasLocal, saveRunMetaLocal, forgetRunMetaLocal, type RunMeta } from "./run-memory.js";
 import { contentDisposition, readArtifact } from "./artifact.js";
 import { existsSync, readFileSync } from "node:fs";
 import { withStartedBy, currentStartedBy, recordStartedBy, startedByOf, type StartedBy } from "./started-by.js";
@@ -1532,6 +1532,17 @@ const readFleet = makeFleetReader(
       },
       forget: async (box) => {
         await Promise.all([forgetRunMetaLocal(cfg, box), forgetRunMeta(hcfg(box), box)]);
+      },
+      forgetMany: async (boxes) => {
+        await Promise.all(boxes.map((b) => forgetRunMetaLocal(cfg, b).catch(() => {})));
+        const byHost = new Map<string, { cfg: Config; boxes: string[] }>();
+        for (const b of boxes) {
+          const c = hcfg(b);
+          const e = byHost.get(c.vpsSsh) ?? { cfg: c, boxes: [] };
+          e.boxes.push(b);
+          byHost.set(c.vpsSsh, e);
+        }
+        await Promise.all([...byHost.values()].map((e) => forgetRunMetas(e.cfg, e.boxes)));
       },
     },
   }

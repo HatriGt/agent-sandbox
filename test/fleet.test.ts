@@ -404,3 +404,21 @@ test("makeFleetReader: a remembered box an awake host no longer lists is forgott
   assert.deepEqual(snap.boxes.map((b) => b.name).sort(), ["live", "pool-1-fs"], "served from memory, the gone box stays gone");
   assert.deepEqual(forgotten, ["delegate-9-fs"], "forgotten once, not every sweep");
 });
+
+test("makeFleetReader: the boxes an awake host no longer lists are forgotten in one go when the store can", async () => {
+  const many: string[][] = [];
+  const single: string[] = [];
+  const store = {
+    load: async () => new Map(["delegate-1-fs", "delegate-2-fs", "delegate-3-fs"].map((n) => [n, { name: n, host: "freestyle-a", role: "session" as const, runState: "done" as const, task: "old" }])),
+    save: async () => {},
+    forget: async (b: string) => void single.push(b),
+    forgetMany: async (b: string[]) => void many.push(b),
+  };
+  const cfg = { idleTimeout: "15m", poolIdleTimeout: "6h", maxDuration: "1h", maxBoxes: 5, poolSize: 1 } as Config;
+  let t = 0;
+  const read = makeFleetReader(cfg, async () => ({ boxes: [running("pool-1-fs", { host: "freestyle-a", role: "pool-free" })], stale: [], held: () => true }), { ttlMs: 1, now: () => (t += 10), store });
+  await read();
+  await new Promise((r) => setImmediate(r));
+  assert.deepEqual(many, [["delegate-1-fs", "delegate-2-fs", "delegate-3-fs"]], "one call, every name");
+  assert.deepEqual(single, [], "not one SSH each");
+});
