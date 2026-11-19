@@ -133,11 +133,12 @@ export function uploadSh(msb: string, box: string): string {
  * reaper), and say in the transcript what happened so the agent and the reader both know the
  * dependencies are not there. Prints RESTORED on success.
  */
-export function restoreSh(turn: number, lostAt: number, file: string = RESTORE_FILE): string {
+export function restoreSh(turn: number, lostAt: number, file: string = RESTORE_FILE, seamText?: string): string {
   const when = new Date(lostAt).toISOString().replace("T", " ").slice(0, 16) + " UTC";
   const seam =
+    seamText ??
     `● brought back from a copy taken after turn ${turn} — the machine was lost around ${when}; ` +
-    `installed dependencies (node_modules and the like) are not in the copy, run the package manager's install if builds act oddly`;
+      `installed dependencies (node_modules and the like) are not in the copy, run the package manager's install if builds act oddly`;
   const f = shellQuote(file);
   return (
     `set -e; gzip -t ${f}; ` +
@@ -251,13 +252,21 @@ async function writeMeta(dir: string, m: RescueMeta): Promise<void> {
  * upload did not land, or the box did not confirm — and in every case the box still holds whatever
  * it held before.
  */
-export async function pushRescue(cfg: Config, box: string, m: RescueMeta, lostAt: number, io: RescueIO = realRescueIO): Promise<void> {
+export async function pushRescue(cfg: Config, box: string, m: RescueMeta, lostAt: number, io: RescueIO = realRescueIO, seam?: string): Promise<void> {
   if (m.tooBig && !m.bytes) throw new Error("the last checkpoint was too big to copy, so there is nothing to bring back");
   const file = path.join(rescueDirOf(cfg, box), m.tar);
   const up = await io.upload(cfg, box, file);
   if (up.code !== 0 || !/UPLOADED/.test(up.stdout)) throw new Error(`the copy did not reach the box (${up.code}): ${(up.stderr || up.stdout).trim().slice(-300)}`);
-  const r = await io.exec(cfg, box, restoreSh(m.turn, lostAt), TRANSFER_TIMEOUT_MS).catch((e) => ({ stdout: "", error: e as Error }));
+  const r = await io.exec(cfg, box, restoreSh(m.turn, lostAt, RESTORE_FILE, seam), TRANSFER_TIMEOUT_MS).catch((e) => ({ stdout: "", error: e as Error }));
   if (!/RESTORED t\d+/.test(r.stdout)) throw new Error(`the box did not confirm the restore: ${("error" in r ? r.error.message : r.stdout).trim().slice(-300)}`);
+}
+
+/** The seam a moved thread reads: the copy came from a machine that still worked, nothing was lost. */
+export function moveSeam(turn: number, fromHost: string, toHost: string): string {
+  return (
+    `● moved from ${fromHost} to ${toHost} after turn ${turn}: workspace, session memory and this transcript came along; ` +
+    `installed dependencies (node_modules and the like) did not, run the package manager's install if builds act oddly`
+  );
 }
 
 export async function dropRescue(cfg: Pick<Config, "dataDir">, box: string): Promise<void> {

@@ -43,9 +43,9 @@ import { StartFailureStreak, isStartFailure, logTail, startFailureAlertText } fr
 import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, type CanaryResult } from "./canary.js";
 import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-disk.js";
 import { configureHostPool, makeHostPool, placeRun } from "./host-pool.js";
-import { createBox, claudeRootSource } from "./msb.js";
+import { createBox, claudeRootSource, teardown as msbTeardown } from "./msb.js";
 import { markClaimed } from "./claims.js";
-import { RESCUE_MAX_MB, capturedTurn, listRescues, pullRescue, pushRescue, readRescue, rescueBoxes, stampRescueKept, summarize, sweepRescues } from "./rescue.js";
+import { RESCUE_MAX_MB, capturedTurn, listRescues, moveSeam, pullRescue, pushRescue, readRescue, rescueBoxes, stampRescueKept, summarize, sweepRescues } from "./rescue.js";
 import { KeptBoxError } from "./msb.js";
 import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread, noteAbsentThreads } from "./threads.js";
 import { closeSshMasters } from "./ssh.js";
@@ -4352,6 +4352,115 @@ app.post("/rescue/restore.json", async (req: Request, res: Response) => {
     res.json(await bringBack(session));
   } catch (e) {
     failWith(res, e);
+  }
+});
+
+// --- Move a thread's machine to another host ------------------------------------------------------
+// The same copy a lost thread is brought back from, taken fresh (a checkpoint captured now and
+// pulled to the controller), put into a new box under the same name on the host asked for, and the
+// old box removed only once the new one holds the whole transcript. Between turns only: a turn in
+// progress has no consistent point to copy. The copy stays on the controller afterwards.
+const moving = new Set<string>();
+app.post("/threads/move.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = boxParam(req.body);
+  const { host: toHost, keepSource } = (req.body ?? {}) as { host?: string; keepSource?: boolean };
+  if (!isBoxName(session) || typeof toHost !== "string" || !toHost) {
+    res.status(400).json({ error: "session and host are required" });
+    return;
+  }
+  const target = hostPool.get(toHost);
+  if (!target || !target.spec.enabled) {
+    res.status(404).json({ error: `no such host: ${toHost}` });
+    return;
+  }
+  if (moving.has(session)) {
+    res.status(409).json({ error: "this thread is already being moved" });
+    return;
+  }
+  moving.add(session);
+  const t0 = Date.now();
+  try {
+    ownership.check(session);
+    ownership.assertCanRun();
+    const fromHost = hostPool.hostOfBox(session) ?? getThread(db, session)?.host ?? PRIMARY_HOST_ID;
+    if (fromHost === toHost) {
+      res.status(409).json({ error: `the machine is already on ${toHost}` });
+      return;
+    }
+    const srcCfg = hcfg(session);
+    await hostPool.readyForBox(session, `move ${session}`);
+    const snap = await watchHub.read(session);
+    if (snap.boxStatus === "missing") {
+      res.status(404).json({ error: "no such machine on its host; open the thread to bring it back first" });
+      return;
+    }
+    if ((snap.agent ?? "claude") !== "claude") {
+      res.status(409).json({ error: "only Claude Code threads can be moved for now" });
+      return;
+    }
+    if (snap.runState === "running") {
+      res.status(409).json({ error: "the agent is working; a move waits for the turn to end" });
+      return;
+    }
+    if (!/^running$/i.test(snap.boxStatus)) {
+      const outcome = await startBoxIfStopped(srcCfg, session);
+      if (outcome !== "running") {
+        res.status(503).json({ error: `the machine on ${fromHost} would not start (${outcome})` });
+        return;
+      }
+      noteRunning(session);
+    }
+    // 1. A fresh copy off the source, awaited (the turn-end pull is fire-and-forget).
+    const kept = isKeptBox(session);
+    const m = await withFinishing(session, () =>
+      withBoxLock(session, async () => {
+        const cap = await execInBox(srcCfg, session, captureCmd());
+        const c = capturedTurn(cap.stdout);
+        if (!c) throw new Error(`the source machine did not capture a checkpoint: ${cap.stdout.trim().slice(-200)}`);
+        const srcBytes = Number((await execInBox(srcCfg, session, "wc -c < /workspace/.agent.log 2>/dev/null || echo 0")).stdout.trim().split("\n").pop()) || 0;
+        const titles = await loadTitles(srcCfg).catch(() => ({}) as Record<string, string>);
+        const meta = await pullRescue(srcCfg, session, c.turn, { owner: ownerOf(db, session) ?? null, hostId: fromHost, agent: snap.agent, task: snap.task, title: titles[session], kept });
+        if (!meta || meta.turn !== c.turn || meta.tooBig || !meta.bytes) throw new Error(meta?.tooBig ? `the checkpoint is ${Math.round(meta.tooBig / 1048576)} MB, over the copy limit` : "the copy did not reach the controller");
+        return { ...meta, srcBytes };
+      })
+    );
+    // 2. A box under the same name on the target host, the copy put in and confirmed.
+    await hostPool.ready(toHost, `move ${session}`, { patienceMs: 150_000 });
+    const runCfg: Config = { ...cfg, ...target.cfg, ...claudeRootSource({ ...cfg, ...target.cfg }) };
+    await createBox(runCfg, { name: session });
+    hostPool.notePlaced(toHost, session);
+    await execInBox(runCfg, session, "touch /.claimed");
+    await markClaimed(runCfg, session);
+    await pushRescue(runCfg, session, m, Date.now(), undefined, moveSeam(m.turn, fromHost, toHost));
+    if (m.title) await saveTitle(runCfg, session, m.title).catch(() => {});
+    if (kept) await markKept(runCfg, session);
+    const dstBytes = Number((await execInBox(runCfg, session, "wc -c < /workspace/.agent.log 2>/dev/null || echo 0")).stdout.trim().split("\n").pop()) || 0;
+    const sessions = Number((await execInBox(runCfg, session, "ls /root/.claude/projects 2>/dev/null | wc -l")).stdout.trim().split("\n").pop()) || 0;
+    if (dstBytes < m.srcBytes || (m.srcBytes > 0 && sessions === 0)) {
+      throw new Error(`the copy on ${toHost} is short (${dstBytes} of ${m.srcBytes} transcript bytes, ${sessions} session dirs); the source on ${fromHost} is untouched, and the new box was left for inspection`);
+    }
+    // 3. The source goes (or stays stopped when asked). The copy on the controller is the third holder.
+    let source: "removed" | "stopped" = "stopped";
+    if (keepSource) await stopBox(srcCfg, session);
+    else {
+      await msbTeardown(srcCfg, session, undefined, { force: true });
+      source = "removed";
+    }
+    hostPool.forgetBox(session);
+    hostPool.rememberBox(session, toHost);
+    upsertThread(db, { id: session, host: toHost, kept });
+    readFleet.forget(session);
+    watchHub.drop(session);
+    noteRunning(session);
+    if (kept) lastKept.add(session);
+    console.error(`[move] ${session}: ${fromHost} → ${toHost}, turn ${m.turn}, ${Math.round(m.bytes / 1024)} KB, source ${source}, ${Date.now() - t0} ms`);
+    res.json({ ok: true, box: session, from: fromHost, host: toHost, turn: m.turn, bytes: m.bytes, transcriptBytes: dstBytes, source, ms: Date.now() - t0 });
+  } catch (e) {
+    console.error(`[move] ${session}: failed after ${Date.now() - t0} ms: ${String((e as Error).message ?? e).slice(0, 300)}`);
+    failWith(res, e);
+  } finally {
+    moving.delete(session);
   }
 });
 
