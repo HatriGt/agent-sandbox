@@ -1542,7 +1542,12 @@ const readFleet = makeFleetReader(
     const away = threadViews(threadRows, present, new Set(stale), (id) => copies.has(id));
     // A Stopped box nobody remembers is dead capacity only when nobody holds it (fleet.ts mergeWithMemory).
     // A thread row holds its box too: a box can vanish, a thread cannot.
-    const held = (name: string): boolean => kept.has(name) || claims.has(name) || ownerOf(db, name) != null || getThread(db, name) != null;
+    // A deleted thread row holds nothing: its box was destroyed (or found gone) on purpose.
+    const held = (name: string): boolean => {
+      if (kept.has(name) || claims.has(name) || ownerOf(db, name) != null) return true;
+      const t = getThread(db, name);
+      return t != null && t.deleted_at == null;
+    };
     const views = [...boxes, ...away].map((b) => ({
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),
@@ -4915,6 +4920,9 @@ const destroyThread = async (session: string, opts: { force?: boolean; boxGone?:
   // already recorded the same finish.
   await archiveFinishedRun(session, { withFiles: false }).catch(() => {});
   if (!opts.boxGone) await deps.teardown(hcfg(session), session, { force: opts.force === true });
+  // The teardown forgets the box's host mapping itself; with no box to tear down, do it here, or
+  // a paused host's remembered listing brings the closed thread back on the next sweep.
+  else hostPool.forgetBox(session);
   readFleet.forget(session);
   watchHub.drop(session);
   inbox.clear(session);
