@@ -968,6 +968,46 @@ test("pause: the host is dormant and its SSH shut before the provider is asked; 
   }
 });
 
+test("a sweep refused by the gateway with 'is suspended' reads the host paused at once, not unreachable until the API answers", async () => {
+  let asked = 0;
+  const fake = {
+    metered: true,
+    state: async (): Promise<ProviderState> => {
+      asked++;
+      return { state: "paused", at: 0 };
+    },
+    pause: async (): Promise<ProviderState> => ({ state: "paused", at: 0 }),
+    start: async (): Promise<ProviderState> => ({ state: "running", at: 0 }),
+  };
+  setProviderForTest("freestyle", fake);
+  try {
+    const pool = makeHostPool(cfg, openMemoryDb(), { now: () => 1_000_000, tunnel: { ensure: async () => true, drop: () => {} } });
+    pool.upsert(vmSpec);
+    pool.noteSweep("fs-1", []);
+    await pool.start("fs-1");
+    assert.equal(pool.dormant("fs-1"), false);
+    asked = 0;
+    // Seen live 2026-11-20 on instabox-b, the machine suspended through the provider's API while
+    // the controller read it running.
+    pool.noteSweepError("fs-1", "msb ls failed (exit 255): ControlSocket /root/.ssh/asb/b6c0ad64.sock already exists, disabling multiplexing\r\nchannel 0: open failed: administratively prohibited: machine m_x is suspended");
+    const h = pool.state().find((x) => x.id === "fs-1")!;
+    assert.equal(h.unreachable, false, "the gateway's reading is the provider's: dormant, not unreachable");
+    assert.equal(h.lastError, undefined, "nothing for the Fleet page to flash");
+    assert.equal(h.providerState?.state, "paused");
+    assert.equal(pool.dormant("fs-1"), true);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(asked, 1, "the provider is still asked, to confirm");
+    // Any other refusal is what it always was.
+    await pool.start("fs-1");
+    pool.noteSweep("fs-1", []);
+    pool.noteSweepError("fs-1", "ssh: connect to host timed out");
+    assert.equal(pool.state().find((x) => x.id === "fs-1")?.unreachable, true);
+  } finally {
+    setProviderForTest("freestyle", null);
+    registerSleepResolver(null);
+  }
+});
+
 test("a sweep error on a dormant host is not the host being unreachable: the pause cut the command short, or the machine is paused", async () => {
   const fake = {
     metered: true,

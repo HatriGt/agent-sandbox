@@ -181,7 +181,11 @@ sweeps, refills and disk readings stop, the Fleet page serves its last snapshot 
 since", and a Freestyle VM is paused through the API at once (its own idle timer would take
 another five minutes of billed time). A box waiting on a question, or sitting finished, does not
 keep the host up; a reply is a launch and wakes it. Pinned and sleeping runs are frozen inside the
-paused VM and thaw with it.
+paused VM and thaw with it. A thread opened, woken or replied to holds its host awake past the
+clock for the provider's attention span (`attentionMs` on the adapter: fifteen minutes on
+Instabox, whose start takes seconds; an hour elsewhere, sized for a resume through a proxy;
+`HOST_ATTENTION_MS` overrides both), so a reader between replies is not paid for with a second
+resume.
 
 **A reply, a resume, a rewind, an ask or a teardown reaches a box whose VM is paused.** Every
 box-scoped call asks the pool for the box's host *ready* first (`readyForBox`): the VM is started

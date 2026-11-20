@@ -112,6 +112,12 @@ export interface ProviderAdapter extends ProviderInfo {
   sshLaneWidth?: number;
   /** ssh options every target of this provider needs (`-p 2222` for a gateway on another port); before the host's own. */
   sshOpts?: string[];
+  /**
+   * How long an operator's attention (a thread opened, woken or replied to) holds a machine of this
+   * kind awake, sized to what a resume there costs: unset means the controller's hour, meant for a
+   * resume that takes minutes through a proxy; a machine that starts in seconds needs far less.
+   */
+  attentionMs?: number;
   /** The Linux user the machine's own sshd knows, when the target's user part is a token, not a user (the direct route logs in as it). */
   directUser?: string;
   /** Paths on a machine of this kind when the host row leaves them blank (the primary's would be wrong there). */
@@ -408,6 +414,7 @@ export const INSTABOX_SSH_PORT = 2222;
 export const INSTABOX_DEFAULT_TEMPLATE = "agent-browser";
 /** Where the shim is installed on a Docker host, and what its host row's `msb` reads unless set. */
 export const DOCKER_SHIM_PATH = "/usr/local/bin/msb";
+export const INSTABOX_ATTENTION_MS = 15 * 60_000;
 export const INSTABOX_HOST_DEFAULTS = { msb: DOCKER_SHIM_PATH, msbHome: "/data", stagingDir: "/data/home/agent-sandbox-staging" };
 
 /** The shim's source, read beside the compiled module (the image keeps `src/` next to `dist/`). */
@@ -677,6 +684,10 @@ export function makeInstaboxAdapter(fetcher: Fetcher = fetch as unknown as Fetch
     metered: true,
     proxyHost: INSTABOX_SSH_GATEWAY,
     sshOpts: ["-p", String(INSTABOX_SSH_PORT)],
+    // A start answers in 3-7 s live (2026-11-19), so an hour's hold after every reply kept the
+    // machine up twelve times longer than its own five-minute clock; fifteen minutes covers a
+    // reader between replies without that.
+    attentionMs: INSTABOX_ATTENTION_MS,
     directUser: "user",
     hostDefaults: INSTABOX_HOST_DEFAULTS,
     canDrive: (spec) => !!cloudOf(spec)?.apiKey && !!cloudOf(spec)?.vmId,

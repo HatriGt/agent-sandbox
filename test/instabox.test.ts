@@ -15,6 +15,7 @@ import {
 } from "../src/host-providers.ts";
 import { configForHost, normalizeHostSpec, publicHostSpec, redactSshTarget, type HostSpec } from "../src/hosts.ts";
 import { routeFor } from "../src/ssh-tunnel.ts";
+import { ATTENTION_HOLD_MS, attentionHoldMs } from "../src/host-sleep.ts";
 import { redactShapes } from "../src/redact.ts";
 import { imagesWanted, PREPARE_HOLD_MS, prepareCuresCheck, prepareHost, prepareStatus, resetPrepareForTest, startPrepare } from "../src/host-prepare.ts";
 
@@ -277,6 +278,17 @@ test("an instabox token is redacted everywhere it shows: the row, the log shapes
   assert.equal(changed.ssh, `ibssh_other0000000000@${INSTABOX_SSH_GATEWAY}`);
   const fsSpec: HostSpec = { ...spec, provider: "freestyle", ssh: "a+root:TOK@beta-ssh.freestyle.sh" };
   assert.equal(normalizeHostSpec({ ssh: "a+root:…@beta-ssh.freestyle.sh" }, fsSpec).ssh, fsSpec.ssh);
+});
+
+test("an Instabox host's attention hold is the adapter's fifteen minutes, not the hour", () => {
+  if (process.env.HOST_ATTENTION_MS) return;
+  const ib = providerFor({ provider: "instabox" });
+  assert.equal(ib.attentionMs, 15 * 60_000);
+  assert.equal(attentionHoldMs(ib.attentionMs), 15 * 60_000);
+  assert.equal(providerFor({ provider: "freestyle" }).attentionMs, undefined);
+  assert.equal(attentionHoldMs(undefined), ATTENTION_HOLD_MS);
+  assert.equal(ATTENTION_HOLD_MS, 60 * 60_000);
+  assert.equal(attentionHoldMs(0), 0);
 });
 
 test("prepareCuresCheck: a fresh machine's missing msb starts the preparation; no SSH or a broken shim does not", () => {

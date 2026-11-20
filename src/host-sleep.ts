@@ -37,7 +37,19 @@ export interface HostSleepState {
  * later the clock paused the host again while the thread was being read, so the reply paid a
  * second resume through the proxy (165 s). Attention is activity.
  */
-export const ATTENTION_HOLD_MS = Math.max(0, Number(process.env.HOST_ATTENTION_MS ?? "") || 60 * 60_000);
+const ATTENTION_FROM_ENV = Math.max(0, Number(process.env.HOST_ATTENTION_MS ?? "") || 0);
+export const ATTENTION_HOLD_MS = ATTENTION_FROM_ENV || 60 * 60_000;
+
+/**
+ * The hold for one host: HOST_ATTENTION_MS when set, else what the host's provider says a resume
+ * there is worth (`ProviderAdapter.attentionMs`), else the hour. The hour was sized for a resume
+ * that costs minutes through a proxy; an Instabox machine starts in seconds and would otherwise
+ * sit awake for an hour after every reply (seen 2026-11-19, with its own clock set to five minutes).
+ */
+export function attentionHoldMs(providerMs?: number): number {
+  if (ATTENTION_FROM_ENV) return ATTENTION_FROM_ENV;
+  return Math.max(0, providerMs ?? ATTENTION_HOLD_MS);
+}
 
 export interface SleepyBox {
   boxStatus: string;

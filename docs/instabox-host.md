@@ -209,9 +209,42 @@ What it found, each fixed the same evening:
    themselves on every launch. The store is per host now: its root keyed by the host's SSH
    target, one queue per host, the mount flag from the box's own host.
 
-Still open: a host stays awake 60 minutes after any reply or open (`HOST_ATTENTION_MS`), so an
-Instabox machine the free plan would pause after 30 idle minutes is kept up by the sweep for an
-hour; and `[alert] host-disk` on the VPS read 93 % during these runs.
+The fourth pass, on the build with all six fixes (a84fb99, the next morning, the machine suspended
+before it): `instabox-cycle.mjs --extra --nap` ALL PASS in 1079 s, `instabox-provider-shut.mjs`
+ALL PASS in 74 s. The package store is what changed the numbers: the boxes no longer install their
+MCP packages on every launch.
+
+| step | seconds (pass 4) | pass 1 |
+|---|---|---|
+| task accepted, machine suspended before it | 19 | 46 |
+| task accepted, machine awake | 5 | 38–40 |
+| first turn done, from the call | 18–34 | 52–61 |
+| Sleep answered / fleet shows Stopped | 0.7–1.4 / 4–8 | same |
+| reply to a sleeping box answered / turn done | 6 / 17 | 6–8 / 15 |
+| host pause answered / host reads paused | 7 / 13 | 3 / 8–18 |
+| reply on a paused host answered / turn done | 9 / 18 | 13.5 / – |
+| box asleep and host paused, thread opened: wake answered / box up | 5.5 / 11 | 3–5 / 7–10 |
+| machine suspended at the provider (API) / wake after it / chat continued | 3.5 / 5 / 15 | 5 / 6.6 / 14 |
+| idle nap, no call (MSB_IDLE_TIMEOUT 15m) / reply after it, turn done | 914 / 15 | 924 / – |
+| teardown | 5–6 | 4–6 |
+
+Two more findings from that pass, fixed the same morning:
+
+7. **The host stayed awake an hour after the last reply.** The attention hold (a thread opened,
+   woken or replied to keeps its host up, `HOST_ATTENTION_MS`, an hour) was sized for a Freestyle
+   resume through its proxy (165 s once); an Instabox start answers in 3–7 s, and the hour kept
+   the machine up twelve times longer than its own five-minute clock, so after the idle nap the
+   host still read awake. The hold is the provider's now (`ProviderAdapter.attentionMs`): fifteen
+   minutes on Instabox, the hour elsewhere, the env override on top.
+8. **A suspend behind the controller's back flashed "unreachable".** The sweep in flight hit the
+   gateway's "administratively prohibited: machine … is suspended" (behind a stale mux socket
+   line) and the pool marked the host unreachable with that text for the second the provider's
+   API took to say "paused"; the thread read its box as absent meanwhile. The gateway's message
+   names the state, so a sweep refused with "is suspended" reads the host paused at once (the API
+   is still asked, to confirm).
+
+Still open: `[alert] host-disk` on the VPS read 93 % during the first passes (86 % the next
+morning); the volume is the RDP one, the sandboxes are a small part of it.
 
 ## Not covered
 

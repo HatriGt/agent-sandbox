@@ -663,13 +663,27 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       // reached a paused machine says nothing about the host; it is dormant, and the Fleet page
       // flashed "unreachable · Connection refused" for it (seen live 2026-11-19 on Instabox).
       if (dormant(h)) return;
+      const drivable = providerFor(h.spec).canDrive(h.spec);
+      // The gateway names the state itself ("administratively prohibited: machine … is suspended"
+      // when the provider's idle timer, or someone at its console, paused the machine behind the
+      // controller's back): that is the provider's reading, so the host is dormant now, not
+      // unreachable for the second the API takes to say the same (seen live 2026-11-20 on
+      // instabox-b: the Fleet page flashed the error and the thread read its box as absent).
+      if (drivable && /is suspended/i.test(err)) {
+        setProvider(h, { state: "paused", detail: "the gateway says the machine is suspended", at: now() });
+        h.lastError = undefined;
+        h.unreachableSince = undefined;
+        log(`[hosts] ${id} paused at the provider (the gateway says it is suspended)`);
+        void refreshProvider(id).catch(() => {});
+        return;
+      }
       h.lastError = err.slice(0, 200);
       if (!h.unreachableSince) {
         h.unreachableSince = now();
         log(`[hosts] ${id} unreachable: ${h.lastError}`);
       }
       // A VM that is paused at its provider is not dead; the next round serves it from memory.
-      if (providerFor(h.spec).canDrive(h.spec)) void refreshProvider(id).catch(() => {});
+      if (drivable) void refreshProvider(id).catch(() => {});
     },
     noteDisk: (id, disk) => {
       const h = get(id);

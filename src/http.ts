@@ -50,7 +50,7 @@ import { KeptBoxError } from "./msb.js";
 import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread, noteAbsentThreads } from "./threads.js";
 import { closeSshMasters } from "./ssh.js";
 import { PRIMARY_HOST_ID, boxHostOf, slugify as hostSlug } from "./hosts.js";
-import { ATTENTION_HOLD_MS } from "./host-sleep.js";
+import { attentionHoldMs } from "./host-sleep.js";
 import { listProviders, providerFor } from "./host-providers.js";
 import { prepareCuresCheck, prepareStatus, startPrepare } from "./host-prepare.js";
 import { sweepHosts } from "./host-sweep.js";
@@ -188,12 +188,15 @@ const hostPool = configureHostPool(
 // live 2026-11-19 on two boxes of a paused Freestyle host).
 /**
  * The operator is using this box's thread (opened it, woke it, replied): its host is held awake for
- * ATTENTION_HOLD_MS, whatever the sweeps read meanwhile. A sweep that times out right after a
- * resume reads "nothing working", and the clock used to pause the host under the reader.
+ * the provider's attention span (attentionHoldMs), whatever the sweeps read meanwhile. A sweep that
+ * times out right after a resume reads "nothing working", and the clock used to pause the host
+ * under the reader.
  */
 const attend = (box: string, reason: string): void => {
-  if (!ATTENTION_HOLD_MS) return;
-  hostPool.get(hcfg(box).hostId ?? PRIMARY_HOST_ID)?.sleep.hold(ATTENTION_HOLD_MS, reason);
+  const h = hostPool.get(hcfg(box).hostId ?? PRIMARY_HOST_ID);
+  if (!h) return;
+  const ms = attentionHoldMs(providerFor(h.spec).attentionMs);
+  if (ms) h.sleep.hold(ms, reason);
 };
 const hcfg = (box: string): Config => {
   if (!hostPool.hostOfBox(box)) {
