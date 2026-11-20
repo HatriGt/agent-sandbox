@@ -4549,7 +4549,11 @@ app.post("/sleep.json", async (req: Request, res: Response) => {
     // Mid-turn, `msb stop` kills the agent and the thread ends on "the sandbox restarted mid-run"
     // (seen live 2026-11-19 on an Instabox box: exit 254, the turn's work lost). The same answer the
     // host pause gives; the thread header disables the item, the command palette did not know.
-    if (!force && (turnStarted.has(session) || (await watchHub.read(session)).runState === "running")) {
+    // A turn the controller started itself (turnStarted) is judged by a read that began after it:
+    // the hub's cached snapshot from before the reply still says "done". The mark alone refused a
+    // Sleep for up to a sweep after the turn had ended (seen live 2026-11-20: 409 on a finished
+    // box, the fifth pass on instabox-b).
+    if (!force && (await watchHub.read(session, turnStarted.get(session))).runState === "running") {
       res.status(409).json({ error: "the agent is working on this machine; wait for the turn to end or stop the run first" });
       return;
     }

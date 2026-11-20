@@ -252,6 +252,11 @@ Two more findings from that pass, fixed the same morning:
    up when a start landed during the command. Proven on the machine: stop, an exec of `sleep 6`,
    a start two seconds in, the box still running after the exec; a plain exec on a stopped box
    still stops it. Prepare on each Instabox host installs the new shim (the images are skipped).
+10. **Sleep refused on a finished box.** The refusal of a sleep mid-turn (finding 2) counted a turn
+    the controller started as running until the next sweep retired the mark, so a Sleep pressed
+    in the fifteen seconds after a turn ended answered 409 "the agent is working on this machine"
+    (the fifth pass, the Sleep right after "more work" finished). The route now asks the hub for a
+    read that began after the turn's start; that read says whether the agent is still at it.
 
 Still open: `[alert] host-disk` on the VPS read 93 % during the first passes (86 % the next
 morning); the volume is the RDP one, the sandboxes are a small part of it.

@@ -69,10 +69,12 @@ export interface WatchHubOpts {
 interface Entry {
   snap: WatchSnapshot | null;
   at: number;
+  /** When the read that produced `snap` began: a reader who needs the state after a moment compares against this. */
+  begunAt: number;
   lastReadAt: number;
   timer: NodeJS.Timeout | null;
   inFlight: Promise<WatchSnapshot> | null;
-  waiters: Array<{ resolve: (s: WatchSnapshot) => void; reject: (e: Error) => void }>;
+  waiters: Array<{ resolve: (s: WatchSnapshot) => void; reject: (e: Error) => void; after?: number }>;
   failures: number;
   /** The whole log stitched from the tail windows, once a readFull asked for it. */
   full?: string;
@@ -116,15 +118,18 @@ export class WatchHub {
   /**
    * Latest snapshot for a box. Resolves immediately from cache when fresh; otherwise waits for the
    * in-flight or next read. Either way it marks the box as watched so its loop keeps running.
+   * With `after` (ms), only a snapshot whose read BEGAN at or after that moment will do: a cached
+   * or in-flight read from before it is not served, the next one is (the sleep route asks for the
+   * state after the turn it started itself; a read from before the reply still says "done").
    */
-  read(session: string): Promise<WatchSnapshot> {
+  read(session: string, after?: number): Promise<WatchSnapshot> {
     const e = this.entry(session);
     e.lastReadAt = this.now();
-    if (e.snap && this.now() - e.at < this.freshMs) {
+    if (e.snap && this.now() - e.at < this.freshMs && (after == null || e.begunAt >= after)) {
       this.ensureLoop(session, e);
       return Promise.resolve(e.snap);
     }
-    const p = new Promise<WatchSnapshot>((resolve, reject) => e.waiters.push({ resolve, reject }));
+    const p = new Promise<WatchSnapshot>((resolve, reject) => e.waiters.push({ resolve, reject, after }));
     this.ensureLoop(session, e);
     if (!e.inFlight && !e.timer) void this.tick(session, e);
     else if (!e.inFlight && e.timer) {
@@ -203,7 +208,7 @@ export class WatchHub {
   private entry(session: string): Entry {
     let e = this.entries.get(session);
     if (!e) {
-      e = { snap: null, at: 0, lastReadAt: 0, timer: null, inFlight: null, waiters: [], failures: 0 };
+      e = { snap: null, at: 0, begunAt: 0, lastReadAt: 0, timer: null, inFlight: null, waiters: [], failures: 0 };
       this.entries.set(session, e);
     }
     return e;
@@ -220,6 +225,7 @@ export class WatchHub {
     // Parked: the host is asleep or paused, so the last snapshot stands in for a read (nothing
     // SSHes it) and the loop idles at the terminal cadence until the host is back.
     const parked = !!e.snap && !!this.skipFn?.(session);
+    const begun = this.now();
     if (parked) {
       snap = e.snap;
       e.failures = 0;
@@ -239,15 +245,22 @@ export class WatchHub {
     if (snap) {
       e.snap = snap;
       e.at = this.now();
+      if (!parked) e.begunAt = begun;
       if (e.full !== undefined && !e.fullLoading) {
         const next = stitchLog(e.full, snap.log, !!snap.logTruncated);
         // No overlap: drop the stitched copy; the next readFull re-reads the whole file.
         if (next === null) e.full = undefined;
         else e.full = next;
       }
-      const waiters = e.waiters;
-      e.waiters = [];
-      for (const w of waiters) w.resolve(snap);
+      // A parked host's stand-in answers everyone; a real read answers those it is recent enough for.
+      const served = e.waiters.filter((w) => parked || w.after == null || w.after <= begun);
+      e.waiters = e.waiters.filter((w) => !served.includes(w));
+      for (const w of served) w.resolve(snap);
+      if (e.waiters.length && this.entries.has(session)) {
+        // Someone needs a read that begins after a moment this one did not: go again now.
+        void this.tick(session, e);
+        return;
+      }
     } else if (e.failures >= 3 && e.waiters.length) {
       // Three misses in a row: readers get the error instead of waiting forever.
       const waiters = e.waiters;

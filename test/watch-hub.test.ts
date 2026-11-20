@@ -23,6 +23,30 @@ test("hub: first read awaits one real read; a second reader inside freshMs is se
   hub.close();
 });
 
+test("hub: a read with `after` is not served a snapshot whose read began before that moment", async () => {
+  let t = 0;
+  const states: WatchSnapshot["runState"][] = ["done", "running", "done"];
+  let reads = 0;
+  const hub = new WatchHub({ read: async () => (reads++, snap("a", states.shift() ?? "done")), tickMs: 10_000, freshMs: 5_000, now: () => t });
+  const before = await hub.read("b");
+  assert.equal(before.runState, "done");
+  assert.equal(reads, 1);
+  // The reply lands at t=100: the cached "done" is from before it, so a reader asking for the state
+  // after the reply gets a fresh read (which finds the turn running).
+  t = 100;
+  const plain = await hub.read("b");
+  assert.equal(plain.runState, "done", "an ordinary reader is served the fresh cache");
+  assert.equal(reads, 1);
+  const after = await hub.read("b", 100);
+  assert.equal(after.runState, "running");
+  assert.equal(reads, 2, "one read, begun after the moment asked for");
+  // That read began at t=100, so a second reader with the same `after` is served from cache.
+  const again = await hub.read("b", 100);
+  assert.equal(again.runState, "running");
+  assert.equal(reads, 2);
+  hub.close();
+});
+
 test("hub: concurrent readers share one in-flight read", async () => {
   let reads = 0;
   let release: (() => void) | null = null;
