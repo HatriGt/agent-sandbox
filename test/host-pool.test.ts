@@ -997,6 +997,12 @@ test("a sweep refused by the gateway with 'is suspended' reads the host paused a
     assert.equal(pool.dormant("fs-1"), true);
     await new Promise((r) => setTimeout(r, 10));
     assert.equal(asked, 1, "the provider is still asked, to confirm");
+    // The same refusal through a mux master (the next pass, 2026-11-20).
+    await pool.start("fs-1");
+    pool.noteSweep("fs-1", []);
+    pool.noteSweepError("fs-1", "msb ls failed (exit 255): mux_client_request_session: session request failed: Session open refused by peer");
+    assert.equal(pool.state().find((x) => x.id === "fs-1")?.unreachable, false);
+    assert.equal(pool.dormant("fs-1"), true);
     // Any other refusal is what it always was.
     await pool.start("fs-1");
     pool.noteSweep("fs-1", []);

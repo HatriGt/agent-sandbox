@@ -31,12 +31,46 @@ import subprocess
 import sys
 import time
 
-SHIM_VERSION = "1"
+SHIM_VERSION = "2"
 LABEL = "agent-sandbox.msb"
 IMAGE_LABEL = "agent-sandbox.image"
 SNAP_REPO = "asb-snap"
 STOP_SECONDS = "5"
 TMPFS = "/tmp:rw,size=256m,mode=1777"
+# `start` leaves a marker here; an `exec` that booted a stopped box for its command stops it again
+# afterwards UNLESS a start landed meanwhile. Seen live 2026-11-20 on instabox-b: the controller's
+# wake (start) arrived while a sweep's read had the box up for its own exec, the start was a no-op
+# on a running container, the read's clean-up stopped it, and the reply two seconds later found
+# "container … is not running". Lives in /tmp like the containers' own state: a reboot clears both.
+WANTED_DIR = "/tmp/msb-docker/wanted"
+
+
+def wanted_path(name):
+    return os.path.join(WANTED_DIR, name)
+
+
+def mark_wanted(name):
+    try:
+        os.makedirs(WANTED_DIR, exist_ok=True)
+        with open(wanted_path(name), "w") as f:
+            f.write("%f\n" % time.time())
+    except OSError:
+        pass
+
+
+def unmark_wanted(name):
+    try:
+        os.remove(wanted_path(name))
+    except OSError:
+        pass
+
+
+def wanted_since(name):
+    """When `start` last asked for the box (epoch seconds), None when nobody did since the last stop."""
+    try:
+        return os.path.getmtime(wanted_path(name))
+    except OSError:
+        return None
 
 
 def die(msg, code=1):
@@ -227,6 +261,7 @@ def cmd_run(argv):
         if not dest:
             die("run: --copy-dir wants host:box", 2)
         copy_into(name, src, dest)
+    mark_wanted(name)
     secs = parse_duration(max_duration) if max_duration else None
     if secs:
         cid = (inspect(name) or {}).get("Id", "")
@@ -285,12 +320,15 @@ def cmd_exec(argv):
     if info is None:
         die("exec: no box named %s" % name)
     booted = False
+    booted_at = None
     if not running(info):
         # msb boots a stopped box for the command and stops it again; the same here.
+        booted_at = time.time()
         docker(["start", name])
         booted = True
     p = subprocess.run(["docker", "exec", "-i"] + env + [name] + command)
-    if booted:
+    # A `start` that landed while the box was up for this command wants it to stay up.
+    if booted and (wanted_since(name) or 0) < booted_at - 1:
         docker(["stop", "-t", STOP_SECONDS, name], check=False, quiet=True)
     sys.exit(p.returncode)
 
@@ -396,6 +434,7 @@ def cmd_start(argv):
     info = inspect(argv[0])
     if info is None:
         die("start: no box named %s" % argv[0])
+    mark_wanted(argv[0])
     if not running(info):
         docker(["start", argv[0]])
 
@@ -406,6 +445,7 @@ def cmd_stop(argv):
     info = inspect(argv[0])
     if info is None:
         die("stop: no box named %s" % argv[0])
+    unmark_wanted(argv[0])
     if running(info):
         docker(["stop", "-t", STOP_SECONDS, argv[0]])
 
@@ -428,6 +468,7 @@ def cmd_rm(argv):
             die("rm: no box named %s" % n)
         if running(info) and not force:
             die("rm: %s is running; stop it first or pass --force" % n)
+        unmark_wanted(n)
         docker(["rm", "-f", "-v", n])
 
 

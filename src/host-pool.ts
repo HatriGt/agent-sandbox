@@ -665,11 +665,12 @@ export function makeHostPool(base: Config, db: Db, opts: HostPoolOpts = {}): Hos
       if (dormant(h)) return;
       const drivable = providerFor(h.spec).canDrive(h.spec);
       // The gateway names the state itself ("administratively prohibited: machine … is suspended"
-      // when the provider's idle timer, or someone at its console, paused the machine behind the
-      // controller's back): that is the provider's reading, so the host is dormant now, not
-      // unreachable for the second the API takes to say the same (seen live 2026-11-20 on
-      // instabox-b: the Fleet page flashed the error and the thread read its box as absent).
-      if (drivable && /is suspended/i.test(err)) {
+      // on a fresh connection, "Session open refused by peer" through a mux master; the provider's
+      // idle timer, or someone at its console, paused the machine behind the controller's back):
+      // that is the provider's reading, so the host is dormant now, not unreachable for the
+      // seconds the API takes to say the same (seen live 2026-11-20 on instabox-b: the Fleet page
+      // flashed the error for 15 s and the thread read its box as absent).
+      if (drivable && /is suspended|Session open refused by peer/i.test(err)) {
         setProvider(h, { state: "paused", detail: "the gateway says the machine is suspended", at: now() });
         h.lastError = undefined;
         h.unreachableSince = undefined;

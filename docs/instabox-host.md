@@ -238,10 +238,20 @@ Two more findings from that pass, fixed the same morning:
    minutes on Instabox, the hour elsewhere, the env override on top.
 8. **A suspend behind the controller's back flashed "unreachable".** The sweep in flight hit the
    gateway's "administratively prohibited: machine … is suspended" (behind a stale mux socket
-   line) and the pool marked the host unreachable with that text for the second the provider's
-   API took to say "paused"; the thread read its box as absent meanwhile. The gateway's message
-   names the state, so a sweep refused with "is suspended" reads the host paused at once (the API
+   line; through a live mux master the same refusal reads "Session open refused by peer") and the
+   pool marked the host unreachable with that text for the seconds the provider's API took to say
+   "paused" (15 s on the next pass); the thread read its box as absent meanwhile. The gateway's
+   message names the state, so a sweep refused either way reads the host paused at once (the API
    is still asked, to confirm).
+9. **A wake was undone by a read.** Shim 1's `exec` on a stopped box did what msb does: boot it,
+   run the command, stop it again. The controller's wake (`start`) landed while a sweep's read had
+   the box up for its own exec, so the start was a no-op on a running container, the read's
+   clean-up stopped it, and the reply two seconds later failed with "container … is not running"
+   (the fifth pass, 02:57 UTC). Shim 2: `start` and `run` leave a marker under
+   `/tmp/msb-docker/wanted/`, `stop` and `rm` clear it, and an exec that booted the box leaves it
+   up when a start landed during the command. Proven on the machine: stop, an exec of `sleep 6`,
+   a start two seconds in, the box still running after the exec; a plain exec on a stopped box
+   still stops it. Prepare on each Instabox host installs the new shim (the images are skipped).
 
 Still open: `[alert] host-disk` on the VPS read 93 % during the first passes (86 % the next
 morning); the volume is the RDP one, the sandboxes are a small part of it.
