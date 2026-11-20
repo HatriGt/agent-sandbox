@@ -530,6 +530,16 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS threads_owner ON threads(owner, deleted_at);
   `,
+  `
+  -- The thread's own sleep clock (src/sleep-reaper.ts): when its box was last seen going from
+  -- running to stopped. Until 2026-11-20 the only clock was a marker on the box's host, which a
+  -- paused host cannot be asked for and a controller restart forgot, so a temporary box asleep on
+  -- a Freestyle or Instabox machine outlived its sleep TTL for as long as the host stayed asleep.
+  -- Rows already asleep start their clock at their last change: never later than the nap, so a
+  -- box past the TTL by that clock is past it in truth.
+  ALTER TABLE threads ADD COLUMN asleep_since INTEGER;
+  UPDATE threads SET asleep_since = updated_at WHERE box_status = 'stopped' AND deleted_at IS NULL;
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

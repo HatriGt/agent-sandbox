@@ -68,7 +68,7 @@ import {
   type TokenStore,
   type GitAccessResolution,
 } from "./gh-token-store.js";
-import { probeToken, canAccessRepo, isPublicRepo } from "./gh-probe.js";
+import { probeToken, canAccessRepo, isPublicRepo, GitHubUnreachableError } from "./gh-probe.js";
 import { localRepoOwnerName, parseOwnerName } from "./git-remote.js";
 
 /** Promise sleep for the block-until-boundary wait loop. */
@@ -232,7 +232,8 @@ export async function resolveCredsForBox(cfg: Config, box: string): Promise<Agen
     const owner = ownerOf(repo);
     if (!owner) continue;
     repoOwners[name] = owner;
-    const confirmed = await confirmedAccountsFor(cfg, store, repo);
+    // A hop that failed says nothing about access: no identity this time, not a wrong one.
+    const confirmed = await confirmedAccountsFor(cfg, store, repo).catch((e) => (e instanceof GitHubUnreachableError ? [] : Promise.reject(e)));
     if (confirmed.length !== 1) continue; // 0 or ambiguous -> no identity (resume can't ask mid-run)
     ownerTokens[owner] = confirmed[0].token;
     ownerLogins[owner] = confirmed[0].login;
@@ -338,7 +339,13 @@ async function resolveGitAccessImpl(
     const owner = ownerOf(repo);
     if (!owner) continue; // no GitHub origin (e.g. a local-only repo) — nothing to resolve/identity to set
 
-    const confirmed = await confirmedAccountsFor(cfg, store, repo);
+    let confirmed: Account[];
+    try {
+      confirmed = await confirmedAccountsFor(cfg, store, repo);
+    } catch (e) {
+      if (!(e instanceof GitHubUnreachableError)) throw e;
+      return { ok: false, question: `Could not check which stored GitHub account can access ${repo}: ${e.message}. Try again in a moment.` };
+    }
 
     // Explicit account choice: honor it if that account can access this repo.
     if (opts.githubAccount?.trim()) {

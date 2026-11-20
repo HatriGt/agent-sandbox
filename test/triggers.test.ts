@@ -253,8 +253,9 @@ test("dispatcher: in-flight and storm counts survive a controller restart; recon
 });
 
 test("box policy: destroy only finished runs, per the automation's setting; normalize keeps it", async () => {
-  assert.equal(shouldDestroyBox(undefined, "done"), true, "unset = destroy after a clean finish");
-  assert.equal(shouldDestroyBox(undefined, "failed"), false);
+  assert.equal(shouldDestroyBox(undefined, "done"), true, "unset = destroy on any finish");
+  assert.equal(shouldDestroyBox(undefined, "failed"), true, "a failed automation run's box goes too (2026-11-20)");
+  assert.equal(shouldDestroyBox(undefined, "waiting"), false);
   assert.equal(shouldDestroyBox("keep", "done"), false);
   assert.equal(shouldDestroyBox("done", "done"), true);
   assert.equal(shouldDestroyBox("done", "failed"), false, "a failed box is kept to inspect");
@@ -263,7 +264,9 @@ test("box policy: destroy only finished runs, per the automation's setting; norm
   const n = normalizeTrigger({ name: "Review", kind: "watch", repo: "o/r", taskTemplate: "t", spec: { watch: ["pr_opened"], destroy: "always" } });
   assert.ok(n.ok);
   if (!n.ok) return;
-  assert.equal(n.trigger.spec.destroy, "always");
+  assert.equal(n.trigger.spec.destroy, undefined, "always is the default, so it is not stored");
+  const done = normalizeTrigger({ name: "Review", kind: "watch", repo: "o/r", taskTemplate: "t", spec: { watch: ["pr_opened"], destroy: "done" } });
+  assert.ok(done.ok && done.trigger.spec.destroy === "done", "an explicit done (keep a failure's box) is stored");
   const bad = normalizeTrigger({ name: "Review", kind: "watch", repo: "o/r", taskTemplate: "t", spec: { watch: ["pr_opened"], destroy: "nuke" } });
   assert.ok(bad.ok && bad.trigger.spec.destroy === undefined);
   const keep = normalizeTrigger({ name: "Review", kind: "watch", repo: "o/r", taskTemplate: "t", spec: { watch: ["pr_opened"], destroy: "keep" } });

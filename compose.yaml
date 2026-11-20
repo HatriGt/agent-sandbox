@@ -9,6 +9,11 @@ services:
       dockerfile: Dockerfile
     container_name: agent-sandbox
     restart: unless-stopped
+    # A real PID 1: the controller spawns ssh ControlMaster processes that outlive their client
+    # (ControlPersist) and are re-parented to PID 1; node reaps no grandchild, so without an init
+    # every one of them stayed a zombie until the cgroup's pids limit refused every fork
+    # (2026-11-20, "spawn ssh EAGAIN").
+    init: true
     env_file:
       - .env
     environment:

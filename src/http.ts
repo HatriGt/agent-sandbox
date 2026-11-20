@@ -94,7 +94,8 @@ import { gatherMonitor, gatherWatch, readAgentLogFull, askInBox, driverStateLine
 import { isBoxName } from "./sync.js";
 import { run as runCmd, shellQuote, sshLaneFront } from "./exec.js";
 import { touchClaimed, markParked } from "./claims.js";
-import { askParkEnabled, askParkGraceMs, parkWaitingBox, shouldPark } from "./snapshot.js";
+import { reapVerdicts, groupByHost, asleepSecOf } from "./sleep-reaper.js";
+import { askParkEnabled, askParkGraceMs, askParkTtlSec, parkWaitingBox, shouldPark } from "./snapshot.js";
 import { safeWorkspacePath } from "./artifact.js";
 import { gitStatus, gitCommitAll, gitPush } from "./git-ops.js";
 import { loadTitles, generateTitle, forgetTitle, saveTitle, cleanTitle } from "./titles.js";
@@ -1307,6 +1308,7 @@ const maybeNap = (boxes: BoxView[], claims: Map<string, number>, nowMs: number) 
   }
 };
 
+const SLEEP_REAP_EVERY_MS = 5 * 60_000;
 const lastSeenStatus = new Map<string, boolean>();
 /**
  * The harness a box started on, as the thread header shows it ("Bug fixer · asks before guessing ·
@@ -1535,7 +1537,9 @@ const readFleet = makeFleetReader(
     // from a host that had boxes is far more likely cut short than emptied.
     const answered = new Set(swept.filter((id) => boxes.some((b) => b.host === id)));
     noteAbsentThreads(db, listThreads(db), present, answered, sweepAt);
-    const away = threadViews(listThreads(db), present, new Set(stale), (id) => copies.has(id));
+    const threadRows = listThreads(db);
+    const threadRow = new Map(threadRows.map((r) => [r.id, r]));
+    const away = threadViews(threadRows, present, new Set(stale), (id) => copies.has(id));
     // A Stopped box nobody remembers is dead capacity only when nobody holds it (fleet.ts mergeWithMemory).
     // A thread row holds its box too: a box can vanish, a thread cannot.
     const held = (name: string): boolean => kept.has(name) || claims.has(name) || ownerOf(db, name) != null || getThread(db, name) != null;
@@ -1552,8 +1556,11 @@ const readFleet = makeFleetReader(
       ...(kept.has(b.name) ? { kept: true } : {}),
       // The quiet clock the dashboard counts down is the nap's own: a wake is activity.
       ...(/^running$/i.test(b.boxStatus) && quietSinceSec(b.lastOutputAt, wokenAtOf(b.name)) !== b.lastOutputAt ? { lastOutputAt: quietSinceSec(b.lastOutputAt, wokenAtOf(b.name)) } : {}),
-      // For a stopped box the claim age is (a good proxy for) how long it has been asleep.
-      ...(!/^running$/i.test(b.boxStatus) && claims.has(b.name) ? { asleepSec: claims.get(b.name) } : {}),
+      // For a stopped box the claim age is (a good proxy for) how long it has been asleep; with the
+      // host's markers out of reach (asleep, unreachable, a restart) the thread's own clock counts.
+      ...(!/^running$/i.test(b.boxStatus) && (claims.has(b.name) || asleepSecOf(threadRow.get(b.name), sweepAt) !== undefined)
+        ? { asleepSec: claims.get(b.name) ?? asleepSecOf(threadRow.get(b.name), sweepAt) }
+        : {}),
     }));
     return { boxes: views, stale, held };
   },
@@ -4894,6 +4901,70 @@ app.post("/revert.json", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * End a thread for good: archive what the last snapshot knows, tear the box down (waking its host
+ * when it must), and drop every controller-side trace of it. The Destroy button, the bulk "destroy
+ * sleeping" and the sleep reaper (src/sleep-reaper.ts) all come through here. `boxGone`: the host
+ * already lists the thread without its box, so nothing is torn down and no host is woken.
+ */
+const destroyThread = async (session: string, opts: { force?: boolean; boxGone?: boolean } = {}): Promise<void> => {
+  // Archive fallback: a run that finished without a fleet sweep observing the edge (controller
+  // restart, teardown racing the sweep) would evaporate. Best-effort from the last-known snapshot
+  // BEFORE the box is destroyed; files may be empty here (a stopped box can't answer listChanges —
+  // honest degradation), and the dedupe rule in archiveRun makes this a no-op when the sweep
+  // already recorded the same finish.
+  await archiveFinishedRun(session, { withFiles: false }).catch(() => {});
+  if (!opts.boxGone) await deps.teardown(hcfg(session), session, { force: opts.force === true });
+  readFleet.forget(session);
+  watchHub.drop(session);
+  inbox.clear(session);
+  markThreadDeleted(db, session);
+  void removeTranscript(cfg, session);
+  boxModels.delete(session);
+  boxVerify.delete(session);
+  boxVerified.delete(session);
+  verifyRetrier?.forget(session);
+  if (!opts.boxGone) void forgetTitle(hcfg(session), session).catch(() => {});
+};
+
+/**
+ * The sleep TTL, judged by the controller from the thread rows (src/sleep-reaper.ts): a temporary
+ * box past it is destroyed wherever its host is, asleep or not; an automation's box goes as soon
+ * as it is not running. Hosts are taken one at a time within, so a paused one is woken once for
+ * all its overdue boxes; a kept box is refused by the teardown and left.
+ */
+let sleepReapRunning = false;
+const sleepReapTick = async (): Promise<void> => {
+  if (sleepReapRunning) return;
+  sleepReapRunning = true;
+  try {
+    const sleepTtlSec = parseDurationSec(cfg.sleepTtl);
+    if (!sleepTtlSec) return;
+    const now = Date.now();
+    const actions = reapVerdicts({ rows: listThreads(db), startedBy: (id) => startedByOf(db, id), nowMs: now, sleepTtlSec, parkTtlSec: askParkTtlSec() });
+    for (const a of actions) {
+      if (a.action === "clock") upsertThread(db, { id: a.id, boxStatus: "stopped" }, now);
+    }
+    await Promise.all(
+      [...groupByHost(actions.filter((a) => a.action !== "clock"))].map(async ([host, list]) => {
+        for (const a of list) {
+          try {
+            await destroyThread(a.id, { boxGone: a.action === "forget" });
+            console.error(`[sleep] ${a.id}${host ? ` on ${host}` : ""}: ${a.action === "forget" ? "thread closed" : "destroyed"} (${a.why})`);
+          } catch (e) {
+            if (e instanceof KeptBoxError) continue;
+            console.error(`[sleep] ${a.id}${host ? ` on ${host}` : ""}: could not destroy (${a.why}): ${String((e as Error).message ?? e).slice(0, 200)}`);
+          }
+        }
+      })
+    );
+  } catch (e) {
+    console.error(`[sleep] sweep failed: ${String((e as Error).message ?? e).slice(0, 200)}`);
+  } finally {
+    sleepReapRunning = false;
+  }
+};
+
 app.post("/teardown.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = boxParam(req.body);
@@ -4908,20 +4979,9 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
     // BEFORE the box is destroyed; files may be empty here (a stopped box can't answer listChanges —
     // honest degradation), and the dedupe rule in archiveRun makes this a no-op when the sweep
     // already recorded the same finish.
-    await archiveFinishedRun(session, { withFiles: false }).catch(() => {});
     // A kept thread is destroyed only when the caller says `force` (the thread's own dialog, which
     // names the keep); the bulk "destroy sleeping" never passes it, so it can never take a kept one.
-    await deps.teardown(hcfg(session), session, { force: force === true });
-    readFleet.forget(session);
-    watchHub.drop(session);
-    inbox.clear(session);
-    markThreadDeleted(db, session);
-    void removeTranscript(cfg, session);
-    boxModels.delete(session);
-    boxVerify.delete(session);
-    boxVerified.delete(session);
-    verifyRetrier?.forget(session);
-    void forgetTitle(hcfg(session), session).catch(() => {});
+    await destroyThread(session, { force: force === true });
     res.json({ ok: true });
   } catch (e) {
     if (e instanceof KeptBoxError) {
@@ -6427,6 +6487,9 @@ app.listen(cfg.httpPort, cfg.httpHost, () => {
   setInterval(() => void hostDiskTick(), HOST_DISK_POLL_MS).unref();
   setTimeout(() => void orphanSweepTick(), 2 * 60_000).unref();
   setInterval(() => void orphanSweepTick(), 24 * 3600_000).unref();
+  // Sleeping boxes past their TTL and finished automation boxes, on every host (src/sleep-reaper.ts).
+  setTimeout(() => void sleepReapTick(), 90_000).unref();
+  setInterval(() => void sleepReapTick(), SLEEP_REAP_EVERY_MS).unref();
   // The baked manifest arrives with the first task start; check an hour in, then daily.
   setTimeout(() => void rebakeTick(), 3600_000).unref();
   setInterval(() => void rebakeTick(), 24 * 3600_000).unref();

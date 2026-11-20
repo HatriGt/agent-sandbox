@@ -69,10 +69,12 @@ export interface TriggerSpec {
   /** watch: `push` on this branch (default: the repo's default branch); run_* only on it (unset: any). */
   branch?: string;
   /**
-   * What happens to a run's box when it finishes: destroyed after a clean finish ("done", the
-   * default when unset), destroyed on any finish ("always"), or kept for the global sleep TTL
-   * ("keep", stored explicitly). A box waiting on a question has not finished; a box the operator
-   * pinned (Keep) is never destroyed.
+   * What happens to a run's box when it finishes: destroyed on any finish ("always", the default
+   * when unset: an automation's box exists to produce its archived result and nothing more, and
+   * until 2026-11-20 a failed run's box sat on its host for the sleep TTL, on a paused host for
+   * days), destroyed after a clean finish only ("done", stored explicitly, to inspect a failure's
+   * box), or kept for the global sleep TTL ("keep", stored explicitly). A box waiting on a
+   * question has not finished; a box the operator pinned (Keep) is never destroyed.
    */
   destroy?: BoxDestroy;
 }
@@ -86,7 +88,7 @@ export type BoxDestroy = (typeof BOX_DESTROY)[number];
 /** Should the box of a run that finished in `state` be destroyed now, under this policy? */
 export function shouldDestroyBox(policy: BoxDestroy | undefined, state: "done" | "failed" | "waiting" | "running"): boolean {
   if (state === "waiting" || state === "running") return false;
-  const p = policy ?? "done";
+  const p = policy ?? "always";
   return p === "always" || (p === "done" && state === "done");
 }
 
@@ -736,7 +738,7 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
   }
   if (typeof s.keepGreen === "boolean") spec.keepGreen = s.keepGreen;
   if (typeof s.addressReviews === "boolean") spec.addressReviews = s.addressReviews;
-  if (BOX_DESTROY.includes(s.destroy as BoxDestroy) && s.destroy !== "done") spec.destroy = s.destroy as BoxDestroy;
+  if (BOX_DESTROY.includes(s.destroy as BoxDestroy) && s.destroy !== "always") spec.destroy = s.destroy as BoxDestroy;
   let signingSecret: string | undefined;
   if (typeof b.signingSecret === "string" && b.signingSecret.trim()) {
     if (!spec.preset) return { ok: false, error: "a signing secret only applies to an alert-source preset" };

@@ -4,7 +4,7 @@
  */
 import { spawn, execFile } from "node:child_process";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { unlink } from "node:fs";
+import { unlink, stat } from "node:fs";
 import { redactShapes } from "./redact.js";
 
 export interface RunResult {
@@ -116,14 +116,46 @@ export function noteSshFailure(sock: string, why: SshFailure): void {
     }
   }
 }
+/**
+ * The socket a command found "already exists" is unlinked only when its master is really gone.
+ *
+ * The same message comes from a benign race: a burst of parallel commands to a host with no socket
+ * yet (the sweep's listing, the keep and claim markers, the titles) all start as masters, the first
+ * binds the path and the rest find it there. Unlinking on the message alone took the LIVE socket
+ * away after every such burst, so the next burst built another master, and every master, orphaned
+ * to PID 1 (node, which reaps no grandchild), stayed a zombie: 521 of them in 25 minutes on the
+ * primary host, 19 088 by 13:48 UTC on 2026-11-20, when the kernel refused the controller every
+ * fork ("spawn ssh EAGAIN"; every automation fire failed for an hour). Now a socket younger than
+ * SOCKET_RACE_WINDOW_MS is a race and stays, an older one is asked (`ssh -O check`) and goes only
+ * when nothing answers. Pure verdict in `staleSocketVerdict` for the test.
+ */
+export const SOCKET_RACE_WINDOW_MS = 15_000;
+export function staleSocketVerdict(o: { ageMs: number | undefined; masterAnswers: boolean | undefined }): "keep-race" | "keep-alive" | "unlink" {
+  if (o.ageMs !== undefined && o.ageMs < SOCKET_RACE_WINDOW_MS) return "keep-race";
+  if (o.masterAnswers) return "keep-alive";
+  return "unlink";
+}
+async function unlinkIfStaleSocket(sock: string): Promise<void> {
+  const ageMs = await new Promise<number | undefined>((res) => stat(sock, (err, st) => res(err ? undefined : Date.now() - st.mtimeMs)));
+  if (ageMs === undefined) return; // already gone
+  if (staleSocketVerdict({ ageMs, masterAnswers: undefined }) === "keep-race") return;
+  const masterAnswers = await new Promise<boolean>((res) => {
+    const c = execFile("ssh", ["-O", "check", "-o", `ControlPath=${sock}`, "asb-master"], { timeout: 3_000 }, (err) => res(!err));
+    c.on("error", () => res(false));
+  });
+  if (staleSocketVerdict({ ageMs, masterAnswers }) !== "unlink") return;
+  console.warn(`[ssh] the master behind ${sock} is gone; unlinking the stale socket`);
+  unlink(sock, () => {});
+}
+
 /** The exit-255 case of `noteSshFailure`, from an argv. */
 export function noteSshExit(cmd: string, args: string[], code: number, stderr = ""): void {
   // ssh found the control socket, nobody answered on it, and it could not become the master
   // because the file is there: the master is gone and the file is stale. Without this every
   // command through that path paid a cold connection until something unlinked it.
   if (/ControlSocket \S+ already exists, disabling multiplexing/.test(stderr)) {
-    const stale = sshControlPathOf(cmd, args);
-    if (stale) unlink(stale, () => {});
+    const sock = sshControlPathOf(cmd, args);
+    if (sock) void unlinkIfStaleSocket(sock);
   }
   if (code !== 255) return;
   const sock = sshControlPathOf(cmd, args);

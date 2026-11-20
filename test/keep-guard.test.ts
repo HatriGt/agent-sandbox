@@ -21,7 +21,10 @@ test("every teardown wrapper passes the force flag through (a deliberate Destroy
   const tenancy = await fs.readFile(new URL("../src/tenancy.ts", import.meta.url), "utf8");
   assert.match(tenancy, /async teardown\(cfg, session, opts\)[\s\S]*?deps\.teardown\(cfg, session, opts\)/, "tenancy.ts wraps teardown and must forward opts");
   const http = await fs.readFile(new URL("../src/http.ts", import.meta.url), "utf8");
-  assert.match(http, /deps\.teardown\(hcfg\(session\), session, \{ force: force === true \}\)/, "the route sends force only when the body says so");
+  // The route and the sleep reaper share destroyThread; the route is the only caller that may say force.
+  assert.match(http, /await destroyThread\(session, \{ force: force === true \}\)/, "the route sends force only when the body says so");
+  assert.match(http, /const destroyThread = async \(session: string, opts[\s\S]*?deps\.teardown\(hcfg\(session\), session, \{ force: opts\.force === true \}\)/, "destroyThread forwards force to the teardown");
+  assert.doesNotMatch(http, /destroyThread\(a\.id, \{[^}]*force/, "the sleep reaper never forces a kept box");
   assert.match(http, /deps\.teardown = async \(c, session, opts\) => \{[\s\S]*?await rawTeardown\(c, session, opts\)/, "the per-box cleanup lane in http.ts rebinds teardown and must forward opts");
   assert.doesNotMatch(http, /deps\.teardown = async \(c, session\) =>/, "no teardown rebind may drop the third argument");
 });

@@ -46,6 +46,8 @@ export interface ThreadRow {
   /** What the hosts last said about the box: running / stopped / absent / unknown (never seen). */
   box_status: string;
   box_seen_at: number | null;
+  /** When the box was last seen going running → stopped (the sleep TTL counts from here); null while running or never seen asleep. */
+  asleep_since: number | null;
   last_turn_at: number | null;
   created_at: number;
   updated_at: number;
@@ -102,11 +104,20 @@ export function upsertThread(db: Db, u: ThreadUpsert, now = Date.now(), opts: { 
     cols.push(col);
     vals.push(k === "repos" ? (v ? JSON.stringify(v) : null) : k === "kept" ? (v ? 1 : 0) : v);
   }
-  const insertCols = ["id", ...cols, "created_at", "updated_at"];
-  const sets = [...cols.map((c) => `${c} = excluded.${c}`), "updated_at = excluded.updated_at", ...(opts.revive ? ["deleted_at = NULL"] : [])];
+  // The sleep clock follows the box status: a box seen stopped starts it (once: a later sweep
+  // saying "stopped" again leaves it), a box seen running clears it. Only a status says anything.
+  const clock = u.boxStatus !== undefined;
+  const insertCols = ["id", ...cols, ...(clock ? ["asleep_since"] : []), "created_at", "updated_at"];
+  const sets = [
+    ...cols.map((c) => `${c} = excluded.${c}`),
+    ...(clock ? ["asleep_since = CASE WHEN excluded.box_status = 'stopped' THEN COALESCE(CASE WHEN threads.box_status = 'stopped' THEN threads.asleep_since END, excluded.updated_at) WHEN excluded.box_status = 'running' THEN NULL ELSE threads.asleep_since END"] : []),
+    "updated_at = excluded.updated_at",
+    ...(opts.revive ? ["deleted_at = NULL"] : []),
+  ];
   db.prepare(`INSERT INTO threads (${insertCols.join(", ")}) VALUES (${insertCols.map(() => "?").join(", ")}) ON CONFLICT(id) DO UPDATE SET ${sets.join(", ")}`).run(
     u.id,
     ...vals,
+    ...(clock ? [u.boxStatus === "stopped" ? now : null] : []),
     now,
     now
   );

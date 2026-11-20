@@ -48,8 +48,26 @@ async function ghGet(cfg: Config, token: string, path: string): Promise<string> 
   const remote =
     `curl -sf -H @- ` +
     `-H "Accept: application/vnd.github+json" ${shellQuote(`https://api.github.com${path}`)}`;
-  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remote], { check: false, input: `Authorization: token ${token}\n` });
+  // A transport failure is not GitHub's answer: ssh's own 255 (the host did not answer) or a
+  // spawn that failed (the controller could not fork, 2026-11-20) must not read as "this account
+  // cannot access the repo", which dropped every stored account and asked for a token that was
+  // there all along. curl's own codes (22 on a 4xx) are GitHub's answer and stay an empty body.
+  let r: { code: number; stdout?: string; stderr?: string };
+  try {
+    r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remote], { check: false, input: `Authorization: token ${token}\n` });
+  } catch (e) {
+    throw new GitHubUnreachableError(String((e as Error).message ?? e));
+  }
+  if (r.code === 255) throw new GitHubUnreachableError((r.stderr ?? "").trim().split("\n").pop() ?? "ssh exited 255");
   return r.stdout ?? "";
+}
+
+/** GitHub could not be asked at all (the hop to it failed); not an answer about access. */
+export class GitHubUnreachableError extends Error {
+  constructor(detail: string) {
+    super(`GitHub could not be reached from the controller (${detail.slice(0, 160)})`);
+    this.name = "GitHubUnreachableError";
+  }
 }
 
 /** GET a GitHub API path as parsed JSON (undefined when the body is not JSON / the call failed). */

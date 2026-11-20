@@ -176,3 +176,15 @@ test("ssh lanes: a front-of-lane command starts before the queue, a command that
   const http = fs.readFileSync(new URL("../src/http.ts", import.meta.url), "utf8");
   assert.match(http, /await sshLaneFront\(\(\) => Promise\.all\(\[countBoxesOnHost\(c\)/, "the readiness probe goes first");
 });
+
+test("ssh: a control socket found 'already exists' is unlinked only when it is old and its master does not answer", async () => {
+  const { staleSocketVerdict, SOCKET_RACE_WINDOW_MS } = await import("../src/exec.ts");
+  // A burst of parallel commands with no socket yet: the first binds it, the rest see it there. Not stale.
+  assert.equal(staleSocketVerdict({ ageMs: 200, masterAnswers: undefined }), "keep-race");
+  assert.equal(staleSocketVerdict({ ageMs: SOCKET_RACE_WINDOW_MS - 1, masterAnswers: false }), "keep-race");
+  // An old socket whose master answers `-O check` is the live channel.
+  assert.equal(staleSocketVerdict({ ageMs: 60_000, masterAnswers: true }), "keep-alive");
+  // An old socket nobody answers on: the master is gone, the file is stale.
+  assert.equal(staleSocketVerdict({ ageMs: 60_000, masterAnswers: false }), "unlink");
+  assert.equal(staleSocketVerdict({ ageMs: undefined, masterAnswers: false }), "unlink");
+});

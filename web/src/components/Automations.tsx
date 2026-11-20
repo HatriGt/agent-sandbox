@@ -1133,23 +1133,23 @@ function Editor({
           <ChevronRight className="text-muted-foreground size-3.5 transition-transform group-open:rotate-90" aria-hidden />
           <span className="label text-muted-foreground">Guardrails</span>
           <span className="text-faint ml-auto truncate text-micro group-open:hidden">
-            {[d.spec.destroy === "always" ? "box destroyed on finish" : d.spec.destroy === "keep" ? "box kept after the run" : "box destroyed when done", d.quiet ? "quiet" : null, (d.spec.keepGreen ?? true) ? "keeps PRs green" : null, (d.spec.addressReviews ?? true) ? "answers reviews" : null].filter(Boolean).join(" · ")}
+            {[d.spec.destroy === "done" ? "box destroyed when done" : d.spec.destroy === "keep" ? "box kept after the run" : "box destroyed on finish", d.quiet ? "quiet" : null, (d.spec.keepGreen ?? true) ? "keeps PRs green" : null, (d.spec.addressReviews ?? true) ? "answers reviews" : null].filter(Boolean).join(" · ")}
           </span>
         </summary>
         <div className="mt-3 flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <span className="text-meta">
             Box after the run
-            <span className="text-faint block text-micro">Keep = the global sleep rule. Destroying skips runs paused on a question, failed runs (unless Always) and boxes you pinned.</span>
+            <span className="text-faint block text-micro">Destroyed on finish unless you say otherwise. Keep = the global sleep rule. A run paused on a question and a box you pinned are never destroyed.</span>
           </span>
           <Segmented<"keep" | "done" | "always">
             ariaLabel="Box after the run"
-            value={d.spec.destroy ?? "done"}
-            onChange={(v) => setSpec({ destroy: v === "done" ? undefined : v })}
+            value={d.spec.destroy ?? "always"}
+            onChange={(v) => setSpec({ destroy: v === "always" ? undefined : v })}
             options={[
-              { value: "keep", label: "Keep" },
-              { value: "done", label: "Destroy if done", title: "Destroy after a clean finish; keep a failed run's box to inspect" },
               { value: "always", label: "Always destroy" },
+              { value: "done", label: "Destroy if done", title: "Destroy after a clean finish; keep a failed run's box to inspect" },
+              { value: "keep", label: "Keep" },
             ]}
           />
         </div>

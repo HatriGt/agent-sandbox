@@ -45,8 +45,16 @@ Think about the machine from the operator's side. After a task is delegated ther
    fell asleep while the controller was down or its host paused) has its clock started on sight and is
    judged on the next sweeps, never destroyed on sight (`stoppedBoxVerdict` in `src/claims.ts`; until
    2026-11-19 only `pool-*` boxes were judged, and sleeping delegate boxes stayed for days). The
-   maintainer only runs against a host that is awake: a paused Freestyle VM is left paused, and its
-   expired sleepers go the first time it is up for something else. A thread whose box was destroyed
+   maintainer only runs against a host that is awake and warms boxes, so since 2026-11-20 the
+   controller judges the TTL itself as well, from the thread table (`src/sleep-reaper.ts`, every
+   five minutes): each thread row carries `asleep_since`, stamped by the sweep that sees its box go
+   running → stopped (a row found asleep with no clock gets one on sight), and a temporary thread
+   past the TTL by that clock is destroyed through the same path as the Destroy button, which wakes
+   a paused host once for all of its overdue boxes and lets its sleep gate put it back. Before that,
+   ten temporary boxes sat asleep on paused Instabox and Freestyle hosts, some for a day, with no
+   countdown (the markers were out of reach). An automation's box (a trigger or a PR follow-up
+   started the run) goes as soon as it is not running: finished, or stopped mid-run; one the host no
+   longer lists has its thread row closed. A thread whose box was destroyed
    is Away (its copy brings it back): the thread row records `absent` the first time an awake host
    lists without it, and that word holds while the host sleeps (before, every such thread came back
    as "asleep" each time its host paused). The Fleet page lists a temporary sleeper as
