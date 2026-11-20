@@ -55,6 +55,12 @@ and `.pill`.
   on ordinary controls.
 - [beste](https://ui.beste.co) — @withbeste. Grey tonal cards on white with white inner tiles, dashed
   chart grids, tabular numerals, big stats; every motion piece declares a reduced-motion fallback.
+- [amicro mono charts](https://amicro.dev/mono-charts) — @amicro (added 2026-11-20, the user's
+  pick for the activity cards). Thirty single-ink chart cards: one flat sheet, a bold figure with
+  its unit in mono and a chip beside it on the top row, one chart in rounded geometry under it
+  (thick rounded bars, pill pillars, a rounded donut, label-left stacked bars), mono axis labels,
+  nothing coloured but the one dot that is a state. Screens: `node .shots/ref-mono.mjs` →
+  `.shots/out/ref-mono-*.png`.
 
 **Motion references (2026-11-17).** [d3motion resources](https://d3motion.pro/resources) — 52
 animated components (counters, rings, bars, timelines, toggles, staggered lists, typewriters,
@@ -1807,3 +1813,84 @@ the whole thing taller than the viewport allowed. It read as a settings dump, no
 - Shots: `node .shots/hub-settings-shot.mjs [--dark]` → `.shots/out/hub-settings[-dark]-{list,host,
   list-after-pick,agent,chip,chip-opens-panel}.png`; it also prints the panel size and asserts no
   horizontal overflow.
+
+## Round: activity cards in the transcript (2026-11-20)
+
+Seven live-activity shapes (countdown, queue position, trip with ETA, a transfer from here to
+there, scoreboard, loop counter, cycle of stages) for the things an agent reports the same way:
+`timer`, `queue`, `journey`, `transfer`, `versus`, `ring`, `stages` (`docs/output-visualizers.md`,
+"Activity cards"; `components/viz/ActivityBlocks.tsx`).
+
+Three passes were rejected before this one. The first copied the phone (tinted icon chip, semibold
+headline, figure on the right) and read as a widget. The second and third set a stat-card layout
+but kept piling on: a 32px header over an inner tile over a hairline over a facts grid, a glowing
+blue track with a ringed marker, flip dots trailing the figure, a plane on an arc, a ring beside a
+clock, micro text in every corner, then a sheen, a ripple, a sweep, a wake, a burst and a flash.
+The user's word for it was "AI slop", and the reference they chose is amicro's Mono Charts. What
+differs, and what the card is now:
+
+- **One sheet.** `VizFrame sheet`: the tile tone with a hairline edge (`.viz-sheet`: box-shadow
+  ring + e1), a 24px radius, the title as a quiet mono eyebrow on the same surface with the
+  utilities at its end, no inset body. The two-tone card (title strip over a tile) was the first
+  thing the user saw as "not the reference": it reads as a widget frame, the sheet reads as a
+  chart card. Inside: the head, the chart on a recessed stage, a mono foot line when the fence had
+  facts nobody claimed.
+- **The reference's type scale.** The figure is `text-2xl` (24px) bold, tight, tabular, with its
+  unit in `font-mono text-micro` beside it (`2:48 left`, `#12 of 40`, `62% done`, `6 apart`);
+  the state chip and tag chips are 18px mono pills at 10px with a hairline and a 5% ground, the
+  state's dot in the machine's hue (the one colour on the head, breathing while live); the toggle
+  is the same chrome with the chosen segment raised in ink. Chips and axis labels are 10px mono,
+  row labels 11px: the one place the dashboard goes under the 11px micro step, because the
+  reference's density is the look. The head is one 28px line that never wraps (chips truncate):
+  a hover that swaps the figure must not move the chart out from under the pointer, which looped
+  enter/leave on the scoreboard once.
+- **The segmented toggle** (the reference's `1H 24H 7D`) on the right when the fence gave more
+  than one reading of the same subject (`left | done`, `place | ahead | wait`, `to go | %`, `% |
+  left`, `gap | main | feature`, `count | % | time`); clicking rolls the figure to that reading.
+  It only ever switches between numbers the agent wrote. With one reading the right slot is a
+  chip; a tag or clock that would crowd the line moves to the foot.
+- **One hue in tiers, rounded geometry with body.** Every chart is drawn in the machine's state
+  with its own three fill tokens (`--viz-ink-live` cobalt at hue 262, `--viz-ink-ok` emerald,
+  `--viz-ink-fail` red, light and dark values in `index.css`); a second series is the same ink at
+  a tier (100 / 60 / 45 / 40 %, the reference's opacity steps), never a second hue, never a
+  gradient (rejected), never a hue-tinted track or chip (rejected); what is not filled is neutral
+  ink at 10%. The shapes, each after one of the reference's cards: a **bullet row** (the label and
+  the reading on one mono line, a 12px track, the fill; a journey's stops as 4px ink markers
+  labelled under) for the timer, journey, transfer and each pipeline stage; **tall pills** one
+  per place for the queue (passed in the hue, the reader's own place in ink, 56px tall, rising
+  from the base 8 ms apart); a **pyramid** of two centred pills with the label inside left and
+  the score inside right for the scoreboard, the leader in the hue and the other at 45%, widths
+  by share; a **148px beaded donut** with a 10px ring and a two-line centre (bold mono over a
+  spaced uppercase word) for the counter.
+- **The stage.** `.viz-stage`: 4% ink in light, a step toward the page in dark, 14px radius,
+  12px padding; it holds the chart and its mono axis ends.
+- **Motion that reports, nothing that decorates.** The figure's digits are an odometer on a
+  re-emit, a toggle or a hover; bars grow once on first paint and tween after; new pills light one
+  after another; donut beads fill in order; rows rise in once. No sheen, ripple, sweep, glow or
+  burst.
+- **Hover opens a card, never invents.** The reference's tooltip, ported: a `viz-tile` with
+  `shadow-e2`, a mono title over a hairline, then rows of muted label and semibold value, a 6px
+  dot in the hue before the row that is the fill. A bullet reads the scale under the pointer (`70%
+  of the way` / done 30% / ends 09:31) or the marker there (`Canary` / reached / at 67%); a pill
+  reads its place (`place 13 of 40` / passed / ends at Merge); a bead reads its attempt (`4 of 5`
+  / next); a pyramid pill or stage row reads its side or stage (`feature` / score 176 / behind by 6
+  / clock). Bullets, pills and the donut float it above the chart (the sheet does not clip, so it
+  may cross the eyebrow); pyramid pills and stage rows float it beside the pointer (to the left
+  past 60% of the width), because their hover also drives the head.
+- **Hover drives the head.** As in the reference's pyramid and donut: resting on a scoreboard
+  pill, a stage row or a donut bead swaps the figure and unit for that point (`176 feature`, `40%
+  Test`, `4 next`), digits rolling, and back on leave. The hovered pill lifts 1.03 with a shadow,
+  the hovered row is lit with a 5% wash, the other beads and pills step back to 70–75%.
+- **Still a piece:** `max-w-[26rem]`, 16px sides and bottom, the eyebrow 40px.
+- Shots: `node .shots/viz-activity.mjs [--dark] [--live [--video] [--frames [--slow]]]` →
+  `.shots/out/viz-activity*.png`; `node .shots/viz-activity-interact.mjs [--dark]` hovers the timer
+  bullet, clicks the timer's `done` segment, hovers the queue pills, the journey's stop, the
+  transfer bullet, the scoreboard's second pill, the ring's fourth bead and the pipeline's Test
+  row, printing the head and tooltip text at each step, all at 2x (`.shots/out/viz-activity-ix-*.png`).
+  Bring the whole card into view before hovering: a later screenshot scroll moves the row out from
+  under the pointer. Compare against the reference with `node .shots/ref-mono.mjs`
+  (`.shots/out/ref-mono-*.png`) before changing anything.
+- **Not dropped in from amicro.** `npx @subhanhq/amicro@latest add …` does not exist: the npm
+  package is the built website, no CLI, no registry. Their charts are recharts demos with
+  hard-coded data (`.shots/amicro-src/mono/*.tsx` keeps the sources for reference); the patterns
+  were ported, not the code.

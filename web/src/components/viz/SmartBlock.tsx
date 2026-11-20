@@ -47,6 +47,8 @@ import { completeLines, repairPartialJson } from "@/lib/viz-stream";
 import { VizSkeleton } from "./VizFrame";
 import type { AutoBlock } from "@/lib/viz-auto-types";
 import { CommandBlock, ComparisonBlock, CronBlock, EnvBlock, FileListBlock, IniBlock, JwtBlock, LinksBlock, StackTraceBlock, UrlBlock } from "./AutoBlocks";
+import { ACTIVITY_LANGS, parseActivity } from "@/lib/viz-activity";
+import { ActivityBlock } from "./ActivityBlocks";
 
 /**
  * The output-visualizer router (docs/output-visualizers.md). Given a fenced block's language and
@@ -268,6 +270,13 @@ export function smartBlock(language: string, code: string, { open = false }: { o
       break;
     }
     default: {
+      // Activity cards: ```timer / queue / journey / transfer / versus / ring / stages (and their
+      // aliases), `key: value` lines tidied like every colon fence.
+      if (ACTIVITY_LANGS[language]) {
+        const activity = parseActivity(language, tidyFence("kv", src));
+        el = activity && <ActivityBlock activity={activity} source={src} />;
+        break;
+      }
       // A language the router does not render rich on its own: yaml, toml/ini, env, a
       // `$`-prompted shell session.
       el = renderAuto(sniffLanguage(language, src), src);
@@ -284,6 +293,7 @@ const LINE_FENCES = new Set([
   "stats", "flow", "tree", "csv", "tsv", "timeline", "steps", "algorithm", "procedure", "progress", "kv", "badges", "score", "keys", "shortcuts",
   "palette", "http", "tests", "log", "diffstat", "commits", "deps", "graph", "dag", "sequence", "findings", "issues", "risks", "funnel", "gantt", "spans", "heatmap",
   "compare", "annotate", "layers",
+  ...Object.keys(ACTIVITY_LANGS),
 ]);
 /** JSON fences: a streaming one is parsed from its repaired prefix. */
 const JSON_FENCES = new Set(["chart", "json", "jsonc"]);

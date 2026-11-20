@@ -1026,20 +1026,6 @@ export function Thread({
     if (vizHeld && !stick.escapedFromLock) stopScroll();
   }, [vizHeld, stick.escapedFromLock, stopScroll]);
 
-  // "New activity" on the jump-to-latest button: set when the trace grows while the reader is
-  // scrolled up in history, cleared the moment they reach the bottom again.
-  const [newBelow, setNewBelow] = React.useState(false);
-  // Keyed on the log's length, not the event count: a paragraph still streaming grows the same
-  // event, and that is exactly the "more below" a reader scrolled up wants to know about.
-  const logLen = snap?.log.length ?? 0;
-  const prevLenRef = React.useRef(logLen);
-  React.useEffect(() => {
-    if (logLen > prevLenRef.current && !stick.isAtBottom) setNewBelow(true);
-    prevLenRef.current = logLen;
-  }, [logLen, stick.isAtBottom]);
-  React.useEffect(() => {
-    if (stick.isAtBottom) setNewBelow(false);
-  }, [stick.isAtBottom]);
   // More than one viewport above the end: the only distance at which a jump button beats scrolling.
   const [farUp, setFarUp] = React.useState(false);
   React.useEffect(() => {
@@ -1430,34 +1416,24 @@ export function Thread({
             </div>
           </DialogContent>
         </Dialog>
-        {/* Jump to the latest output: centred just above the composer, only once the reader is more
-            than a viewport away from the end (a screen's worth of scrolling is a wheel flick, not a
-            journey). When the agent produces something NEW while you are reading history, the
-            button appears at once and grows a label — the chat-app affordance for "there is more
-            below than when you left". */}
+        {/* Jump to the latest output: a plain round arrow centred just above the composer, only once
+            the reader is more than a viewport away from the end (a screen's worth of scrolling is a
+            wheel flick, not a journey). It never grows a label: the "New activity" pill that used
+            to stretch it when the trace grew was taken out on request (2026-11-20). */}
         <AnimatePresence initial={false}>
-          {!stick.isAtBottom && (farUp || newBelow) && (
+          {!stick.isAtBottom && farUp && (
             <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
             <motion.button
               type="button"
-              layout={!still}
               initial={still ? false : { opacity: 0, scale: 0.25 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.9 }}
               transition={still ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 }}
               onClick={() => void stick.scrollToBottom()}
               aria-label="Scroll to latest"
-              className={cn(
-                "text-foreground pointer-events-auto flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-full border shadow-e2",
-                newBelow ? "border-live/40 bg-card px-3" : "bg-card hover:bg-muted w-8"
-              )}
+              className="bg-card hover:bg-muted text-foreground pointer-events-auto grid size-8 cursor-pointer place-items-center rounded-full border shadow-e2"
             >
-              {newBelow && (
-                <motion.span initial={{ opacity: 0, x: 4 }} animate={{ opacity: 1, x: 0 }} className="text-live text-micro font-medium whitespace-nowrap">
-                  New activity
-                </motion.span>
-              )}
-              <ArrowDown className={cn("size-4", newBelow && "text-live")} aria-hidden />
+              <ArrowDown className="size-4" aria-hidden />
             </motion.button>
             </div>
           )}

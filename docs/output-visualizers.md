@@ -137,6 +137,70 @@ away — the beautifier is presentation, never authority.
 - **````layers```** — architecture stack: `Layer: item, item` per line, top to bottom, as bands with
   item chips and connectors. 2–10 layers, ≤ 16 items each; a line without `name:` → plain code.
 
+#### Activity cards (something happening right now)
+
+The phone's live-activity grammar (a countdown, a place in line, a trip with an arrival time, a
+flight arc, a scoreboard, a reps ring, a wash cycle) for the things an agent reports the same way.
+One body shape for all seven: `key: value` lines (≤ 24; a first line with no colon is the
+headline; bullets / `**bold**` / `=` are tidied like every colon fence). `title:` is the eyebrow
+AND the live-slot name — an agent that re-emits the card with the same title updates it in place
+(values roll, tracks tween, the re-emit collapses to an "updated" row). `status:` is the headline;
+`note:` a quiet line; every key the kind does not claim becomes a footer fact, in order. The hue is
+the machine's state only: live blue while it runs, green once done, red when it expired or failed.
+Nothing ticks on its own — a card shows what the agent last said. Parsers:
+`web/src/lib/viz-activity.ts`; renderers: `web/src/components/viz/ActivityBlocks.tsx`.
+
+- **````timer``` / ````countdown```** — `left:` or `elapsed:` (the hero), `total:` (gives the bar),
+  `started:`, `ends:`. Durations: `2:48`, `1:02:05`, `6h 14m`, `4 min`, `90s`. `left: 0:00` is
+  expired: red, "Time's up". Needs one of left / elapsed / total.
+- **````queue```** — `position: #12` (or `next`), `of: 40`, `ahead:`, `wait:` (est.), `end: Merge`
+  (what the line leads to). Marker on a track that ends in the head-of-line dot; a status that says
+  merged / ready / seated rests the marker on the head. Needs a position.
+- **````journey``` / ````trip``` / ````delivery```** — `stops: Build, Test, Canary, Production`
+  (also `|` or `->`), `progress: Canary` (a stop) or `62%` / `3/5`, `from:` / `to:` without stops,
+  `remaining:` (the hero: `2 min`, `1.35 km`), `departed:`, `arrives:`, `by:` (the carrier:
+  `freestyle-a · 2 vCPU`). Stops become station dots with labels when ≤ 6. Needs stops, ends or a
+  fraction; a `progress` that names no stop → code.
+- **````transfer``` / ````flight``` / ````migration```** — `from: VPS`, `to: FS-A` (both required,
+  short), `progress: 62%`, `tag:` / `gate:` (a chip in the header), `departed:`, `arrives:`,
+  `remaining:`. An arc from foot to foot, drawn solid as far as the fraction, dotted beyond, the
+  plane riding it facing the direction of travel.
+- **````versus``` / ````match``` / ````scoreboard```** — `score: main 182 - 176 feature`, or `home:
+  Harbor 3` + `away: Ridge 2`, or `before: 410ms` + `after: 182ms` (the key names the side when
+  the value is bare). `status: live` (the breathing Live pill) or `final` / `done`; `event: GOAL`
+  (a chip that fades in when it changes); `clock: 72:35`. Both figures in ink: which side is ahead
+  depends on the metric, so the status or event says so.
+- **````ring``` / ````counter```** — `value: 3` (inside the ring), `max: 5` (fills the ring; reaching
+  it turns green), `time: 0:36` (the hero, labelled elapsed). Needs a value.
+- **````stages``` / ````phases``` / ````cycle```** — `stages: Install ✓, Build ✓, Test (40%),
+  Package, Publish` (`✓` done, `…` or `(40%)` active) or an unmarked list plus `current: Test` and
+  `progress: 3/4`; `remaining: 16 min`. Segmented bars with the active one part-filled (a soft
+  full fill when its share is unknown). 2–12 stages; a `current` that names no stage → code.
+
+The card is a 26rem single-hue chart sheet after amicro's Mono Charts (the rules are in
+`web/DESIGN.md`, "Round: activity cards"): one flat surface with the title as a mono eyebrow, a
+24px bold figure with its unit in mono, a tiny state chip whose dot is the only colour on the
+head, and, when the fence gave more than one reading of the same thing, a segmented toggle that
+switches the figure between them (timer `left | done`, queue `place | ahead | wait`, journey `to
+go | %`, transfer `% | left`, versus `gap | home | away`, ring `count | % | time`, stages `left |
+done`); then the chart on a recessed stage, in the state's hue with second series as the same ink
+at a lower tier: a bullet row with the label above a 12px track (timer, journey with its stops as
+markers, transfer, each pipeline stage), tall pills one per place with the reader's own in ink
+(queue), a pyramid of two labelled pills (versus), a wide beaded donut with a two-line centre
+(ring), and mono labels on the axis. Hovering a point opens a tooltip card (title, then label /
+value rows) for it: the scale or marker under a bullet, a pill's place, a bead's attempt, a side or
+a stage; hovering a pyramid pill, a stage row or a bead also swaps the head's figure for that point
+until the pointer leaves. Every reading is computed from the fence, nothing is added. The figure's
+digits roll on a re-emit, a toggle or a hover, bars and beads tween, pills rise once; nothing
+ticks, counts up or glows.
+
+Fixture: `node .shots/viz-activity.mjs [--dark] [--live [--video] [--frames [--slow]]]` renders every
+card in a real thread over Vite (`.shots/out/viz-activity*.png`); `--live` streams a second version
+of each and asserts the cards updated in place rather than stacking. `node
+.shots/viz-activity-interact.mjs [--dark]` drives the tooltips, the timer's toggle and the row and
+bead hovers that take the head over, printing the head and tooltip text at each step, at 2x
+(`.shots/out/viz-activity-ix-*.png`).
+
 ### Prose upgrades (no fence)
 
 - A list whose every item (≥ 2) is `label: NN%` or `label: a/b` → the progress block.

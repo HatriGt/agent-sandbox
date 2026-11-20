@@ -117,7 +117,10 @@ function useRolledText(text: string): string {
     const start = performance.now();
     const fmt: Parsed = { ...to, decimals: Math.max(from.decimals, to.decimals) };
     const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / ROLL_MS);
+      // Clamped below too: a frame timestamp from before the layout effect (the frame began
+      // first; far more under a slowed animation clock) made t negative and the ease-out
+      // extrapolate past the old value (11 → 6 read 19, 2 min → 1 min read 4 min).
+      const t = Math.max(0, Math.min(1, (now - start) / ROLL_MS));
       if (t >= 1) return setShown(text);
       setShown(format(fmt, from.n + (to.n - from.n) * easeOut(t)));
       raf.current = requestAnimationFrame(tick);

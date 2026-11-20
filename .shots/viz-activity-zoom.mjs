@@ -1,0 +1,17 @@
+import { chromium } from "file:///C:/Users/ak/AppData/Roaming/npm/node_modules/@playwright/mcp/node_modules/playwright/index.mjs";
+const kind = process.argv[2] ?? "transfer";
+const browser = await chromium.launch();
+const ctx = await browser.newContext({ viewport: { width: 1100, height: 2700 }, deviceScaleFactor: 2 });
+await ctx.addInitScript(() => { localStorage.setItem("asb-token", "devtoken123"); localStorage.setItem("asb-hub-howto-done", "1"); });
+const page = await ctx.newPage();
+const meta = { name: "asb-activity", boxStatus: "running", runState: "idle", task: "t", role: "cold" };
+const body = process.argv[3] ?? "title: Thread move\nfrom: VPS\nto: FS-A\nprogress: 62%\ndeparted: 09:05\narrives: in 35 s";
+const log = "```" + kind + "\n" + body + "\n```\n";
+await page.route("**/fleet.json*", (r) => r.fulfill({ json: { boxes: [meta], lifecycle: {} } }));
+await page.route("**/monitor.json*", (r) => r.fulfill({ json: { boxes: [meta], lifecycle: {} } }));
+await page.route("**/watch.json*", (r) => r.fulfill({ json: { ...meta, log } }));
+await page.route("**/watch.sse*", (r) => r.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: `event: snapshot\nid: ${log.length}\ndata: ${JSON.stringify({ meta, log, from: 0 })}\n\n` }));
+await page.goto("http://localhost:5181/dashboard/box/asb-activity", { waitUntil: "load" });
+await page.waitForTimeout(2000);
+await page.locator("[data-activity]").first().locator("xpath=ancestor::div[contains(@class,'viz-card')]").screenshot({ path: `.shots/out/viz-activity-zoom-${kind}.png` });
+await browser.close();

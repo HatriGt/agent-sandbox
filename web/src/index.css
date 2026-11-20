@@ -173,6 +173,12 @@
   --viz-ground: color-mix(in oklab, var(--foreground) 4.5%, var(--background));
   --viz-tile: var(--card);
   --viz-hairline: oklch(0 0 0 / 0.06);
+  /* Chart ink for the activity cards (components/viz/ActivityBlocks.tsx): one solid hue per state,
+     cleaner and brighter than the UI's --live/--ok/--destructive (which are tuned for text and
+     dots), after the saturated single-ink fills of amicro's Mono Charts. */
+  --viz-ink-live: oklch(0.55 0.17 262); /* cobalt: the sky/cyan variant was rejected, 2026-11-20 */
+  --viz-ink-ok: oklch(0.64 0.17 152);
+  --viz-ink-fail: oklch(0.6 0.22 27);
 
   --faint: oklch(0.555 0.012 286);
   --shade-1: oklch(0 0 0 / 0.1);
@@ -231,6 +237,9 @@
   --viz-ground: color-mix(in oklab, var(--foreground) 5%, var(--background));
   --viz-tile: color-mix(in oklab, var(--foreground) 10%, var(--background));
   --viz-hairline: oklch(1 0 0 / 0.07);
+  --viz-ink-live: oklch(0.7 0.14 262); /* cornflower on the dark ground */
+  --viz-ink-ok: oklch(0.78 0.17 152);
+  --viz-ink-fail: oklch(0.7 0.19 24);
 
   --faint: oklch(0.62 0.012 286);
   --shade-1: oklch(0 0 0 / 0.4);
@@ -1596,10 +1605,36 @@
   animation: viz-grow-x var(--dur-slow) var(--viz-ease) backwards;
   animation-delay: calc(min(var(--i, 0), 10) * var(--viz-step) + 60ms);
 }
+/* A tall pill rising from its base once (the queue's places): the same curve, an 8 ms step. */
+@keyframes viz-grow-y {
+  from {
+    scale: 1 0;
+  }
+}
+.viz-grow-y {
+  transform-origin: bottom;
+  animation: viz-grow-y var(--dur-slow) var(--viz-ease) backwards;
+  animation-delay: calc(var(--i, 0) * 8ms + 60ms);
+}
+/* A hover readout on a chart (activity cards): a tile that fades up 3px in 120 ms. */
+@keyframes viz-readout {
+  from {
+    opacity: 0;
+    translate: -50% 3px;
+    scale: 0.97;
+  }
+}
+.viz-readout {
+  animation: viz-readout 120ms var(--viz-ease) backwards;
+}
 :root[data-motion="reduced"] {
   .viz-grow-x,
+  .viz-grow-y,
   .viz-rail {
     animation: none;
+  }
+  .viz-readout {
+    animation-duration: 0.01ms;
   }
 }
 
@@ -1656,6 +1691,22 @@
     --border: var(--viz-hairline);
     background: var(--viz-ground);
     border-radius: 1rem;
+  }
+  /* The sheet (the activity cards, after amicro's Mono Charts): one flat surface in the tile tone
+     with a hairline edge and a 24px radius, no title strip in a second tone and no inset body; the
+     chart sits on a recessed stage inside it (.viz-stage). Light: white on the page, a soft lift;
+     dark: a step up from the page, the hairline is the edge. */
+  .viz-card.viz-sheet {
+    background: var(--viz-tile);
+    border-radius: 1.5rem;
+    box-shadow: 0 0 0 1px var(--viz-hairline), var(--shadow-e1);
+  }
+  .viz-stage {
+    background: color-mix(in oklab, var(--foreground) 4%, transparent);
+    border-radius: 14px;
+  }
+  .dark .viz-stage {
+    background: color-mix(in oklab, var(--background) 35%, transparent);
   }
   .surface-hover {
     transition: background-color var(--dur-fast) var(--viz-ease), box-shadow var(--dur-fast) var(--viz-ease), translate var(--dur-fast) var(--viz-ease);

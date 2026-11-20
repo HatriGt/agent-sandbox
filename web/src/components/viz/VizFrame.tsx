@@ -22,6 +22,9 @@ const SKELETON_TITLE: Record<string, string> = {
   chart: "Drawing chart", json: "Reading JSON", jsonc: "Reading JSON", stats: "Collecting metrics", timeline: "Building timeline",
   steps: "Listing steps", progress: "Measuring progress", tests: "Reading test results", log: "Reading log", flow: "Tracing flow",
   sequence: "Drawing sequence", findings: "Ranking findings", compare: "Weighing options", annotate: "Annotating code", layers: "Stacking layers",
+  timer: "Setting the clock", countdown: "Setting the clock", queue: "Finding the place in line", journey: "Plotting the route", trip: "Plotting the route", delivery: "Plotting the route",
+  transfer: "Plotting the hop", flight: "Plotting the hop", migration: "Plotting the hop", versus: "Keeping score", match: "Keeping score", scoreboard: "Keeping score",
+  ring: "Counting", counter: "Counting", stages: "Laying out stages", phases: "Laying out stages", cycle: "Laying out stages",
 };
 
 /**
@@ -167,6 +170,7 @@ export function VizFrame({
   className,
   ownsZoom,
   fullscreen = ownsZoom ? "canvas" : "flow",
+  sheet = false,
 }: {
   title?: string;
   /** Original fence text, powering both the copy action and the raw toggle. */
@@ -179,6 +183,12 @@ export function VizFrame({
   ownsZoom?: boolean;
   /** `flow` (a document: fills the sheet, scrolls) or `canvas` (a picture: centred, pan + zoom). */
   fullscreen?: VizFullscreenMode;
+  /**
+   * One flat sheet (index.css .viz-sheet) instead of the two-tone card: the title line is a quiet
+   * mono eyebrow inside the same surface, the utilities sit at its end, and the body is not inset
+   * on a tile. The activity cards use it; the chart sits on their own recessed stage.
+   */
+  sheet?: boolean;
 }) {
   const [raw, setRaw] = React.useState(false);
   // Raw ⇄ visual only cross-fades once the reader has toggled; first paint is the frame's entrance.
@@ -209,9 +219,9 @@ export function VizFrame({
     }
   };
   return (
-    <div className={cn("group/viz viz-card not-prose my-3 p-1", !filling && "viz-frame-in", className)} data-live-slot={slot ?? undefined}>
-      <div className="flex h-8 items-center gap-0.5 pr-0.5 pl-2.5">
-        <span className="text-foreground min-w-0 flex-1 truncate text-meta font-medium tabular-nums">{title ?? slotTitle}</span>
+    <div className={cn("group/viz viz-card not-prose my-3", sheet ? "viz-sheet" : "p-1", !filling && "viz-frame-in", className)} data-live-slot={slot ?? undefined}>
+      <div className={cn("flex items-center gap-0.5", sheet ? "h-10 pr-2 pl-4" : "h-8 pr-0.5 pl-2.5")}>
+        <span className={cn("min-w-0 flex-1 truncate tabular-nums", sheet ? "text-muted-foreground font-mono text-micro" : "text-foreground text-meta font-medium")}>{title ?? slotTitle}</span>
         <LiveSlotBadge />
         {actions}
         {/* Utility controls stay quiet until the card is engaged (index.css .viz-ctl). */}
@@ -237,7 +247,8 @@ export function VizFrame({
         )}
       </div>
       {/* Keyed wrapper: raw ⇄ rendered cross-fades through a 2px blur (the old view leaves at once). */}
-      <div className="viz-tile overflow-hidden rounded-xl">
+      {/* The sheet does not clip: its tooltips float past the eyebrow, and the raw view is transparent. */}
+      <div className={cn(!sheet && "viz-tile overflow-hidden rounded-xl")}>
         {raw ? (
           <div key="raw" className="viz-swap">
             <CodeBlock className="my-0 rounded-none border-0 bg-transparent">

@@ -93,6 +93,14 @@ export const AGENT_SYS_PROMPT =
   "'time | event ✓'; ```steps '1. Title ✓'; ```progress 'label: 72%'; ```kv 'key: value'; ```badges " +
   "'label: healthy|down'; ```http 'GET /path → 200 OK · 48ms'; ```deps 'pkg 1.2.3 → 2.0.0'; ```funnel " +
   "'stage: value'; ```gantt 'label | start | end'. Callouts: '> [!NOTE]'. " +
+  "SOMETHING HAPPENING RIGHT NOW (a build with minutes left, a place in a queue, a rollout, a copy " +
+  "from one host to another, a benchmark of two sides, a retry loop, a job's phases) → an activity card: " +
+  "'key: value' lines, always with 'title:' so re-emitting it later updates the same card in place. " +
+  "```timer 'status, left/elapsed, total, ends'; ```queue 'position: #12, of, wait, end'; ```journey " +
+  "'stops: a, b, c + progress: b (or 62%), remaining, departed, arrives, by'; ```transfer 'from, to, " +
+  "progress: 62%, departed, arrives, tag'; ```versus 'score: main 182 - 176 feature, status: live|final, " +
+  "event, clock'; ```ring 'value, max, time'; ```stages 'stages: Install ✓, Build (40%), Test, remaining'. " +
+  "Only state what you know — a card never counts on its own. " +
   "EXPLAINING CODE OR A PROCESS — do this unprompted, whenever you walk someone through how something " +
   "works: call chains / control flow / data flow → ```graph 'Caller -> Callee', with decisions in braces and " +
   "labelled edges ('Start -> {Has BPs?} -|yes|-> Select docs -> End'; '{Has BPs?} -|no|-> Exit'); " +

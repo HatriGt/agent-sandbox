@@ -16,6 +16,8 @@
  * behaviour (stop at the start of a new reply) honest.
  */
 
+import { activityTitle } from "./viz-activity";
+
 /** A complete fence line: three-or-more backticks/tildes plus an optional info string. */
 const FENCE_RE = /^\s{0,3}(`{3,}|~{3,})(.*)$/;
 const ATTR = (name: string) => new RegExp(`(?:^|\\s)${name}=(?:"([^"]+)"|'([^']+)'|(\\S+))`);
@@ -98,7 +100,8 @@ export function fenceName(f: Pick<Fence, "lang" | "meta" | "body" | "heading">):
   const metaTitle = attr(f.meta, "title");
   if (id) return { key: "id:" + id.toLowerCase(), title: metaTitle ?? id };
   const chartTitle = f.lang === "chart" ? f.body.match(/"title"\s*:\s*"((?:[^"\\]|\\.)+)"/)?.[1] : undefined;
-  const name = metaTitle ?? chartTitle ?? f.heading;
+  // An activity card's `title:` line names it the way a chart's JSON title does.
+  const name = metaTitle ?? chartTitle ?? activityTitle(f.lang, f.body) ?? f.heading;
   if (!name) return null;
   const key = normalizeName(name);
   return key ? { key: "t:" + key, title: name } : null;
