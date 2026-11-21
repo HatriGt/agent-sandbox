@@ -126,6 +126,11 @@ export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>,
       const view = asleep({ ...known, host: b.host ?? known.host });
       if (b.kept) view.kept = true;
       else delete view.kept;
+      // The sleep clock is this sweep's reading (a host marker or the thread row), never the memory's:
+      // the memory kept a view from a listing hours old, and a thread row's clock seeded after a
+      // restart never showed (the Fleet read "temporary" with no countdown, 2026-11-21).
+      if (b.asleepSec !== undefined) view.asleepSec = b.asleepSec;
+      else delete view.asleepSec;
       // Listed again: whatever an earlier listing said, the box is there.
       delete view.absent;
       memory.set(b.name, view);

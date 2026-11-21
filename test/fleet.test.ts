@@ -432,3 +432,13 @@ test("mergeWithMemory: a remembered box the thread row says is gone is not shown
   assert.deepEqual(out.map((b) => b.name), ["delegate-1-there"]);
   assert.ok(mem.has("delegate-1-gone"), "the memory keeps it for the host's next listing");
 });
+
+test("mergeWithMemory: the sleep clock comes from this sweep's view, not from the memory", () => {
+  const mem = new Map<string, BoxView>();
+  mem.set("delegate-1-q", { name: "delegate-1-q", host: "instabox-a", role: "session", boxStatus: "Stopped", runState: "waiting", task: "hi", asleepSec: 5 });
+  const out = mergeWithMemory([{ name: "delegate-1-q", host: "instabox-a", role: "session", boxStatus: "Stopped", runState: "waiting", asleepSec: 900 }], mem, { stale: new Set(["instabox-a"]) });
+  assert.equal(out[0]?.asleepSec, 900, "the row's clock, decorated this sweep");
+  assert.equal(out[0]?.task, "hi", "the memory's description stays");
+  const noClock = mergeWithMemory([{ name: "delegate-1-q", host: "instabox-a", role: "session", boxStatus: "Stopped", runState: "waiting" }], mem, { stale: new Set() });
+  assert.equal(noClock[0]?.asleepSec, undefined, "no reading this sweep: no stale figure");
+});
