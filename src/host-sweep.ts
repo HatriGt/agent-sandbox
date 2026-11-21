@@ -100,7 +100,11 @@ export async function sweepHosts(cfg: Config, poolOverride?: HostPool): Promise<
       const id = h.spec.id;
       if (pool.dormant(id)) {
         out.stale.push(id);
-        merge(id, h.lastBoxes, last.get(id));
+        // A paused machine runs nothing: every box remembered on it is asleep, whatever the last
+        // listing before the pause said. Served as "Running", a box on a host that paused mid-run
+        // kept box_status "running" in its thread row for as long as the host slept, and the sleep
+        // reaper (src/sleep-reaper.ts) never judged it (a trigger's box, 19 h, 2026-11-21).
+        merge(id, h.lastBoxes.map(asleepOnPausedHost), last.get(id));
         return;
       }
       try {
@@ -119,6 +123,12 @@ export async function sweepHosts(cfg: Config, poolOverride?: HostPool): Promise<
   );
   if (!out.swept.length && firstError && !hosts.some((h) => pool.dormant(h.spec.id))) throw firstError;
   return out;
+}
+
+/** A remembered box on a paused host: stopped, its live vitals gone (a frozen meter looks live). */
+export function asleepOnPausedHost(b: BoxView): BoxView {
+  if (!/^running$/i.test(b.boxStatus)) return b;
+  return { ...b, boxStatus: "Stopped", cpu: undefined, mem: undefined, memUsage: undefined, disk: undefined };
 }
 
 /** Just the boxes, for callers that used gatherMonitor across the one host. */

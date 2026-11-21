@@ -11,7 +11,7 @@ import path from "node:path";
 import { openMemoryDb } from "../src/db.ts";
 import { mergeWithMemory } from "../src/fleet.ts";
 import type { BoxView } from "../src/monitor.ts";
-import { getThread, listThreads, markThreadDeleted, noteAbsentThreads, planSync, readTranscript, syncSh, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread } from "../src/threads.ts";
+import { getThread, listThreads, markThreadDeleted, noteAbsentThreads, noteDormantThreads, planSync, readTranscript, syncSh, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread } from "../src/threads.ts";
 
 const box = (name: string, extra: Partial<BoxView> = {}): BoxView => ({ name, role: "session", boxStatus: "Running", runState: "running", task: "fix the pool", ...extra });
 
@@ -185,4 +185,19 @@ test("threads: a host that answered without the box marks the row absent (not a 
   upsertThread(db, { id: "gone", boxStatus: "running" }, now + 2);
   const back = threadViews(listThreads(db), new Set(), new Set(["freestyle-a"]), () => true);
   assert.equal(back.find((v) => v.name === "gone")?.absent, undefined);
+});
+
+test("noteDormantThreads: a row still running on a paused host is asleep, and its clock starts once", () => {
+  const db = openMemoryDb();
+  const t0 = 1_700_000_000_000;
+  upsertThread(db, { id: "mid-run", host: "instabox-b", task: "review", runState: "running", boxStatus: "running" }, t0);
+  upsertThread(db, { id: "awake-host", host: "primary", task: "x", runState: "running", boxStatus: "running" }, t0);
+  upsertThread(db, { id: "already", host: "instabox-b", task: "y", runState: "done", boxStatus: "stopped" }, t0);
+  const now = t0 + 60_000;
+  assert.deepEqual(noteDormantThreads(db, listThreads(db), (h) => h === "instabox-b", now), ["mid-run"]);
+  assert.equal(getThread(db, "mid-run")?.box_status, "stopped");
+  assert.equal(getThread(db, "mid-run")?.asleep_since, now, "the clock starts when the pause is seen");
+  assert.equal(getThread(db, "already")?.asleep_since, t0, "a row already asleep keeps its clock");
+  assert.equal(getThread(db, "awake-host")?.box_status, "running");
+  assert.deepEqual(noteDormantThreads(db, listThreads(db), (h) => h === "instabox-b", now + 1), [], "written once");
 });

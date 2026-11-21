@@ -78,6 +78,12 @@ export interface MergeOpts {
    * sleeping thread whose memory was lost, and it is listed under its name so it can be opened.
    */
   held?: (name: string) => boolean;
+  /**
+   * Did a listing already say this box is gone (the thread row's box_status "absent")? The memory's
+   * own `absent` mark is lost with a restart; the row is not. A remembered box on a stale host is
+   * shown asleep only when neither says it is gone.
+   */
+  gone?: (name: string) => boolean;
 }
 
 /** A remembered box, shown asleep: last-seen description, no live vitals (a frozen meter looks live). */
@@ -139,7 +145,7 @@ export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>,
       // box is gone (`absent` below): then the thread row speaks (threadViews), and the memory says
       // nothing. Before 2026-11-19 every thread whose box had been destroyed came back as "asleep"
       // each time its host paused, and the Sleeping list was mostly boxes that did not exist.
-      if (!known.absent) out.push(asleep(known));
+      if (!known.absent && !opts.gone?.(name)) out.push(asleep(known));
       continue;
     }
     // A box someone holds (a kept box, a claim, an owner, a live thread row) keeps its memory on its
@@ -176,7 +182,7 @@ export interface RunMemoryStore {
 }
 
 /** What one sweep answers: the boxes, and (from a host pool) which hosts were served from memory and who holds a box. */
-export type SweepAnswer = BoxView[] | { boxes: BoxView[]; stale?: readonly string[]; held?: (name: string) => boolean };
+export type SweepAnswer = BoxView[] | { boxes: BoxView[]; stale?: readonly string[]; held?: (name: string) => boolean; gone?: (name: string) => boolean };
 
 export function makeFleetReader(
   cfg: Config,
@@ -257,8 +263,9 @@ export function makeFleetReader(
         const boxes = Array.isArray(answer) ? answer : answer.boxes;
         const stale = Array.isArray(answer) ? undefined : new Set(answer.stale ?? []);
         const held = Array.isArray(answer) ? undefined : answer.held;
+        const gone = Array.isArray(answer) ? undefined : answer.gone;
         const before = new Set(memory.keys());
-        const merged = mergeWithMemory(boxes, memory, { stale, held });
+        const merged = mergeWithMemory(boxes, memory, { stale, held, gone });
         persist(boxes);
         if (opts.store) {
           for (const name of before) if (!memory.has(name)) void opts.store.forget(name).catch(() => {});

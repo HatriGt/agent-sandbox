@@ -13,7 +13,10 @@
  * Automation boxes (a run a trigger or a PR follow-up started) go as soon as their box is not
  * running: the run's result is archived on the finish edge, and the box exists only to produce it.
  * One whose box the host no longer lists at all (`absent`) has nothing left to destroy; its thread
- * row is closed. A run paused on a question is not finished and keeps the park TTL. A kept (pinned)
+ * row is closed. A run paused on a question is held to `parkTtlSec`, which the caller sets to the
+ * sleep TTL unless ask-park stops a box the moment it asks (then the park TTL, src/snapshot.ts): the
+ * owner's rule is that every temporary box goes an hour after it fell asleep, question or not, and
+ * on 2026-11-21 one sat asleep on a greeting for 14 h under the 48 h park hold. A kept (pinned)
  * thread is never touched; the teardown refuses one anyway.
  */
 import type { ThreadRow } from "./threads.js";
@@ -24,7 +27,7 @@ export interface ReapInput {
   startedBy: (id: string) => StartedBy | undefined;
   nowMs: number;
   sleepTtlSec: number;
-  /** A box parked on a question is held this long instead (src/snapshot.ts askParkTtlSec). */
+  /** How long a box parked on a question is held; the sleep TTL unless ask-park is on (src/snapshot.ts askParkTtlSec). */
   parkTtlSec: number;
 }
 

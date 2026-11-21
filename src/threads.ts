@@ -210,6 +210,22 @@ export function noteAbsentThreads(db: Db, rows: ThreadRow[], present: ReadonlySe
 }
 
 /**
+ * Threads whose row still has the box running on a host that is paused: the row records "stopped"
+ * (a paused machine runs nothing), which starts the sleep clock. After a controller restart a paused
+ * host's boxes are served from the thread table itself, so no listing ever corrects the row; before
+ * this a trigger's box sat "running" on a paused Instabox for 19 h (2026-11-21). Returns the ids written.
+ */
+export function noteDormantThreads(db: Db, rows: ThreadRow[], dormant: (host: string) => boolean, now = Date.now()): string[] {
+  const out: string[] = [];
+  for (const r of rows) {
+    if (r.deleted_at || r.box_status !== "running" || !r.host || !dormant(r.host)) continue;
+    upsertThread(db, { id: r.id, boxStatus: "stopped", boxSeenAt: now }, now);
+    out.push(r.id);
+  }
+  return out;
+}
+
+/**
  * The fleet rows for threads whose box the hosts did not list this sweep. Pure.
  *   · host in `stale` (asleep or unreachable) and no listing has said the box is gone (box_status
  *     "absent", noteAbsentThreads): the box is merely out of sight → shown asleep;

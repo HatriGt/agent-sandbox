@@ -47,7 +47,7 @@ import { createBox, claudeRootSource, teardown as msbTeardown } from "./msb.js";
 import { markClaimed } from "./claims.js";
 import { RESCUE_MAX_MB, capturedTurn, listRescues, moveSeam, pullRescue, pushRescue, readRescue, rescueBoxes, stampRescueKept, summarize, sweepRescues } from "./rescue.js";
 import { KeptBoxError } from "./msb.js";
-import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread, noteAbsentThreads } from "./threads.js";
+import { getThread, listThreads, markThreadDeleted, readTranscript, removeTranscript, syncTranscript, threadFromBox, threadRunMetas, threadViews, upsertThread, noteAbsentThreads, noteDormantThreads } from "./threads.js";
 import { closeSshMasters } from "./ssh.js";
 import { PRIMARY_HOST_ID, boxHostOf, slugify as hostSlug } from "./hosts.js";
 import { attentionHoldMs } from "./host-sleep.js";
@@ -1402,7 +1402,8 @@ const readFleet = makeFleetReader(
       const runningNow = /^running$/i.test(b.boxStatus);
       // A session box (a delegate) is launched without a claim marker: its first nap writes one, so
       // the sleep TTL covers it exactly as it covers a pool box (src/claims.ts stoppedBoxVerdict).
-      if (was === true && !runningNow && b.role !== "pool-free") void (claims.has(b.name) ? touchClaimed(hcfg(b.name), b.name) : markClaimed(hcfg(b.name), b.name)).catch(() => {});
+      // Not on a host served from memory this sweep: an SSH to a paused VM resumes it (Freestyle).
+      if (was === true && !runningNow && b.role !== "pool-free" && !stale.includes(b.host ?? PRIMARY_HOST_ID)) void (claims.has(b.name) ? touchClaimed(hcfg(b.name), b.name) : markClaimed(hcfg(b.name), b.name)).catch(() => {});
       lastSeenStatus.set(b.name, runningNow);
     }
     for (const k of [...lastSeenStatus.keys()]) if (!boxes.some((b) => b.name === k)) lastSeenStatus.delete(k);
@@ -1537,6 +1538,9 @@ const readFleet = makeFleetReader(
     // from a host that had boxes is far more likely cut short than emptied.
     const answered = new Set(swept.filter((id) => boxes.some((b) => b.host === id)));
     noteAbsentThreads(db, listThreads(db), present, answered, sweepAt);
+    // A host paused at its provider or by its own clock runs nothing: a row that still has its box
+    // running there is asleep, and its sleep clock starts (src/threads.ts noteDormantThreads).
+    noteDormantThreads(db, listThreads(db), (host) => hostPool.dormant(host), sweepAt);
     const threadRows = listThreads(db);
     const threadRow = new Map(threadRows.map((r) => [r.id, r]));
     const away = threadViews(threadRows, present, new Set(stale), (id) => copies.has(id));
@@ -1548,6 +1552,10 @@ const readFleet = makeFleetReader(
       const t = getThread(db, name);
       return t != null && t.deleted_at == null;
     };
+    // A row a listing already marked "absent" is not re-listed asleep from memory while its host
+    // sleeps: the memory's own `absent` flag dies with a restart, the row does not (an Away thread
+    // on freestyle-a read as asleep for two days, 2026-11-21).
+    const gone = (name: string): boolean => threadRow.get(name)?.box_status === "absent";
     const views = [...boxes, ...away].map((b) => ({
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),
@@ -1567,7 +1575,7 @@ const readFleet = makeFleetReader(
         ? { asleepSec: claims.get(b.name) ?? asleepSecOf(threadRow.get(b.name), sweepAt) }
         : {}),
     }));
-    return { boxes: views, stale, held };
+    return { boxes: views, stale, held, gone };
   },
   {
   decorate: (boxes) =>
@@ -4949,7 +4957,10 @@ const sleepReapTick = async (): Promise<void> => {
     const sleepTtlSec = parseDurationSec(cfg.sleepTtl);
     if (!sleepTtlSec) return;
     const now = Date.now();
-    const actions = reapVerdicts({ rows: listThreads(db), startedBy: (id) => startedByOf(db, id), nowMs: now, sleepTtlSec, parkTtlSec: askParkTtlSec() });
+    // A box parked on a question is held longer only when ask-park stops it the moment it asks
+    // (ASK_PARK=1); otherwise it fell asleep after the idle timeout like any other, and the sleep
+    // TTL is the rule for every temporary box (the owner's rule: idle → asleep → an hour → gone).
+    const actions = reapVerdicts({ rows: listThreads(db), startedBy: (id) => startedByOf(db, id), nowMs: now, sleepTtlSec, parkTtlSec: askParkEnabled() ? askParkTtlSec() : sleepTtlSec });
     for (const a of actions) {
       if (a.action === "clock") upsertThread(db, { id: a.id, boxStatus: "stopped" }, now);
     }

@@ -54,7 +54,11 @@ Think about the machine from the operator's side. After a task is delegated ther
    ten temporary boxes sat asleep on paused Instabox and Freestyle hosts, some for a day, with no
    countdown (the markers were out of reach). An automation's box (a trigger or a PR follow-up
    started the run) goes as soon as it is not running: finished, or stopped mid-run; one the host no
-   longer lists has its thread row closed. A thread whose box was destroyed
+   longer lists has its thread row closed. A paused host runs nothing: the sweep serves its remembered
+   boxes as stopped and the rows that still had a box running there start their clock at once (until
+   2026-11-21 a trigger's box sat "running" on a paused Instabox for 19 h and was never judged). A box
+   asleep on a question follows the same TTL unless ask-park is on (then `ASK_PARK_TTL`): the rule is
+   idle → asleep → an hour → gone for every temporary box. A thread whose box was destroyed
    is Away (its copy brings it back): the thread row records `absent` the first time an awake host
    lists without it, and that word holds while the host sleeps (before, every such thread came back
    as "asleep" each time its host paused). The Fleet page lists a temporary sleeper as

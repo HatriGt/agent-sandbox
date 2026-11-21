@@ -1070,3 +1070,34 @@ test("a metered host with no provider reading yet is dormant (nothing SSHes a VM
     setProviderForTest("freestyle", null);
   }
 });
+
+test("sweepHosts: a paused host's remembered boxes are served asleep, whatever the last listing said", async () => {
+  // instabox-b paused with a trigger's box listed Running (2026-11-21): served as Running from
+  // memory, the thread row kept box_status "running" for 19 h and the sleep reaper never judged it.
+  const { sweepHosts, setSweepForTest } = await import("../src/host-sweep.ts");
+  setProviderForTest("freestyle", {
+    metered: true,
+    state: async (): Promise<ProviderState> => ({ state: "paused", at: 1_000_000 }),
+    pause: async (): Promise<ProviderState> => ({ state: "paused", at: 1_000_000 }),
+    start: async (): Promise<ProviderState> => ({ state: "running", at: 1_000_000 }),
+  });
+  setSweepForTest(async () => ({ boxes: [box("live-box")], kept: new Set<string>(), claims: new Map<string, number>(), titles: {} }), 40);
+  try {
+    const pool = makeHostPool(cfg, openMemoryDb());
+    pool.upsert({ ...vmSpec, priority: -1 });
+    pool.noteSweep("fs-1", [{ ...box("mid-run", "running"), cpu: "3%" }, box("napping", "done", "session", "Stopped")]);
+    await pool.refreshProvider("fs-1");
+    assert.equal(pool.dormant("fs-1"), true);
+    const r = await sweepHosts(cfg, pool);
+    assert.deepEqual(r.stale, ["fs-1"]);
+    const mid = r.boxes.find((b) => b.name === "mid-run");
+    assert.equal(mid?.boxStatus, "Stopped", "a paused machine runs nothing");
+    assert.equal(mid?.cpu, undefined, "no live vitals on a frozen box");
+    assert.equal(mid?.runState, "running", "what the run was doing when the host paused is kept");
+    assert.equal(r.boxes.find((b) => b.name === "napping")?.boxStatus, "Stopped");
+    assert.equal(r.boxes.find((b) => b.name === "live-box")?.boxStatus, "Running");
+  } finally {
+    setSweepForTest(null);
+    registerSleepResolver(null);
+  }
+});

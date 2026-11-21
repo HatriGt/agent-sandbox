@@ -422,3 +422,13 @@ test("makeFleetReader: the boxes an awake host no longer lists are forgotten in 
   assert.deepEqual(many, [["delegate-1-fs", "delegate-2-fs", "delegate-3-fs"]], "one call, every name");
   assert.deepEqual(single, [], "not one SSH each");
 });
+
+test("mergeWithMemory: a remembered box the thread row says is gone is not shown asleep while its host sleeps", () => {
+  // After a restart the memory's own `absent` mark is gone; the row's box_status "absent" is not.
+  const mem = new Map<string, BoxView>();
+  mem.set("delegate-1-gone", { name: "delegate-1-gone", host: "freestyle-a", role: "session", boxStatus: "Stopped", runState: "idle", task: "riskdb 503" });
+  mem.set("delegate-1-there", { name: "delegate-1-there", host: "freestyle-a", role: "session", boxStatus: "Stopped", runState: "idle", task: "still on the host" });
+  const out = mergeWithMemory([], mem, { stale: new Set(["freestyle-a"]), held: () => true, gone: (n) => n === "delegate-1-gone" });
+  assert.deepEqual(out.map((b) => b.name), ["delegate-1-there"]);
+  assert.ok(mem.has("delegate-1-gone"), "the memory keeps it for the host's next listing");
+});
