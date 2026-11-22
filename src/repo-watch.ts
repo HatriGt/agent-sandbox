@@ -2,6 +2,7 @@ import type { Db } from "./db.js";
 import type { Dispatcher } from "./trigger-dispatch.js";
 import type { TriggerSpec, WatchEvent } from "./triggers.js";
 import { claimDelivery, savePayload, watchTriggers, type TriggerRow } from "./trigger-store.js";
+import { clearRoundBox, followDecision, followPr, followPreface, getFollowed, noteRoundStarted, openFollows, queueNote, roundGate, settleFollow, type FollowedPr, type FollowNote } from "./pr-follow.js";
 
 /**
  * Repo activity without a webhook: the controller polls GitHub as the automation's owner and turns
@@ -13,6 +14,10 @@ import { claimDelivery, savePayload, watchTriggers, type TriggerRow } from "./tr
  * The first poll of a source only records a baseline: nothing that happened before an automation
  * was saved is replayed. Each fire is claimed in `trigger_deliveries` with a stable key, so a
  * restart between "noticed" and "recorded" cannot fire the same change twice.
+ *
+ * An automation with `spec.follow` keeps watching each PR its runs reviewed (src/pr-follow.ts):
+ * the pulls and comment sources are read for it whether or not it fires on them, and a change on a
+ * followed PR starts a re-review round instead of a plain fire.
  */
 
 export type WatchAnswer = ({ notModified: true } | { notModified: false; data: unknown; etag?: string; login: string }) & { rate?: RateInfo };
@@ -133,6 +138,16 @@ interface GhComment {
   body?: string;
   html_url?: string;
   issue_url?: string;
+  user?: GhUser;
+}
+interface GhReviewComment {
+  id: number;
+  body?: string;
+  html_url?: string;
+  pull_request_url?: string;
+  path?: string;
+  line?: number | null;
+  in_reply_to_id?: number;
   user?: GhUser;
 }
 interface GhCommit {
@@ -283,6 +298,27 @@ export function diffComments(prev: CommentsState | undefined, items: GhComment[]
   return { state: { maxId }, hits };
 }
 
+/** Newest inline review comments on PRs → one hit per comment id above the high-water mark (a review's summary body has no repo-wide listing and is not seen). */
+export function diffReviewComments(prev: CommentsState | undefined, items: GhReviewComment[]): { state: CommentsState; hits: WatchHit[] } {
+  const maxId = Math.max(prev?.maxId ?? 0, ...items.map((c) => Number(c.id) || 0));
+  if (!prev) return { state: { maxId }, hits: [] };
+  const hits: WatchHit[] = [];
+  for (const c of [...items].sort((a, b) => Number(a.id) - Number(b.id))) {
+    if (Number(c.id) <= prev.maxId) continue;
+    const n = Number(String(c.pull_request_url ?? "").split("/").pop());
+    const prUrl = String(c.html_url ?? "").replace(/#.*$/, "");
+    const pull_request = { number: n, html_url: prUrl };
+    hits.push({
+      event: "review_comment_created",
+      key: `rcomment:${c.id}`,
+      payload: { action: "created", comment: c, pull_request, issue: { ...pull_request, pull_request }, sender: c.user },
+      ...(Number.isFinite(n) && n > 0 ? { subject: { kind: "pr", number: n } } : {}),
+      comment: { body: String(c.body ?? ""), author: String(c.user?.login ?? ""), bot: c.user?.type === "Bot" },
+    });
+  }
+  return { state: { maxId }, hits };
+}
+
 export interface PushState {
   sha: string;
 }
@@ -358,11 +394,11 @@ export function watchMatches(spec: TriggerSpec, hit: WatchHit, login: string, de
   if (hit.event === "issue_labeled" && spec.label && spec.label.toLowerCase() !== (hit.label ?? "").toLowerCase()) return { ok: false, reason: `label is not '${spec.label}'` };
   if (hit.event === "push" && hit.branch !== (spec.branch ?? defaultBranch)) return { ok: false, reason: `push to ${hit.branch}` };
   if ((hit.event === "run_failed" || hit.event === "run_succeeded") && spec.branch && hit.branch !== spec.branch) return { ok: false, reason: `run on ${hit.branch}` };
-  if (hit.event === "comment_created" && hit.comment) {
+  if ((hit.event === "comment_created" || hit.event === "review_comment_created") && hit.comment) {
     const c = hit.comment;
     if (c.bot) return { ok: false, reason: "comment is from a bot" };
     if (c.body.includes(RECEIPT_MARK)) return { ok: false, reason: "comment is a run receipt" };
-    if (spec.command) {
+    if (spec.command && hit.event === "comment_created") {
       const body = c.body.trim();
       if (!(body === spec.command || body.startsWith(spec.command + " ") || body.startsWith(spec.command + "\n"))) return { ok: false, reason: `comment does not start with ${spec.command}` };
     } else if (c.author.toLowerCase() === login.toLowerCase()) {
@@ -374,12 +410,12 @@ export function watchMatches(spec: TriggerSpec, hit: WatchHit, login: string, de
 
 /* ───────────────────────────── the poller ───────────────────────────── */
 
-type Source = "repo" | "pulls" | "issues" | "comments" | "runs" | "releases" | `push:${string}`;
+type Source = "repo" | "pulls" | "issues" | "comments" | "review_comments" | "runs" | "releases" | `push:${string}`;
 
 const SOURCE_OF: Record<WatchEvent, Exclude<Source, "repo" | `push:${string}`> | "push"> = {
   pr_opened: "pulls", pr_pushed: "pulls", pr_ready: "pulls", pr_merged: "pulls", pr_closed: "pulls", pr_reopened: "pulls",
   issue_opened: "issues", issue_closed: "issues", issue_reopened: "issues", issue_labeled: "issues",
-  comment_created: "comments", push: "push", run_failed: "runs", run_succeeded: "runs", release_published: "releases",
+  comment_created: "comments", review_comment_created: "review_comments", push: "push", run_failed: "runs", run_succeeded: "runs", release_published: "releases",
 };
 
 const PATH: Record<Exclude<Source, `push:${string}`>, string> = {
@@ -387,6 +423,7 @@ const PATH: Record<Exclude<Source, `push:${string}`>, string> = {
   pulls: "/pulls?state=all&sort=updated&direction=desc&per_page=50",
   issues: "/issues?state=all&sort=updated&direction=desc&per_page=50",
   comments: "/issues/comments?sort=created&direction=desc&per_page=50",
+  review_comments: "/pulls/comments?sort=created&direction=desc&per_page=50",
   runs: "/actions/runs?status=completed&per_page=30",
   releases: "/releases?per_page=10",
 };
@@ -471,6 +508,15 @@ export function makeRepoWatcher(d: WatchDeps) {
       if (s !== "push") sources.add(s);
     }
     if (events.has("push")) for (const t of triggers) if (t.spec.watch?.includes("push")) sources.add(`push:${t.spec.branch ?? defaultBranch}`);
+    // A following automation reads what happens to its PRs whether or not it fires on it.
+    const following = triggers.filter((t) => t.spec.follow && openFollows(d.db, t.id, repo).length > 0);
+    for (const t of following) {
+      sources.add("pulls");
+      if (t.spec.follow!.onComment) {
+        sources.add("comments");
+        sources.add("review_comments");
+      }
+    }
 
     const hits: WatchHit[] = [];
     for (const source of sources) {
@@ -484,6 +530,7 @@ export function makeRepoWatcher(d: WatchDeps) {
         source === "pulls" ? diffPulls(r.prev as PullsState | undefined, r.data as GhPr[], t)
         : source === "issues" ? diffIssues(r.prev as IssuesState | undefined, r.data as GhIssue[], t)
         : source === "comments" ? diffComments(r.prev as CommentsState | undefined, r.data as GhComment[])
+        : source === "review_comments" ? diffReviewComments(r.prev as CommentsState | undefined, r.data as GhReviewComment[])
         : source === "runs" ? diffRuns(r.prev as IdsState | undefined, (r.data as { workflow_runs?: GhRun[] }).workflow_runs ?? [], t)
         : source === "releases" ? diffReleases(r.prev as IdsState | undefined, r.data as GhRelease[], t)
         : diffPush(r.prev as PushState | undefined, branch, r.data as GhCommit[]);
@@ -491,9 +538,16 @@ export function makeRepoWatcher(d: WatchDeps) {
       hits.push(...out.hits);
     }
 
+    const fullRepo = repoInfo.full_name ?? repo;
     for (const hit of hits) {
       const payload = { ...hit.payload, repository, asb_event: hit.event };
       for (const t of triggers) {
+        // A change on a PR this automation follows is a round (or the end of the follow), never a fresh fire.
+        const followed = t.spec.follow && hit.subject?.kind === "pr" ? getFollowed(d.db, t.id, fullRepo, hit.subject.number) : undefined;
+        if (followed && followed.state === "open") {
+          await followHit(t, followed.number, hit, payload, login, fullRepo);
+          continue;
+        }
         if (!watchMatches(t.spec, hit, login, defaultBranch).ok) continue;
         if (!claimDelivery(d.db, t.id, [`watch:${hit.key}`], now())) continue;
         try {
@@ -501,10 +555,83 @@ export function makeRepoWatcher(d: WatchDeps) {
         } catch {
           /* preview storage is best-effort */
         }
-        await d.dispatcher
-          .fire(t, { payload, event: hit.event, match: { match: true, ...(hit.subject ? { subject: { ...hit.subject, repo: repoInfo.full_name ?? repo } } : {}) } })
-          .catch((e) => log(`[watch] ${t.id} ${hit.event}: ${(e as Error).message.slice(0, 200)}`));
+        const r = await d.dispatcher
+          .fire(t, { payload, event: hit.event, match: { match: true, ...(hit.subject ? { subject: { ...hit.subject, repo: fullRepo } } : {}) } })
+          .catch((e) => (log(`[watch] ${t.id} ${hit.event}: ${(e as Error).message.slice(0, 200)}`), undefined));
+        // The run that reviews an open PR puts the PR under follow; its box is round 0.
+        const pr = (payload as Record<string, unknown>).pull_request as { state?: string; head?: { sha?: string } } | undefined;
+        if (r?.outcome === "started" && r.box && t.spec.follow && hit.subject?.kind === "pr" && hit.event.startsWith("pr_") && pr?.state === "open") {
+          followPr(d.db, { triggerId: t.id, repo: fullRepo, number: hit.subject.number, headSha: String(pr.head?.sha ?? ""), box: r.box }, now());
+          log(`[follow] ${t.id} follows ${fullRepo}#${hit.subject.number} until it merges`);
+        }
       }
+    }
+    // Rounds that waited behind a running one start once its box is through.
+    for (const t of following) {
+      for (const f of openFollows(d.db, t.id, repo)) {
+        if (!f.box || f.pending.length === 0 || inFlight(f.box)) continue;
+        clearRoundBox(d.db, t.id, fullRepo, f.number, now());
+        await startRound(t, { ...f, box: null }, f.pending, login, fullRepo);
+      }
+    }
+  }
+
+  /** Is a fire's box still running? (trigger_fires closes on finish, teardown and reconcile.) */
+  const inFlight = (box: string) => !!d.db.prepare(`SELECT 1 FROM trigger_fires WHERE box = ? AND finished_at IS NULL`).get(box);
+
+  /** A change on a followed PR: settle the follow, start a round, queue it, or ignore it. */
+  async function followHit(t: TriggerRow, number: number, hit: WatchHit, payload: Record<string, unknown>, login: string, fullRepo: string): Promise<void> {
+    const follow = t.spec.follow!;
+    const dec = followDecision(follow, hit, login, t.spec.allowForks);
+    if (dec.kind === "ignore") return;
+    if (dec.kind === "settle") {
+      settleFollow(d.db, t.id, fullRepo, number, dec.state, now());
+      log(`[follow] ${t.id} ${fullRepo}#${number} ${dec.state}: follow ended`);
+      return;
+    }
+    if (!claimDelivery(d.db, t.id, [`follow:${hit.key}`], now())) return;
+    const row = getFollowed(d.db, t.id, fullRepo, number);
+    if (!row || row.state !== "open") return;
+    const running = !!row.box && inFlight(row.box);
+    if (row.box && !running) {
+      clearRoundBox(d.db, t.id, fullRepo, number, now());
+      row.box = null;
+    }
+    const gate = roundGate(follow, row, running);
+    if (!gate.ok && gate.reason === "capped") {
+      log(`[follow] ${t.id} ${fullRepo}#${number}: ${hit.event} ignored, ${follow.rounds} round${follow.rounds === 1 ? "" : "s"} already`);
+      return;
+    }
+    if (!gate.ok) {
+      queueNote(d.db, t.id, fullRepo, number, dec.note, now());
+      log(`[follow] ${t.id} ${fullRepo}#${number}: ${hit.event} queued behind the running round`);
+      return;
+    }
+    try {
+      savePayload(d.db, t.id, JSON.parse(d.redact(JSON.stringify(payload))));
+    } catch {
+      /* preview storage is best-effort */
+    }
+    await startRound(t, row, [...row.pending, dec.note], login, fullRepo, payload);
+  }
+
+  /** Fire a re-review round: the automation's template for the PR plus the follow preface. */
+  async function startRound(t: TriggerRow, row: FollowedPr, notes: FollowNote[], login: string, fullRepo: string, payload?: Record<string, unknown>): Promise<void> {
+    const follow = t.spec.follow!;
+    const prUrl = `https://github.com/${fullRepo}/pull/${row.number}`;
+    const sha = [...notes].reverse().find((n) => n.sha)?.sha;
+    const event = notes[notes.length - 1]?.event ?? "pr_pushed";
+    // A queued round carries no fresh payload; the template still needs the PR, so a minimal one stands in.
+    const p = payload ?? { action: "synchronize", pull_request: { number: row.number, html_url: prUrl, state: "open", head: { sha: sha ?? row.headSha } }, asb_event: event };
+    const r = await d.dispatcher
+      .fire(t, { payload: p, event: String(p.asb_event ?? event), match: { match: true, subject: { kind: "pr", number: row.number, repo: fullRepo } }, follow: { round: row.rounds + 1, preface: followPreface({ row, notes, follow, login, prUrl }) } })
+      .catch((e) => (log(`[follow] ${t.id} ${fullRepo}#${row.number}: ${(e as Error).message.slice(0, 200)}`), undefined));
+    if (r?.outcome === "started" && r.box) {
+      noteRoundStarted(d.db, t.id, fullRepo, row.number, r.box, sha, now());
+      log(`[follow] ${t.id} ${fullRepo}#${row.number}: round ${row.rounds + 1} of ${follow.rounds} started in ${r.box}`);
+    } else {
+      // A skipped or failed start drops the change: the next one on the PR gets another go.
+      clearRoundBox(d.db, t.id, fullRepo, row.number, now());
     }
   }
 

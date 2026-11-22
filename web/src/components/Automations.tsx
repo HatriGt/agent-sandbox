@@ -3,7 +3,7 @@ import { ArrowUpRight, CalendarClock, ChevronRight, Copy, FlaskConical, GitPullR
 import type { LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
-import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent, type WatchEvent } from "@/lib/api";
+import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent, type PrFollow, type WatchEvent } from "@/lib/api";
 import { fmtAgo, friendlyName } from "@/lib/format";
 import { useCached, writeCache } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,7 @@ const WATCH_LABEL: Record<WatchEvent, string> = {
   issue_reopened: "Issue reopened",
   issue_labeled: "Issue labelled",
   comment_created: "New comment (issue or PR)",
+  review_comment_created: "New review comment on a PR",
   push: "Push to branch",
   run_failed: "Workflow run failed",
   run_succeeded: "Workflow run succeeded",
@@ -55,7 +56,7 @@ const WATCH_LABEL: Record<WatchEvent, string> = {
 const WATCH_GROUPS: Array<{ label: string; events: WatchEvent[] }> = [
   { label: "Pull requests", events: ["pr_opened", "pr_pushed", "pr_ready", "pr_merged", "pr_closed", "pr_reopened"] },
   { label: "Issues", events: ["issue_opened", "issue_closed", "issue_reopened", "issue_labeled"] },
-  { label: "Comments", events: ["comment_created"] },
+  { label: "Comments", events: ["comment_created", "review_comment_created"] },
   { label: "Branch & CI", events: ["push", "run_failed", "run_succeeded"] },
   { label: "Releases", events: ["release_published"] },
 ];
@@ -771,6 +772,71 @@ function WatchFields({ spec, setSpec }: { spec: AutomationDraft["spec"]; setSpec
           <Switch size="sm" checked={!!spec.allowForks} onCheckedChange={(v) => setSpec({ allowForks: v })} />
         </label>
       </Collapse>
+      <Collapse open={on.some((e) => e.startsWith("pr_"))}>
+        <FollowFields follow={spec.follow} onChange={(follow) => setSpec({ follow })} />
+      </Collapse>
+    </div>
+  );
+}
+
+const FOLLOW_DEFAULT: PrFollow = { onPush: true, onComment: true, resolve: true, rounds: 5 };
+const FOLLOW_ROUNDS = [3, 5, 10] as const;
+
+/** "See the PR through": after the first review, re-review the same PR on new pushes and comments until it merges. */
+function FollowFields({ follow, onChange }: { follow: PrFollow | undefined; onChange: (f: PrFollow | undefined) => void }) {
+  const on = !!follow;
+  const f = follow ?? FOLLOW_DEFAULT;
+  const patch = (p: Partial<PrFollow>) => {
+    const next = { ...f, ...p };
+    onChange(next.onPush || next.onComment ? next : undefined);
+  };
+  return (
+    <div className="surface flex flex-col gap-3 px-3 py-3">
+      <label className="flex items-center justify-between gap-3">
+        <span className="text-meta">
+          Follow each reviewed PR until it merges
+          <span className="text-faint block text-micro">The first run reviews the PR; later changes on that PR bring the reviewer back until it merges or closes.</span>
+        </span>
+        <Switch size="sm" checked={on} onCheckedChange={(v) => onChange(v ? FOLLOW_DEFAULT : undefined)} />
+      </label>
+      <Collapse open={on}>
+        <div className="flex flex-col gap-3 pt-1">
+          <label className="flex items-center justify-between gap-3">
+            <span className="text-meta">
+              Re-review when new commits are pushed
+              <span className="text-faint block text-micro">Reads the diff since the last review, not the whole PR again.</span>
+            </span>
+            <Switch size="sm" checked={f.onPush} onCheckedChange={(v) => patch({ onPush: v })} />
+          </label>
+          <label className="flex items-center justify-between gap-3">
+            <span className="text-meta">
+              Re-review when someone else comments
+              <span className="text-faint block text-micro">Replies and review comments by people. The reviewer's own comments and bots never count.</span>
+            </span>
+            <Switch size="sm" checked={f.onComment} onCheckedChange={(v) => patch({ onComment: v })} />
+          </label>
+          <label className="flex items-center justify-between gap-3">
+            <span className="text-meta">
+              Resolve its own review threads once a push addresses them
+              <span className="text-faint block text-micro">Off = it replies "addressed" and leaves resolving to people.</span>
+            </span>
+            <Switch size="sm" checked={f.resolve} onCheckedChange={(v) => patch({ resolve: v })} />
+          </label>
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-meta">
+              Rounds per PR, at most
+              <span className="text-faint block text-micro">Each round is one run. Changes that land during a round are reviewed together in the next.</span>
+            </span>
+            <Segmented<string>
+              ariaLabel="Rounds per PR"
+              value={String(FOLLOW_ROUNDS.includes(f.rounds as (typeof FOLLOW_ROUNDS)[number]) ? f.rounds : 5)}
+              onChange={(v) => patch({ rounds: Number(v) })}
+              options={FOLLOW_ROUNDS.map((n) => ({ value: String(n), label: String(n) }))}
+            />
+          </div>
+          <p className="text-faint text-micro">It approves when nothing blocking remains and requests changes otherwise. It never merges, pushes to the branch or closes the PR.</p>
+        </div>
+      </Collapse>
     </div>
   );
 }
@@ -1133,7 +1199,7 @@ function Editor({
           <ChevronRight className="text-muted-foreground size-3.5 transition-transform group-open:rotate-90" aria-hidden />
           <span className="label text-muted-foreground">Guardrails</span>
           <span className="text-faint ml-auto truncate text-micro group-open:hidden">
-            {[d.spec.destroy === "done" ? "box destroyed when done" : d.spec.destroy === "keep" ? "box kept after the run" : "box destroyed on finish", d.quiet ? "quiet" : null, (d.spec.keepGreen ?? true) ? "keeps PRs green" : null, (d.spec.addressReviews ?? true) ? "answers reviews" : null].filter(Boolean).join(" · ")}
+            {[d.spec.destroy === "done" ? "box destroyed when done" : d.spec.destroy === "keep" ? "box kept after the run" : "box destroyed on finish", d.quiet ? "quiet" : null, (d.spec.keepGreen ?? true) ? "keeps PRs green" : null, (d.spec.addressReviews ?? true) ? "answers reviews" : null, d.kind === "watch" && d.spec.follow ? "follows PRs to merge" : null].filter(Boolean).join(" · ")}
           </span>
         </summary>
         <div className="mt-3 flex flex-col gap-3">

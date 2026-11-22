@@ -25,16 +25,16 @@ export const GITHUB_EVENTS: readonly GithubEvent[] = ["issue_labeled", "issue_co
 export type WatchEvent =
   | "pr_opened" | "pr_pushed" | "pr_ready" | "pr_merged" | "pr_closed" | "pr_reopened"
   | "issue_opened" | "issue_closed" | "issue_reopened" | "issue_labeled"
-  | "comment_created" | "push" | "run_failed" | "run_succeeded" | "release_published";
+  | "comment_created" | "review_comment_created" | "push" | "run_failed" | "run_succeeded" | "release_published";
 export const WATCH_EVENTS: readonly WatchEvent[] = [
   "pr_opened", "pr_pushed", "pr_ready", "pr_merged", "pr_closed", "pr_reopened",
   "issue_opened", "issue_closed", "issue_reopened", "issue_labeled",
-  "comment_created", "push", "run_failed", "run_succeeded", "release_published",
+  "comment_created", "review_comment_created", "push", "run_failed", "run_succeeded", "release_published",
 ];
 const WATCH_WORDS: Record<WatchEvent, string> = {
   pr_opened: "PR opened", pr_pushed: "PR pushed to", pr_ready: "PR ready for review", pr_merged: "PR merged", pr_closed: "PR closed",
   pr_reopened: "PR reopened", issue_opened: "issue opened", issue_closed: "issue closed", issue_reopened: "issue reopened",
-  issue_labeled: "issue labelled", comment_created: "new comment", push: "push", run_failed: "workflow failed",
+  issue_labeled: "issue labelled", comment_created: "new comment", review_comment_created: "new review comment", push: "push", run_failed: "workflow failed",
   run_succeeded: "workflow succeeded", release_published: "release published",
 };
 
@@ -68,6 +68,8 @@ export interface TriggerSpec {
   watch?: WatchEvent[];
   /** watch: `push` on this branch (default: the repo's default branch); run_* only on it (unset: any). */
   branch?: string;
+  /** watch: see each PR a run reviewed through to its merge (src/pr-follow.ts); unset = the first review is the last. */
+  follow?: PrFollow;
   /**
    * What happens to a run's box when it finishes: destroyed on any finish ("always", the default
    * when unset: an automation's box exists to produce its archived result and nothing more, and
@@ -79,8 +81,23 @@ export interface TriggerSpec {
   destroy?: BoxDestroy;
 }
 
+/**
+ * Following a reviewed PR until it merges: a new push or a comment by someone else starts a
+ * re-review round on the same PR; `rounds` caps them per PR; `resolve` lets the agent resolve the
+ * review threads its own earlier findings opened once a push addresses them.
+ */
+export interface PrFollow {
+  onPush: boolean;
+  onComment: boolean;
+  resolve: boolean;
+  rounds: number;
+}
+
 /** Storm cap (plan §5 "Trigger safety"): no trigger fires more than this many runs per rolling hour, whatever the source says. Every fire gets its own box; there is no per-automation run cap. */
 export const MAX_FIRES_PER_HOUR = 12;
+
+export const FOLLOW_MAX_ROUNDS = 20;
+export const FOLLOW_DEFAULT_ROUNDS = 5;
 
 export const BOX_DESTROY = ["keep", "done", "always"] as const;
 export type BoxDestroy = (typeof BOX_DESTROY)[number];
@@ -667,6 +684,18 @@ const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 const MAX_REPOS = 20;
 
 /** Normalise + validate a create/update body. Unknown fields are dropped; defaults are the safe ones. */
+/** `follow` as saved: off when neither change is followed; rounds clamped to 1..FOLLOW_MAX_ROUNDS (default FOLLOW_DEFAULT_ROUNDS). */
+export function normalizeFollow(v: unknown): PrFollow | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const f = v as Record<string, unknown>;
+  const onPush = f.onPush === true;
+  const onComment = f.onComment === true;
+  if (!onPush && !onComment) return undefined;
+  const n = Number(f.rounds);
+  const rounds = Number.isFinite(n) ? Math.min(FOLLOW_MAX_ROUNDS, Math.max(1, Math.round(n))) : FOLLOW_DEFAULT_ROUNDS;
+  return { onPush, onComment, resolve: f.resolve === true, rounds };
+}
+
 export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInput; signingSecret?: string } | { ok: false; error: string } {
   const b = (body && typeof body === "object" ? body : {}) as Record<string, any>;
   const name = typeof b.name === "string" ? b.name.trim().slice(0, 80) : "";
@@ -726,6 +755,8 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
     const command = str(s.command, 30);
     if (command) spec.command = command;
     if (s.allowForks === true) spec.allowForks = true;
+    const follow = normalizeFollow(s.follow);
+    if (follow) spec.follow = follow;
   } else if (kind === "chain") {
     if (typeof s.afterTrigger !== "string" || !s.afterTrigger) return { ok: false, error: "a chain runs after another automation — pick it" };
     spec.afterTrigger = s.afterTrigger;

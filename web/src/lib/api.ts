@@ -1489,6 +1489,7 @@ export type WatchEvent =
   | "issue_reopened"
   | "issue_labeled"
   | "comment_created"
+  | "review_comment_created"
   | "push"
   | "run_failed"
   | "run_succeeded"
@@ -1511,6 +1512,8 @@ export interface AutomationSpec {
   watch?: WatchEvent[];
   /** kind "watch": `push` branch (default = repo default branch); `run_*` filter (unset = any branch). */
   branch?: string;
+  /** kind "watch": see each reviewed PR through to its merge (re-review rounds on pushes / comments by others). */
+  follow?: PrFollow;
   afterTrigger?: string;
   on?: "done" | "any";
   carry?: "patch" | "none";
@@ -1520,12 +1523,20 @@ export interface AutomationSpec {
   cooldownMin?: number;
 }
 export type AlertPreset = "sentry" | "datadog" | "pagerduty";
+export interface PrFollow {
+  onPush: boolean;
+  onComment: boolean;
+  resolve: boolean;
+  rounds: number;
+}
 /** What a delivery was about and what its run produced (src/run-facts.ts). Fire-time fields first, finish-time ones after. */
 export interface RunFacts {
   v: 1;
   subject?: { kind: "pr" | "issue"; number: number; repo: string; url: string; title?: string; author?: string };
   alert?: { source: string; title: string; severity?: string; url?: string };
   event?: string;
+  /** Re-review round on a followed PR (1-based); unset on the first review. */
+  round?: number;
   state?: "done" | "failed" | "waiting" | "running";
   headline?: string;
   archiveId?: number;

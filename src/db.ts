@@ -540,6 +540,22 @@ const MIGRATIONS: string[] = [
   ALTER TABLE threads ADD COLUMN asleep_since INTEGER;
   UPDATE threads SET asleep_since = updated_at WHERE box_status = 'stopped' AND deleted_at IS NULL;
   `,
+  `
+  CREATE TABLE IF NOT EXISTS watch_followed_prs (
+    trigger_id TEXT NOT NULL REFERENCES triggers(id) ON DELETE CASCADE,
+    repo TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    head_sha TEXT NOT NULL DEFAULT '',
+    rounds INTEGER NOT NULL DEFAULT 0,
+    box TEXT,
+    pending_json TEXT,
+    state TEXT NOT NULL DEFAULT 'open',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (trigger_id, repo, number)
+  );
+  CREATE INDEX IF NOT EXISTS watch_followed_prs_box ON watch_followed_prs(box) WHERE box IS NOT NULL;
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

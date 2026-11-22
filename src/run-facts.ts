@@ -18,6 +18,8 @@ export interface RunFacts {
   alert?: { source: string; title: string; severity?: string; url?: string };
   /** The event name (x-github-event / watch event / preset action), when there was one. */
   event?: string;
+  /** A re-review round on a followed PR (src/pr-follow.ts), 1-based; unset on the first review. */
+  round?: number;
   /* ── filled when the run finished ── */
   state?: RunDigest["state"];
   headline?: string;

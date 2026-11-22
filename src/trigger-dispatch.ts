@@ -59,6 +59,8 @@ export interface FireContext {
   /** chain: the finished parent run. */
   parent?: { box: string; digest: RunDigest };
   manual?: boolean;
+  /** A re-review round on a followed PR (src/pr-follow.ts): the preface goes after the template. */
+  follow?: { round: number; preface: string };
 }
 
 export function makeDispatcher(d: DispatcherDeps) {
@@ -120,7 +122,7 @@ export function makeDispatcher(d: DispatcherDeps) {
     };
     const rendered = renderTemplate(t.taskTemplate, templateContext(ctx.payload, extra));
     const task =
-      rendered.text.trim() + "\n" + unattendedPreamble({ name: t.name, kind: t.kind, prOnly: true }) + (t.quiet ? "\n" + quietPreamble(rendered.text) : "");
+      rendered.text.trim() + (ctx.follow ? "\n" + ctx.follow.preface : "") + "\n" + unattendedPreamble({ name: t.name, kind: t.kind, prOnly: true }) + (t.quiet ? "\n" + quietPreamble(rendered.text) : "");
 
     let repos: StartRunInput["repos"];
     // The repo this event came from (a multi-repo automation fires once per event, in that repo).
@@ -140,6 +142,7 @@ export function makeDispatcher(d: DispatcherDeps) {
       name: t.name,
       source: t.kind,
       ...(ctx.event ? { event: ctx.event } : {}),
+      ...(ctx.follow ? { round: ctx.follow.round } : {}),
       ...(ctx.parent ? { parent: ctx.parent.box } : {}),
       ...(ctx.match?.subject && Number.isFinite(ctx.match.subject.number) ? { subject: { kind: ctx.match.subject.kind, number: ctx.match.subject.number, ...(subjectRepo ? { repo: subjectRepo } : {}) } } : {}),
     };
@@ -158,7 +161,7 @@ export function makeDispatcher(d: DispatcherDeps) {
       result = { at, outcome: "failed", reason: (e as Error).message.slice(0, 300) };
     }
     if (result.outcome !== "started") d.db.prepare(`UPDATE trigger_fires SET finished_at = ? WHERE id = ?`).run(now(), fireId);
-    markFired(d.db, t.id, result, at, subjectFacts(ctx.payload, ctx.match?.subject, subjectRepo, ctx.event));
+    markFired(d.db, t.id, result, at, { ...subjectFacts(ctx.payload, ctx.match?.subject, subjectRepo, ctx.event), ...(ctx.follow ? { round: ctx.follow.round } : {}) });
     d.audit?.(t.owner, "trigger.fire", { trigger: t.id, box: result.box, outcome: result.outcome });
     log(`[triggers] ${t.id} (${t.kind}) → ${result.outcome}${result.box ? ` ${result.box}` : ""}${result.reason ? `: ${result.reason}` : ""}`);
     return result;

@@ -14,7 +14,7 @@ export type StartedBy =
   | { kind: "mcp" }
   | { kind: "after"; parent: string }
   | { kind: "intake"; source: "email" | "slack"; from?: string }
-  | { kind: "trigger"; triggerId: string; name: string; source: TriggerKind; event?: string; subject?: { kind: "issue" | "pr"; number: number; repo?: string }; /** chain: the box this run follows. */ parent?: string }
+  | { kind: "trigger"; triggerId: string; name: string; source: TriggerKind; event?: string; subject?: { kind: "issue" | "pr"; number: number; repo?: string }; /** chain: the box this run follows. */ parent?: string; /** A re-review round on a followed PR (src/pr-follow.ts), 1-based. */ round?: number }
   /** A PR follow-up (src/pr-followups.ts): back on the PR's branch after CI failed, review feedback, or a `/agent …` command. `parent` is "" on a PR the agent did not open. */
   | { kind: "followup"; followup: "ci" | "review" | "command"; parent: string; pr: { repo: string; number: number }; attempt: number; subject: string; triggerId?: string };
 

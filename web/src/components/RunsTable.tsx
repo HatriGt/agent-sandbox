@@ -79,6 +79,7 @@ function cell(col: Col, d: AutomationDelivery, f: RunFacts | undefined): React.R
             <span className="flex min-w-0 items-center gap-2">
               <span className="text-muted-foreground tabular shrink-0 font-mono text-micro">#{f.subject.number}</span>
               <span className="truncate">{f.subject.title ?? `${f.subject.kind === "pr" ? "PR" : "Issue"} #${f.subject.number}`}</span>
+              {f.round ? <span className="text-faint shrink-0 text-micro">round {f.round}</span> : null}
               <ArrowUpRight className="text-faint size-3 shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100" aria-hidden />
             </span>,
             "text-foreground block min-w-0",
