@@ -33,6 +33,10 @@ comment quoted with its author and file). The reviewer is told to:
 4. review the delta to the first pass's standard without repeating findings already on the PR;
 5. submit a review: approve when nothing blocking remains, request changes otherwise. Never merge, push to the branch or close.
 
+When the connected account also authored the PR, GitHub refuses a formal approval from it, so the
+round posts its verdict as a review comment instead (seen on the first live proof, a PR the account
+opened itself).
+
 Every comment it posts ends with `<!-- agent-sandbox:follow -->`, so later rounds (and the
 watcher) can tell its words from the author's.
 
