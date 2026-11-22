@@ -19,11 +19,13 @@ await page.getByText(name, { exact: true }).first().click();
 await page.waitForTimeout(1200);
 const view = page.getByRole("button", { name: /^View$/ });
 if (await view.count()) { await view.first().click(); await page.waitForTimeout(1000); }
-const tile = page.getByText("Follow each reviewed PR until it merges", { exact: true }).first();
-await tile.scrollIntoViewIfNeeded();
-await page.waitForTimeout(500);
-const sheet = page.locator("[role=dialog]").first();
+const tile = page.getByText("Follow each reviewed PR until it merges").first().locator("xpath=ancestor::div[contains(@class,'surface')][1]");
+await tile.evaluate((el) => el.scrollIntoView({ block: "start" }));
+await page.waitForTimeout(800);
+// Toasts (asks, run reports) overlay the sheet's corner: hide them for the shot.
+await page.addStyleTag({ content: "[data-sonner-toaster]{display:none !important}" });
 const out = `.shots/automation-follow${dark ? "-dark" : ""}.png`;
+const sheet = page.locator("[role=dialog]").first();
 if (await sheet.count()) await sheet.screenshot({ path: out }); else await page.screenshot({ path: out });
 console.log("saved", out, page.url());
 if (errors.length) console.log("page errors:\n" + errors.join("\n"));
