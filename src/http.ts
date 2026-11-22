@@ -5117,9 +5117,12 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
         }
         // PR-only at the git layer: a pre-push hook refusing the default branch (src/pr-only.ts).
         // Fail closed: no guard, no run. The box is torn down and the fire is recorded as failed.
-        const guard = await guardOrStop(r.box, (b) => installPrOnlyGuard(cfg, b), (b) => deps.teardown(cfg, b));
+        // On the box's own host: with the primary's config every fire whose box landed on another
+        // host failed here with "sandbox not found" (every Deal Reviewer delivery, 2026-11-21/22),
+        // and the failed start left a thread row the sleep reaper had to close later.
+        const guard = await guardOrStop(r.box, (b) => installPrOnlyGuard(hcfg(b), b), (b) => destroyThread(b));
         if (!guard.ok) return guard;
-        void generateTitle(cfg, r.box, t.name).catch(() => {});
+        void generateTitle(hcfg(r.box), r.box, t.name).catch(() => {});
         return { ok: true as const, box: r.box };
       })
     );
@@ -5354,7 +5357,7 @@ registerIntakeRoutes(app, {
           detach: true,
         });
         if (!r.ok) return { ok: false as const, question: r.question };
-        void generateTitle(cfg, r.box, input.task).catch(() => {});
+        void generateTitle(hcfg(r.box), r.box, input.task).catch(() => {});
         return { ok: true as const, box: r.box };
       })
     ),
@@ -5740,7 +5743,7 @@ const delegateOnceInner = async (body0: Record<string, unknown>, principal: Prin
           /* the link is bookkeeping; the run already started */
         }
       }
-      void generateTitle(cfg, result.box, rawTask).catch(() => {});
+      void generateTitle(hcfg(result.box), result.box, rawTask).catch(() => {});
     }
     const extra = { ...(inferred.length ? { inferred } : {}), ...(harness ? { harness: { id: harness.id, name: harness.name, applied } } : {}) };
     return { status: 200, json: { ...result, ...extra } };
@@ -5831,7 +5834,7 @@ const delegateAttempts = async (body: Record<string, unknown>, principal: Princi
   for (const [k, v] of attemptJobs) if (v === job) attemptJobs.delete(k);
   if (!r.ok) return { status: 200, json: { ok: false, question: r.question } };
   const first = r.group.attempts.find((a) => a.box)!;
-  for (const a of r.group.attempts) if (a.box) void generateTitle(cfg, a.box, `${body.task} (attempt ${a.index})`).catch(() => {});
+  for (const a of r.group.attempts) if (a.box) void generateTitle(hcfg(a.box), a.box, `${body.task} (attempt ${a.index})`).catch(() => {});
   return {
     status: 200,
     json: {

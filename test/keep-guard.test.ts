@@ -35,3 +35,12 @@ test("a teardown wakes the box's host first, and the removal guard reads the kee
   const msb = fs.readFileSync(new URL("../src/msb.ts", import.meta.url), "utf8");
   assert.match(msb, /async function removalRefusal[\s\S]*?await listKeptStrict\(cfg\)\.catch\(/, "removalRefusal must use the strict reader so a gated SSH reads as unknown");
 });
+
+test("a trigger's PR-only guard is installed on the box's own host, and a failed guard closes the thread", () => {
+  // Every Deal Reviewer delivery failed "could not start" with "sandbox not found" (2026-11-21/22):
+  // the box booted on an Instabox host and the guard's exec went to the primary with `cfg`.
+  const http = fs.readFileSync(new URL("../src/http.ts", import.meta.url), "utf8");
+  assert.match(http, /guardOrStop\(r\.box, \(b\) => installPrOnlyGuard\(hcfg\(b\), b\), \(b\) => destroyThread\(b\)\)/, "the guard must run on the box's host and tear down through destroyThread");
+  assert.doesNotMatch(http, /installPrOnlyGuard\(cfg, /, "the primary's config never addresses a box");
+  assert.doesNotMatch(http, /generateTitle\(cfg, /, "the title helper asks inside the box: its host's config");
+});
