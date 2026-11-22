@@ -27,11 +27,14 @@ import datetime
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
 
-SHIM_VERSION = "2"
+SHIM_VERSION = "3"
+# The docker CLI, as a command line; MSB_DOCKER points the tests at a fake (never set on a host).
+DOCKER = shlex.split(os.environ.get("MSB_DOCKER") or "docker")
 LABEL = "agent-sandbox.msb"
 IMAGE_LABEL = "agent-sandbox.image"
 SNAP_REPO = "asb-snap"
@@ -80,7 +83,7 @@ def die(msg, code=1):
 
 def docker(args, stdin=None, input_bytes=None, check=True, quiet=False):
     """One docker CLI call; stdout captured, stderr captured (shown on failure unless quiet)."""
-    p = subprocess.run(["docker"] + args, stdin=stdin, input=input_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p = subprocess.run(DOCKER + args, stdin=stdin, input=input_bytes, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     out = p.stdout.decode("utf-8", "replace")
     err = p.stderr.decode("utf-8", "replace")
     if check and p.returncode != 0:
@@ -273,11 +276,17 @@ def cmd_run(argv):
 
 
 def copy_into(name, src, dest):
-    if not os.path.isdir(src):
-        die("copy: %s is not a directory on the host" % src)
+    if not os.path.exists(src):
+        die("copy: %s is not on the host" % src)
     info = inspect(name)
     if info is None:
         die("copy: no box named %s" % name)
+    if not os.path.isdir(src):
+        # A file (the rescue upload stages one): docker cp puts it at DEST, or inside DEST when that
+        # is an existing directory. Until shim 3 only directories were accepted, so a thread brought
+        # back onto a Docker host got an empty box under its name (2026-11-22, instabox-a).
+        docker(["cp", src, name + ":" + dest])
+        return
     exists = False
     if running(info):
         code, _, _ = docker(["exec", name, "test", "-d", dest], check=False, quiet=True)
@@ -326,7 +335,7 @@ def cmd_exec(argv):
         booted_at = time.time()
         docker(["start", name])
         booted = True
-    p = subprocess.run(["docker", "exec", "-i"] + env + [name] + command)
+    p = subprocess.run(DOCKER + ["exec", "-i"] + env + [name] + command)
     # A `start` that landed while the box was up for this command wants it to stay up.
     if booted and (wanted_since(name) or 0) < booted_at - 1:
         docker(["stop", "-t", STOP_SECONDS, name], check=False, quiet=True)
@@ -473,9 +482,12 @@ def cmd_rm(argv):
 
 
 def cmd_copy(argv):
-    if len(argv) != 2:
+    # msb's `copy -q` (quiet) and any other flag are accepted and ignored: a docker cp has no
+    # progress chatter to silence. Shim 2 read the flag as a third path and refused the whole copy.
+    paths = [a for a in argv if not a.startswith("-")]
+    if len(paths) != 2:
         die("copy: usage is copy SRC box:DEST or copy box:SRC DEST", 2)
-    a, b = argv
+    a, b = paths
     if ":" in b and not os.path.exists(b):
         name, _, dest = b.partition(":")
         copy_into(name, a, dest)
@@ -663,7 +675,7 @@ def cmd_save(argv):
     if out_path and out_path != "-":
         docker(["save", "-o", out_path] + refs)
     else:
-        p = subprocess.run(["docker", "save"] + refs, stdout=sys.stdout.buffer)
+        p = subprocess.run(DOCKER + ["save"] + refs, stdout=sys.stdout.buffer)
         sys.exit(p.returncode)
 
 

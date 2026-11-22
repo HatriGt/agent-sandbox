@@ -95,6 +95,13 @@ memory from the thread table at load, and a row whose task was never learned use
 task stored at claim time (`boxes.task_head`), so a thread is named from the controller's own
 records; the host's answer, when it comes, still wins per box and fills the row's full task.
 
+A running box with no task mark (mid-launch, before the agent writes it, or a restore that left
+the box empty) is listed under its row's task and title the same way; a claimed box with no task
+anywhere is nobody's thread yet and is counted as warm capacity rather than shown. A restore whose
+copy does not land removes the box it created, so the thread stays Away with its copy instead of
+an empty machine standing in for it (2026-11-22: the Docker shim refused the upload and the Fleet
+read "idle · No task yet" for a two-day-old thread).
+
 Two more rules landed the same evening. A later load replaces what the fleet remembered of a
 stopped box (the host's own memory, arriving once the host is awake, wins over the thread-table
 seed; a running box's live reading is never replaced). And a metered host nobody has heard from yet

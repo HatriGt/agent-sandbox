@@ -1556,25 +1556,35 @@ const readFleet = makeFleetReader(
     // sleeps: the memory's own `absent` flag dies with a restart, the row does not (an Away thread
     // on freestyle-a read as asleep for two days, 2026-11-21).
     const gone = (name: string): boolean => threadRow.get(name)?.box_status === "absent";
-    const views = [...boxes, ...away].map((b) => ({
-      ...b,
-      ...(titles[b.name] ? { title: titles[b.name] } : {}),
-      ...harnessLineOf(b.name),
-      ...workflowLineOf(b.name),
-      ...skillPicksView(b.name),
-      ...memoryReceiptView(b.name),
-      // The task and any pending question are operator/agent text too — same redaction as the log.
-      ...(b.task ? { task: redactor.redact(b.task) } : {}),
+    const views = [...boxes, ...away].map((b) => {
+      // A running box with no task mark is still the thread its row names: a box mid-launch (the
+      // mark is written when the agent starts), or one a restore left empty. The row's task and
+      // title stand in; without a task anywhere a claimed box is nobody's thread yet and is listed
+      // as warm capacity, not as "No task yet" under a machine name (seen 2026-11-22 on instabox-a).
+      const row = threadRow.get(b.name);
+      const task = b.task || row?.task || undefined;
+      const unowned = !task && b.role === "pool-claimed" && /^running$/i.test(b.boxStatus);
+      return {
+        ...b,
+        ...(unowned ? { role: "pool-free" as const } : {}),
+        ...(titles[b.name] ? { title: titles[b.name] } : !b.title && row?.title ? { title: row.title } : {}),
+        ...harnessLineOf(b.name),
+        ...workflowLineOf(b.name),
+        ...skillPicksView(b.name),
+        ...memoryReceiptView(b.name),
+        // The task and any pending question are operator/agent text too — same redaction as the log.
+        ...(task ? { task: redactor.redact(task) } : {}),
       ...(b.question ? { question: redactor.redact(b.question) } : {}),
       ...(kept.has(b.name) ? { kept: true } : {}),
       // The quiet clock the dashboard counts down is the nap's own: a wake is activity.
       ...(/^running$/i.test(b.boxStatus) && quietSinceSec(b.lastOutputAt, wokenAtOf(b.name)) !== b.lastOutputAt ? { lastOutputAt: quietSinceSec(b.lastOutputAt, wokenAtOf(b.name)) } : {}),
       // For a stopped box the claim age is (a good proxy for) how long it has been asleep; with the
       // host's markers out of reach (asleep, unreachable, a restart) the thread's own clock counts.
-      ...(!/^running$/i.test(b.boxStatus) && (claims.has(b.name) || asleepSecOf(threadRow.get(b.name), sweepAt) !== undefined)
-        ? { asleepSec: claims.get(b.name) ?? asleepSecOf(threadRow.get(b.name), sweepAt) }
+      ...(!/^running$/i.test(b.boxStatus) && (claims.has(b.name) || asleepSecOf(row, sweepAt) !== undefined)
+        ? { asleepSec: claims.get(b.name) ?? asleepSecOf(row, sweepAt) }
         : {}),
-    }));
+      };
+    });
     return { boxes: views, stale, held, gone };
   },
   {
@@ -4360,12 +4370,22 @@ const bringBackInner = async (session: string): Promise<BringBack> => {
     await createBox(runCfg, { name: session });
     onAcquired(session);
     if (hostCfg.hostId) hostPool.rememberBox(session, hostCfg.hostId);
-    // Claimed BEFORE the copy goes in, in the box and on the host: a Running pool-named box
-    // with neither /.claimed nor /.ready reads as an orphaned warm-up to the pool maintainer
-    // (its name's timestamp is hours old), and the copy takes seconds to arrive.
-    await execInBox(runCfg, session, "touch /.claimed");
-    await markClaimed(runCfg, session);
-    await pushRescue(runCfg, session, m, lostAt);
+    try {
+      // Claimed BEFORE the copy goes in, in the box and on the host: a Running pool-named box
+      // with neither /.claimed nor /.ready reads as an orphaned warm-up to the pool maintainer
+      // (its name's timestamp is hours old), and the copy takes seconds to arrive.
+      await execInBox(runCfg, session, "touch /.claimed");
+      await markClaimed(runCfg, session);
+      await pushRescue(runCfg, session, m, lostAt);
+    } catch (e) {
+      // The copy did not land: what stands under the thread's name is an empty, claimed box. Left
+      // there it is listed as the thread ("idle · No task yet" on the Fleet, 2026-11-22, when the
+      // Docker shim refused the upload) and shadows the copy on the next attempt (/wake.json finds
+      // it running and restores nothing). It goes; the thread stays Away with its copy.
+      console.error(`[rescue] ${session}: the copy did not land on ${hostCfg.hostId ?? "the primary host"}, removing the empty box: ${String((e as Error).message ?? e).slice(0, 200)}`);
+      await deps.teardown(runCfg, session, { force: true }).catch((e2) => console.error(`[rescue] ${session}: the empty box could not be removed: ${String((e2 as Error).message ?? e2).slice(0, 160)}`));
+      throw e;
+    }
     if (m.title) await saveTitle(runCfg, session, m.title).catch(() => {});
     return hostCfg.hostId;
   });

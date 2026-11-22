@@ -36,7 +36,7 @@ verb to Docker:
 | `run -d --name … -m … --cpus … --copy-dir … --from-snapshot … --max-duration …` | `docker run -d --init` of the image (or of the `asb-snap:NAME` commit for a snapshot), a 256 MB `/tmp` tmpfs, the copy-dir put in with `docker cp`, a detached watchdog that stops the container after `--max-duration` |
 | `exec -e K=V box -- cmd` | `docker exec -i`; a stopped container is started for the command and stopped again; the command's exit code is returned |
 | `ls --format json`, `status`, `metrics` | `docker ps` plus inspect, in msb's shapes (`running`/`stopped`, the metrics table with "exited" rows) |
-| `start`, `stop`, `rm --force`, `modify --memory`, `copy` | the Docker equivalents |
+| `start`, `stop`, `rm --force`, `modify --memory`, `copy` | the Docker equivalents; `copy` takes a file or a directory and ignores msb's `-q` (shim 3: before it, the rescue upload's `copy -q FILE box:DEST` was refused and a thread brought back onto this host got an empty box under its name) |
 | `snapshot create/ls/rm` | `docker commit` into the `asb-snap` repository |
 | `image inspect/ls/rm`, `load -q -t TAG`, `save` | Docker images; `load` reads a docker-format tar on stdin |
 
