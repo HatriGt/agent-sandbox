@@ -6,7 +6,15 @@
     <meta name="color-scheme" content="dark light" />
     <meta name="description" content="Delegate coding tasks to Claude Code running in isolated microVMs on your own server." />
     <link rel="icon" type="image/svg+xml" href="/dashboard/favicon.svg" />
-    <link rel="apple-touch-icon" href="/dashboard/favicon.svg" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/dashboard/icons/apple-touch-icon.png" />
+    <!-- Installable app: the manifest names the icons and start page; the service worker (/dashboard/sw.js)
+         is registered by the bundle. iOS reads its own tags instead of the manifest's display mode. -->
+    <link rel="manifest" href="/dashboard/manifest.webmanifest" />
+    <meta name="application-name" content="Agent Sandbox" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Agent Sandbox" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="theme-color" content="#18181b" />
     <title>Agent Sandbox</title>
     <script>
@@ -17,7 +25,11 @@
         var t = localStorage.getItem("asb-theme"), d = localStorage.getItem("asb-dark");
         if (!/^(light|linen|mist|black|graphite|midnight|nord|forest|dusk)$/.test(t)) t = d !== null ? (d === "true" || d === "1" ? "black" : "light") : matchMedia("(prefers-color-scheme: dark)").matches ? "black" : "light";
         document.documentElement.setAttribute("data-theme", t);
-        if (/^(black|graphite|midnight|nord|forest|dusk)$/.test(t)) document.documentElement.classList.add("dark");
+        var dark = /^(black|graphite|midnight|nord|forest|dusk)$/.test(t);
+        if (dark) document.documentElement.classList.add("dark");
+        // The installed app's title bar: the scheme's page tone now, the exact theme tone once lib/theme runs.
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute("content", dark ? "#121212" : "#fcfcfc");
       } catch (e) {}
     </script>
     <style>

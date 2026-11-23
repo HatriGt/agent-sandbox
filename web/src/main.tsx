@@ -1,3 +1,5 @@
+// First: the install prompt fires once, early, and this module is what catches it (see lib/pwa).
+import { registerServiceWorker } from "@/lib/pwa";
 import { StrictMode, Suspense, lazy, type ReactNode } from "react";
 import { lazyRetry, recoverFromStaleChunk } from "@/lib/lazy-retry";
 import { createRoot } from "react-dom/client";
@@ -21,6 +23,9 @@ import { ErrorBoundary, RouteError } from "./components/ErrorBoundary";
 window.addEventListener("vite:preloadError", (e) => {
   if (recoverFromStaleChunk()) e.preventDefault();
 });
+
+// The installed app's offline shell and bundle cache (production builds only).
+registerServiceWorker();
 
 // Resolve the motion setting onto <html data-motion> before first paint so CSS never flashes motion.
 initMotionPref();

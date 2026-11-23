@@ -13,6 +13,7 @@ Start with **[status.md](status.md)** — what is shipped, what is in flight, wh
 | [mobile-release.md](mobile-release.md) | Shipping the phone app: OTA vs APK, the Actions build, app anatomy |
 | [security.md](security.md) | Threat model, isolation boundary, what a token can do |
 | [self-hosting.md](self-hosting.md) | Running your own controller |
+| [pwa.md](pwa.md) | The console as an installable app: manifest, icons, the scoped service worker, the Install row, how to check it |
 | [hosts.md](hosts.md) | Box hosts: a pool of machines runs go to (your VPS, Freestyle accounts, Instabox machines, any machine with msb); a cloud host is built from an API key alone |
 | [saas-design.md](saas-design.md) | The multi-user design (now largely built — see status.md) |
 

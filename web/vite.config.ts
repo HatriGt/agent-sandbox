@@ -1,13 +1,36 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "node:path";
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+
+/**
+ * Ships web/sw/sw.js as dist/sw.js with its build id stamped from the bundle's own file names: a
+ * deploy that changes any bundle changes the worker, so browsers install it and drop the old shell
+ * cache; a rebuild of identical sources yields the same worker and no churn. Not a `public/` file
+ * on purpose: the dev server never serves it, so `npm run dev` runs without a worker in the way.
+ */
+function serviceWorker(): Plugin {
+  return {
+    name: "asb-service-worker",
+    apply: "build",
+    generateBundle(_opts, bundle) {
+      const template = readFileSync(path.resolve(import.meta.dirname, "sw/sw.js"), "utf8");
+      // The bundle's names and the worker's own text: a change to either is a new worker.
+      const id = createHash("sha256").update(Object.keys(bundle).sort().join("\n")).update(template).digest("hex").slice(0, 12);
+      // The quoted token only: the file's header comment mentions the placeholder by name too.
+      const source = template.replace('"__BUILD_ID__"', JSON.stringify(id));
+      this.emitFile({ type: "asset", fileName: "sw.js", source });
+    },
+  };
+}
 
 // The app is served by the same express container that serves /mcp, mounted under /dashboard.
 // A relative base keeps the asset URLs working from that subpath without an absolute host.
 export default defineConfig({
   base: "/dashboard/",
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), serviceWorker()],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "src") } },
   build: {
     outDir: "dist",

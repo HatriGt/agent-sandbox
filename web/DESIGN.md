@@ -1894,3 +1894,22 @@ differs, and what the card is now:
   package is the built website, no CLI, no registry. Their charts are recharts demos with
   hard-coded data (`.shots/amicro-src/mono/*.tsx` keeps the sources for reference); the patterns
   were ported, not the code.
+
+## Round: the console as an installed app (2026-11-22)
+
+- **Installable, not a different product.** A web manifest (`public/manifest.webmanifest`, start
+  `/dashboard/`, scope `/`, standalone) and a service worker scoped to `/dashboard/` (`sw/sw.js`,
+  stamped into `dist/sw.js` by the build) make the console a PWA. The worker never sees a data
+  route (they live at the origin root), so nothing bearer-guarded is cached; offline it draws the
+  console and its own "offline · retrying" state, never the browser's error page.
+- **One row, one button.** Account → Install: the purpose line, then either the outline
+  **Install app** button (Chromium hands the page a prompt), one sentence naming the browser's own
+  menu item (Safari, Firefox), or the meta "Running as the installed app". Ink only; no icon chip,
+  no card, no banner. The browser's own install infobar is suppressed in favour of this row.
+- **The title bar is the page.** `meta[name=theme-color]` follows the theme's page tone (set by
+  the pre-paint script per scheme, then by `applyTheme` exactly), so the installed window's frame
+  matches the paper on every one of the nine themes.
+- **Icons** are the favicon rasterised (`.shots/pwa-icons.mjs`): the rounded plate for `any`, the
+  glyph on full-bleed ink inside the 80% safe zone for `maskable` and the Apple touch icon.
+- Proof: `node .shots/pwa-probe.mjs` against a controller serving the built bundle
+  (`.shots/pwa/account-install-*.png`, `offline-*.png`). See `docs/pwa.md`.

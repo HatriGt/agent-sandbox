@@ -4,10 +4,11 @@ import { setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from 
 import { useTheme } from "@/lib/theme";
 import { ThemePicker } from "@/components/ThemePicker";
 import { Segmented } from "@/components/ui/segmented";
-import { Activity as ActivityIcon, ChevronDown, Palette, PlugZap, Shield } from "lucide-react";
+import { Activity as ActivityIcon, ChevronDown, Download, Palette, PlugZap, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BoxView } from "@/lib/api";
 import { getMe, setMe } from "@/lib/auth";
+import { promptInstall, useInstall } from "@/lib/pwa";
 import { useGo } from "@/lib/route";
 import { isVisible } from "@/lib/format";
 import { Capacity } from "@/components/Capacity";
@@ -68,6 +69,45 @@ function AppearanceSettings() {
         />
         <p className="text-muted-foreground w-full text-micro">System follows your OS &lsquo;animation effects&rsquo; setting.</p>
       </div>
+    </SettingsSection>
+  );
+}
+
+/**
+ * The console as an installed app. Chromium hands the page an install prompt we can open from a
+ * button; Safari and Firefox only install from their own menus, so there the row says where.
+ * Inside the installed app the row only confirms it.
+ */
+function InstallSettings() {
+  const { canPrompt, standalone, installed } = useInstall();
+  const [busy, setBusy] = React.useState(false);
+  const install = async () => {
+    setBusy(true);
+    try {
+      if (await promptInstall()) toast.success("Installed. Agent Sandbox is in your app list now.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <SettingsSection
+      id="install"
+      title="Install"
+      meta={standalone ? "Running as the installed app" : installed ? "Installed on this device" : undefined}
+      purpose="Open the console in its own window, with an icon on your desktop or home screen."
+    >
+      {standalone || installed ? (
+        <p className="text-muted-foreground max-w-[64ch] text-meta">Launch it from your app list or home screen; it keeps working on a poor connection and opens straight to your threads.</p>
+      ) : canPrompt ? (
+        <Button variant="outline" size="sm" onClick={install} disabled={busy}>
+          <Download />
+          Install app
+        </Button>
+      ) : (
+        <p className="text-muted-foreground max-w-[64ch] text-meta">
+          Use your browser&rsquo;s menu: <span className="text-foreground">Install Agent Sandbox</span> in Chrome and Edge, <span className="text-foreground">Add to Dock</span> in Safari, or Share &rarr; <span className="text-foreground">Add to Home Screen</span> on a phone.
+        </p>
+      )}
     </SettingsSection>
   );
 }
@@ -295,6 +335,7 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
       )}
 
       <AppearanceSettings />
+      <InstallSettings />
       <NotifySettings />
       {user && <ApiKeys />}
       {user && <Sessions />}

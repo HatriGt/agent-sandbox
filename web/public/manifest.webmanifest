@@ -1,0 +1,26 @@
+{
+  "id": "/dashboard/",
+  "name": "Agent Sandbox",
+  "short_name": "Sandbox",
+  "description": "Delegate coding tasks to Claude Code running in isolated microVMs on your own server.",
+  "start_url": "/dashboard/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fcfcfc",
+  "theme_color": "#18181b",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["developer tools", "productivity"],
+  "icons": [
+    { "src": "/dashboard/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/dashboard/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/dashboard/icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/dashboard/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "New thread", "url": "/dashboard/", "icons": [{ "src": "/dashboard/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Fleet", "url": "/dashboard/fleet", "icons": [{ "src": "/dashboard/icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Autopilot", "url": "/dashboard/autopilot", "icons": [{ "src": "/dashboard/icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

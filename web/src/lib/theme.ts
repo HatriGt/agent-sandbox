@@ -103,8 +103,11 @@ export function lastTheme(scheme: Scheme): ThemeId {
 export function applyTheme(id: ThemeId) {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
+  const theme = themeOf(id);
   root.dataset.theme = id;
-  root.classList.toggle("dark", themeOf(id).scheme === "dark");
+  root.classList.toggle("dark", theme.scheme === "dark");
+  // The installed app's title bar (and a phone's status bar) takes the page colour of the theme.
+  document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content", theme.preview.background);
 }
 
 export function setTheme(id: ThemeId) {

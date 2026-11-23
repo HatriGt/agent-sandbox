@@ -13,6 +13,16 @@ test("the SPA shell gets the app CSP; assets under /dashboard count as the shell
   assert.equal(cspKindForPath("/"), "app");
   assert.equal(cspKindForPath("/dashboard"), "app");
   assert.equal(cspKindForPath("/dashboard/assets/index-abc.js"), "app");
+  // The installable-app files ride with the shell: the worker's own CSP must allow its same-origin fetches.
+  assert.equal(cspKindForPath("/dashboard/sw.js"), "app");
+  assert.equal(cspKindForPath("/dashboard/manifest.webmanifest"), "app");
+});
+
+test("app CSP lets the service worker and the manifest load from this origin", () => {
+  const csp = cspFor("app");
+  assert.match(csp, /worker-src 'self'/);
+  // manifest-src falls back to default-src, which must stay 'self' (never 'none').
+  assert.match(csp, /default-src 'self'/);
 });
 
 test("data routes and artifact bytes are not the app shell", () => {
