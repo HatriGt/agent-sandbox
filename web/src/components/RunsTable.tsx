@@ -64,7 +64,7 @@ function cell(col: Col, d: AutomationDelivery, f: RunFacts | undefined): React.R
     case "outcome": {
       const running = d.outcome === "fired" && f && !f.state;
       const word = running ? "running" : d.outcome === "fired" ? (f?.state ?? "fired") : deliveryLine(d);
-      const tone = running ? "live" : f?.state === "failed" ? "destructive" : d.outcome === "fired" ? "ok" : d.outcome === "skipped" ? "muted" : "destructive";
+      const tone = running ? "live" : f?.state === "failed" ? "destructive" : d.outcome === "fired" ? "ok" : d.outcome === "skipped" || d.outcome === "deferred" ? "muted" : "destructive";
       return (
         <StatusDot tone={tone} pulse={!!running} className="max-w-full">
           <span className="truncate">{d.test ? `test · ${word}` : word}</span>

@@ -556,6 +556,18 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS watch_followed_prs_box ON watch_followed_prs(box) WHERE box IS NOT NULL;
   `,
+  `
+  -- Events the storm cap held back (src/trigger-dispatch.ts): the fire context, replayed oldest
+  -- first once the automation's hourly window frees. A capped event is delayed, never dropped.
+  CREATE TABLE IF NOT EXISTS trigger_deferred (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trigger_id TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    ctx_json TEXT NOT NULL,
+    log_id INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS trigger_deferred_trigger ON trigger_deferred(trigger_id, id);
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

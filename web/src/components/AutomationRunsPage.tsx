@@ -76,10 +76,12 @@ export function AutomationRunsPage({ id, onBack, onOpenBox }: { id: string; onBa
   const counts = {
     all: all.length,
     fired: all.filter((d) => d.outcome === "fired").length,
-    skipped: all.filter((d) => d.outcome === "skipped").length,
+    skipped: all.filter((d) => d.outcome === "skipped" || d.outcome === "deferred").length,
     rejected: all.filter((d) => d.outcome === "rejected" || d.outcome === "failed").length,
   };
-  const rows = all.filter((d) => (filter === "all" ? true : filter === "rejected" ? d.outcome === "rejected" || d.outcome === "failed" : d.outcome === filter));
+  const rows = all.filter((d) =>
+    filter === "all" ? true : filter === "rejected" ? d.outcome === "rejected" || d.outcome === "failed" : filter === "skipped" ? d.outcome === "skipped" || d.outcome === "deferred" : d.outcome === filter
+  );
 
   const Glyph = a ? GLYPH[a.kind] : HistoryIcon;
   const canTest = a?.kind === "webhook" && !!a.spec.preset;

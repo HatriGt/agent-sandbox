@@ -93,8 +93,16 @@ export interface PrFollow {
   rounds: number;
 }
 
-/** Storm cap (plan §5 "Trigger safety"): no trigger fires more than this many runs per rolling hour, whatever the source says. Every fire gets its own box; there is no per-automation run cap. */
-export const MAX_FIRES_PER_HOUR = 12;
+/**
+ * Storm cap (plan §5 "Trigger safety"): no trigger starts more than this many runs per rolling hour,
+ * whatever the source says. Every fire gets its own box; there is no per-automation run cap. An
+ * event that arrives over the cap waits (src/trigger-dispatch.ts) and starts once the window frees.
+ * 12 was too few for a reviewer on two busy repos with follow rounds (2026-11-23: seven PRs and
+ * four pushes in one hour hit it).
+ */
+export const MAX_FIRES_PER_HOUR = 30;
+/** How many capped events one automation may hold; beyond that they are skipped, not queued. */
+export const MAX_DEFERRED_PER_TRIGGER = 100;
 
 export const FOLLOW_MAX_ROUNDS = 20;
 export const FOLLOW_DEFAULT_ROUNDS = 5;

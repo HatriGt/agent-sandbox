@@ -22,7 +22,7 @@ import {
   MAX_FIRES_PER_HOUR,
   shouldDestroyBox,
 } from "../src/triggers.ts";
-import { claimDelivery, createTrigger, getTrigger, getTriggerById, revealSecret } from "../src/trigger-store.ts";
+import { claimDelivery, createTrigger, getTrigger, getTriggerById, listDeliveries, revealSecret, setEnabled } from "../src/trigger-store.ts";
 import { makeDispatcher } from "../src/trigger-dispatch.ts";
 import { PRE_PUSH_HOOK, refusePush } from "../src/pr-only.ts";
 import { archiveRun, ledgerTotals, listLedger } from "../src/run-archive.ts";
@@ -243,13 +243,68 @@ test("dispatcher: in-flight and storm counts survive a controller restart; recon
   // Storm cap counts persisted attempts: finish each run and keep firing until the cap bites.
   const d4 = mk();
   let last = "";
-  for (let k = 0; k < 20; k++) {
+  for (let k = 0; k < MAX_FIRES_PER_HOUR + 5; k++) {
     for (const b of [...live]) await d4.onRunFinished(b, digest({ box: b }), undefined);
     d4.forget("x");
     last = (await d4.fire(row, { manual: true })).outcome;
     t += 1000;
   }
   assert.equal(last, "skipped", "storm cap holds across dispatcher instances");
+});
+
+test("dispatcher: an event over the storm cap waits and starts when the window frees; Run now is told no; a paused automation drops its queue", async () => {
+  const db = openMemoryDb();
+  const n = normalizeTrigger({ name: "Review", kind: "watch", repo: "o/r", taskTemplate: "Review #{{pr.number}}", spec: { watch: ["pr_opened"] } });
+  assert.ok(n.ok);
+  if (!n.ok) return;
+  const { row } = createTrigger(db, box, "u1", n.trigger);
+  let t = 1_000_000_000_000;
+  let i = 0;
+  const started: Array<{ event?: string; n?: number }> = [];
+  const hooked: string[] = [];
+  const d = makeDispatcher({
+    db,
+    log: () => {},
+    now: () => t,
+    startRun: async () => ({ ok: true, box: `box-${++i}` }),
+  });
+  d.onFire((_t, ctx, r) => hooked.push(`${ctx.event}#${ctx.match?.subject?.number}:${r.outcome}`));
+  const ev = (k: number) => ({ payload: { pull_request: { number: k, title: `PR ${k}`, user: { login: "bob" }, state: "open" }, repository: { full_name: "o/r" } }, event: "pr_opened", match: { match: true as const, subject: { kind: "pr" as const, number: k, repo: "o/r" } } });
+  for (let k = 1; k <= MAX_FIRES_PER_HOUR; k++) {
+    assert.equal((await d.fire(row, ev(k))).outcome, "started");
+    t += 1000;
+  }
+  // Over the cap: the event waits (its row names the PR), a manual run is refused outright.
+  const held = await d.fire(row, ev(99));
+  assert.equal(held.outcome, "deferred");
+  const waiting = listDeliveries(db, "u1", row.id)[0];
+  assert.deepEqual([waiting.outcome, waiting.reason, waiting.facts?.subject?.number, waiting.facts?.subject?.title], ["deferred", "limit", 99, "PR 99"]);
+  assert.equal((await d.fire(row, { manual: true })).outcome, "skipped");
+  assert.equal((await d.fire(row, ev(100))).outcome, "deferred");
+  assert.equal(hooked.filter((h) => h.startsWith("pr_opened#99")).length, 0, "a held event has not fired yet");
+  // Ticks inside the window change nothing; after it, the held events start oldest first.
+  await d.tick();
+  assert.equal(i, MAX_FIRES_PER_HOUR);
+  t += 3600_000;
+  await d.tick();
+  assert.equal(i, MAX_FIRES_PER_HOUR + 2, "both held events started");
+  assert.deepEqual(hooked.filter((h) => /#(99|100):/.test(h)), ["pr_opened#99:started", "pr_opened#100:started"]);
+  const log = listDeliveries(db, "u1", row.id);
+  assert.equal(log.filter((e) => e.outcome === "deferred").length, 0, "the waiting rows were replaced by the fires");
+  assert.deepEqual(log.slice(0, 2).map((e) => [e.outcome, e.facts?.subject?.number]), [["fired", 100], ["fired", 99]]);
+  started.length = 0;
+  // Pausing the automation drops what it still holds; the rows explain why.
+  t += 1000;
+  for (let k = 0; k < MAX_FIRES_PER_HOUR; k++) {
+    await d.fire(row, ev(200 + k));
+    t += 1000;
+  }
+  assert.equal((await d.fire(row, ev(300))).outcome, "deferred");
+  setEnabled(db, "u1", row.id, false);
+  await d.tick();
+  const dropped = listDeliveries(db, "u1", row.id)[0];
+  assert.deepEqual([dropped.outcome, dropped.facts?.subject?.number], ["skipped", 300]);
+  assert.match(dropped.detail ?? "", /paused/);
 });
 
 test("box policy: destroy only finished runs, per the automation's setting; normalize keeps it", async () => {

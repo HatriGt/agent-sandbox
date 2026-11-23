@@ -2,7 +2,7 @@ import type { Db } from "./db.js";
 import type { Dispatcher } from "./trigger-dispatch.js";
 import type { TriggerSpec, WatchEvent } from "./triggers.js";
 import { claimDelivery, savePayload, watchTriggers, type TriggerRow } from "./trigger-store.js";
-import { clearRoundBox, followDecision, followPr, followPreface, getFollowed, noteRoundStarted, openFollows, queueNote, roundGate, settleFollow, type FollowedPr, type FollowNote } from "./pr-follow.js";
+import { clearRound, clearRoundBox, followDecision, followPr, followPreface, getFollowed, noteRoundStarted, openFollows, queueNote, roundGate, settleFollow, type FollowedPr, type FollowNote } from "./pr-follow.js";
 
 /**
  * Repo activity without a webhook: the controller polls GitHub as the automation's owner and turns
@@ -87,7 +87,7 @@ export function backoffUntil(rate: RateInfo | undefined, status: number | undefi
 
 export interface WatchDeps {
   db: Db;
-  dispatcher: Pick<Dispatcher, "fire">;
+  dispatcher: Pick<Dispatcher, "fire" | "admits" | "onFire">;
   get: WatchGet;
   redact(s: string): string;
   log?(m: string): void;
@@ -555,26 +555,34 @@ export function makeRepoWatcher(d: WatchDeps) {
         } catch {
           /* preview storage is best-effort */
         }
-        const r = await d.dispatcher
+        // The follow registration happens in the dispatcher's after-fire hook (below), so a review the
+        // storm cap deferred registers its PR when it finally starts.
+        await d.dispatcher
           .fire(t, { payload, event: hit.event, match: { match: true, ...(hit.subject ? { subject: { ...hit.subject, repo: fullRepo } } : {}) } })
-          .catch((e) => (log(`[watch] ${t.id} ${hit.event}: ${(e as Error).message.slice(0, 200)}`), undefined));
-        // The run that reviews an open PR puts the PR under follow; its box is round 0.
-        const pr = (payload as Record<string, unknown>).pull_request as { state?: string; head?: { sha?: string } } | undefined;
-        if (r?.outcome === "started" && r.box && t.spec.follow && hit.subject?.kind === "pr" && hit.event.startsWith("pr_") && pr?.state === "open") {
-          followPr(d.db, { triggerId: t.id, repo: fullRepo, number: hit.subject.number, headSha: String(pr.head?.sha ?? ""), box: r.box }, now());
-          log(`[follow] ${t.id} follows ${fullRepo}#${hit.subject.number} until it merges`);
-        }
+          .catch((e) => log(`[watch] ${t.id} ${hit.event}: ${(e as Error).message.slice(0, 200)}`));
       }
     }
-    // Rounds that waited behind a running one start once its box is through.
+    // Rounds that waited (behind a running one, or for the storm cap) start once the way is clear.
     for (const t of following) {
       for (const f of openFollows(d.db, t.id, repo)) {
-        if (!f.box || f.pending.length === 0 || inFlight(f.box)) continue;
-        clearRoundBox(d.db, t.id, fullRepo, f.number, now());
+        if (f.pending.length === 0 || (f.box && inFlight(f.box))) continue;
+        if (!d.dispatcher.admits(t).ok) continue;
+        if (f.box) clearRoundBox(d.db, t.id, fullRepo, f.number, now());
         await startRound(t, { ...f, box: null }, f.pending, login, fullRepo);
       }
     }
   }
+
+  // The run that reviews an open PR puts the PR under follow; its box is round 0. Rounds (ctx.follow)
+  // do their own bookkeeping in startRound.
+  d.dispatcher.onFire((t, ctx, r) => {
+    const subj = ctx.match?.subject;
+    if (r.outcome !== "started" || !r.box || !t.spec.follow || ctx.follow || !subj?.repo || subj.kind !== "pr" || !ctx.event?.startsWith("pr_")) return;
+    const pr = (ctx.payload as Record<string, unknown> | undefined)?.pull_request as { state?: string; head?: { sha?: string } } | undefined;
+    if (pr?.state !== "open") return;
+    followPr(d.db, { triggerId: t.id, repo: subj.repo, number: subj.number, headSha: String(pr.head?.sha ?? ""), box: r.box }, now());
+    log(`[follow] ${t.id} follows ${subj.repo}#${subj.number} until it merges`);
+  });
 
   /** Is a fire's box still running? (trigger_fires closes on finish, teardown and reconcile.) */
   const inFlight = (box: string) => !!d.db.prepare(`SELECT 1 FROM trigger_fires WHERE box = ? AND finished_at IS NULL`).get(box);
@@ -607,6 +615,14 @@ export function makeRepoWatcher(d: WatchDeps) {
       log(`[follow] ${t.id} ${fullRepo}#${number}: ${hit.event} queued behind the running round`);
       return;
     }
+    // Over the storm cap the change waits as a note (changes meanwhile join it) and the end of a
+    // later poll starts the round once the automation's window frees.
+    const adm = d.dispatcher.admits(t);
+    if (!adm.ok) {
+      queueNote(d.db, t.id, fullRepo, number, dec.note, now());
+      log(`[follow] ${t.id} ${fullRepo}#${number}: ${hit.event} waits (${adm.reason})`);
+      return;
+    }
     try {
       savePayload(d.db, t.id, JSON.parse(d.redact(JSON.stringify(payload))));
     } catch {
@@ -629,9 +645,13 @@ export function makeRepoWatcher(d: WatchDeps) {
     if (r?.outcome === "started" && r.box) {
       noteRoundStarted(d.db, t.id, fullRepo, row.number, r.box, sha, now());
       log(`[follow] ${t.id} ${fullRepo}#${row.number}: round ${row.rounds + 1} of ${follow.rounds} started in ${r.box}`);
-    } else {
-      // A skipped or failed start drops the change: the next one on the PR gets another go.
+    } else if (r?.outcome === "skipped" && r.reason?.startsWith("storm cap")) {
+      // Lost the slot to an event that got there first: the notes stay queued for a later poll.
+      for (const n of notes) queueNote(d.db, t.id, fullRepo, row.number, n, now());
       clearRoundBox(d.db, t.id, fullRepo, row.number, now());
+    } else {
+      // A failed start drops the change: the next one on the PR gets another go.
+      clearRound(d.db, t.id, fullRepo, row.number, now());
     }
   }
 

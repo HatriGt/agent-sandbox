@@ -16,7 +16,8 @@ export type TriggerScope = "automation" | "scheduled";
 
 export interface TriggerResult {
   at: number;
-  outcome: "started" | "skipped" | "failed";
+  /** deferred: the storm cap held the event; it waits in trigger_deferred and starts when the window frees. */
+  outcome: "started" | "skipped" | "failed" | "deferred";
   box?: string;
   reason?: string;
   /** Filled in when the started run finishes (the receipt chip on the row). */
@@ -159,6 +160,7 @@ export function deleteTrigger(db: Db, owner: string, id: string): boolean {
   if (n) {
     db.prepare(`DELETE FROM trigger_deliveries WHERE trigger_id = ?`).run(id);
     db.prepare(`DELETE FROM trigger_delivery_log WHERE trigger_id = ?`).run(id);
+    db.prepare(`DELETE FROM trigger_deferred WHERE trigger_id = ?`).run(id);
   }
   return n > 0;
 }
@@ -217,14 +219,65 @@ export function markFired(db: Db, id: string, result: TriggerResult, now = Date.
   logFromResult(db, id, result, facts);
 }
 
-/** Record a skip without touching last_fired (a skip is not a fire), but DO advance a schedule. */
-export function markSkipped(db: Db, id: string, result: TriggerResult, now = Date.now()): void {
+/**
+ * Record a skip (or a deferral) without touching last_fired (neither is a fire), but DO advance a
+ * schedule. The facts name the PR / issue the held event was about, so the runs page shows what
+ * was held back rather than only why. Answers the delivery log row's id.
+ */
+export function markSkipped(db: Db, id: string, result: TriggerResult, now = Date.now(), facts?: Partial<RunFacts>): number | undefined {
   const t = db.prepare(`SELECT kind, spec_json, enabled FROM triggers WHERE id = ?`).get(id) as { kind: TriggerKind; spec_json: string; enabled: number } | undefined;
-  if (!t) return;
+  if (!t) return undefined;
   const spec = JSON.parse(t.spec_json) as TriggerSpec;
   const next = spec.at ? (t.enabled ? now + ONCE_RETRY_MS : null) : computeNextFire({ kind: t.kind, spec, enabled: !!t.enabled }, now);
   db.prepare(`UPDATE triggers SET next_fire = ?, last_result_json = ? WHERE id = ?`).run(next, JSON.stringify(result), id);
-  logFromResult(db, id, result);
+  return logFromResult(db, id, result, facts);
+}
+
+/* ───────────────────────────── deferred fires (storm cap) ───────────────────────────── */
+
+export interface DeferredFire {
+  id: number;
+  triggerId: string;
+  at: number;
+  /** The FireContext the dispatcher was given, as JSON (payload, event, match, follow, parent). */
+  ctx: unknown;
+  /** The "deferred" delivery log row, removed when the event finally fires. */
+  logId?: number;
+}
+
+export function countDeferred(db: Db, triggerId: string): number {
+  return (db.prepare(`SELECT COUNT(*) AS n FROM trigger_deferred WHERE trigger_id = ?`).get(triggerId) as { n: number }).n;
+}
+
+export function enqueueDeferred(db: Db, triggerId: string, ctx: unknown, at: number, logId?: number): number {
+  return Number(db.prepare(`INSERT INTO trigger_deferred (trigger_id, at, ctx_json, log_id) VALUES (?, ?, ?, ?)`).run(triggerId, at, JSON.stringify(ctx), logId ?? null).lastInsertRowid);
+}
+
+/** Every automation with something waiting, each with its oldest first. */
+export function listDeferred(db: Db): Map<string, DeferredFire[]> {
+  const out = new Map<string, DeferredFire[]>();
+  for (const r of db.prepare(`SELECT id, trigger_id, at, ctx_json, log_id FROM trigger_deferred ORDER BY trigger_id, id`).all() as Array<Record<string, any>>) {
+    const f: DeferredFire = { id: Number(r.id), triggerId: String(r.trigger_id), at: Number(r.at), ctx: parse<unknown>(r.ctx_json, {}), ...(r.log_id ? { logId: Number(r.log_id) } : {}) };
+    const list = out.get(f.triggerId) ?? [];
+    list.push(f);
+    out.set(f.triggerId, list);
+  }
+  return out;
+}
+
+/** Take a deferred event off the queue; its "waiting" log row goes with it (the fire writes its own). */
+export function takeDeferred(db: Db, f: DeferredFire): void {
+  db.prepare(`DELETE FROM trigger_deferred WHERE id = ?`).run(f.id);
+  if (f.logId) db.prepare(`DELETE FROM trigger_delivery_log WHERE id = ?`).run(f.logId);
+}
+
+/** Drop every deferred event of an automation that is gone or paused; their log rows turn into skips. */
+export function dropDeferred(db: Db, triggerId: string, detail: string): number {
+  const rows = db.prepare(`SELECT id, log_id FROM trigger_deferred WHERE trigger_id = ?`).all(triggerId) as Array<{ id: number; log_id: number | null }>;
+  const upd = db.prepare(`UPDATE trigger_delivery_log SET outcome = 'skipped', detail = ? WHERE id = ?`);
+  for (const r of rows) if (r.log_id) upd.run(detail.slice(0, 300), r.log_id);
+  db.prepare(`DELETE FROM trigger_deferred WHERE trigger_id = ?`).run(triggerId);
+  return rows.length;
 }
 
 export function markFinished(db: Db, id: string, box: string, finished: NonNullable<TriggerResult["finished"]>): void {
@@ -327,9 +380,9 @@ export function quietCounts(db: Db, triggerId: string): QuietCounts {
 }
 
 /** Every dispatcher outcome (webhook, schedule, chain, run-now) lands in the delivery log. */
-function logFromResult(db: Db, id: string, result: TriggerResult, facts?: Partial<RunFacts>): void {
+function logFromResult(db: Db, id: string, result: TriggerResult, facts?: Partial<RunFacts>): number {
   const reason = reasonOf(result);
-  logDelivery(db, id, {
+  return logDelivery(db, id, {
     at: result.at,
     outcome: result.outcome === "started" ? "fired" : result.outcome,
     ...(reason ? { reason } : {}),
@@ -349,7 +402,8 @@ export function advanceNextFire(db: Db, id: string, now = Date.now()): void {
 
 /* ───────────────────────────── delivery log (bet 4) ───────────────────────────── */
 
-export type DeliveryOutcome = "fired" | "skipped" | "rejected" | "failed";
+/** deferred: held by the storm cap; the row is replaced by the fire's own once the event starts. */
+export type DeliveryOutcome = "fired" | "skipped" | "rejected" | "failed" | "deferred";
 /** Why a delivery didn't fire, in one word the UI can badge. */
 export type DeliveryReason = "cooldown" | "disabled" | "limit" | "dedupe" | "ignored" | "signature" | "payload" | "error" | "sender" | "asked";
 
@@ -421,7 +475,7 @@ export function reasonOf(result: TriggerResult): DeliveryReason | undefined {
   if (result.outcome === "failed") return "error";
   const r = result.reason ?? "";
   if (r === "disabled") return "disabled";
-  if (/^storm cap/.test(r)) return "limit";
+  if (result.outcome === "deferred" || /^storm cap/.test(r)) return "limit";
   return "ignored";
 }
 

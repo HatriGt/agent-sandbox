@@ -1553,7 +1553,8 @@ export interface RunFacts {
 export interface AutomationDelivery {
   id: number;
   at: number;
-  outcome: "fired" | "skipped" | "rejected" | "failed";
+  /** deferred: held by the storm cap; it starts when the automation's hourly window frees. */
+  outcome: "fired" | "skipped" | "rejected" | "failed" | "deferred";
   reason?: "cooldown" | "disabled" | "limit" | "dedupe" | "ignored" | "signature" | "payload" | "error" | "sender" | "asked";
   detail?: string;
   box?: string;

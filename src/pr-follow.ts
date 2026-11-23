@@ -126,6 +126,11 @@ export function queueNote(db: Db, triggerId: string, repo: string, number: numbe
   db.prepare(`UPDATE watch_followed_prs SET pending_json = ?, updated_at = ? WHERE trigger_id = ? AND repo = ? AND number = ?`).run(JSON.stringify(pending), now, triggerId, keyOf(repo), number);
 }
 
+/** A round that could not start drops the changes it was for: the next one on the PR gets another go. */
+export function clearRound(db: Db, triggerId: string, repo: string, number: number, now = Date.now()): void {
+  db.prepare(`UPDATE watch_followed_prs SET box = NULL, pending_json = NULL, updated_at = ? WHERE trigger_id = ? AND repo = ? AND number = ?`).run(now, triggerId, keyOf(repo), number);
+}
+
 /** The running round's box finished (or vanished): the next change starts a new round. */
 export function clearRoundBox(db: Db, triggerId: string, repo: string, number: number, now = Date.now()): void {
   db.prepare(`UPDATE watch_followed_prs SET box = NULL, updated_at = ? WHERE trigger_id = ? AND repo = ? AND number = ?`).run(now, triggerId, keyOf(repo), number);

@@ -134,9 +134,10 @@ const REASON_LABEL: Record<NonNullable<AutomationDelivery["reason"]>, string> = 
   asked: "needs an answer",
 };
 
-/** "fired → box-1" / "skipped · cooldown" / "rejected · bad signature". */
+/** "fired → box-1" / "skipped · cooldown" / "rejected · bad signature" / "waiting · limit reached". */
 export function deliveryLine(d: AutomationDelivery): string {
-  const head = d.outcome === "fired" ? `fired${d.box ? ` → ${d.box}` : ""}` : `${d.outcome === "failed" ? "could not start" : d.outcome}${d.reason ? ` · ${REASON_LABEL[d.reason]}` : ""}`;
+  const word = d.outcome === "failed" ? "could not start" : d.outcome === "deferred" ? "waiting" : d.outcome;
+  const head = d.outcome === "fired" ? `fired${d.box ? ` → ${d.box}` : ""}` : `${word}${d.reason ? ` · ${REASON_LABEL[d.reason]}` : ""}`;
   return d.test ? `test · ${head}` : head;
 }
 /** "checked 12× · 1 report" — a quiet automation's runs that found nothing vs those that reported. */
@@ -148,7 +149,7 @@ function randomToken(): string {
   crypto.getRandomValues(b);
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 }
-export const deliveryTone = (d: AutomationDelivery) => (d.outcome === "fired" ? "text-ok" : d.outcome === "skipped" ? "text-muted-foreground" : "text-destructive");
+export const deliveryTone = (d: AutomationDelivery) => (d.outcome === "fired" ? "text-ok" : d.outcome === "skipped" || d.outcome === "deferred" ? "text-muted-foreground" : "text-destructive");
 
 function blank(kind: AutomationKind = "schedule"): AutomationDraft {
   return {
@@ -426,7 +427,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
               <RecipeGallery recipes={RECIPES} onPick={pickRecipe} />
               <p className="text-muted-foreground flex items-start gap-2 text-micro">
                 <ShieldCheck className="mt-px size-3.5 shrink-0" aria-hidden />
-                One run at a time by default, PR-only, and a storm cap of 12 fires an hour. Schedules run in your own timezone.
+                PR-only, and a storm cap of 30 starts an hour: anything over it waits its turn. Schedules run in your own timezone.
               </p>
             </div>
           ) : (

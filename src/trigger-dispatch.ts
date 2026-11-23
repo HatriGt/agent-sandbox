@@ -5,7 +5,9 @@ import type { TraceEvent } from "./trace.js";
 import { resultFacts, subjectFacts } from "./run-facts.js";
 import {
   admit,
+  MAX_DEFERRED_PER_TRIGGER,
   formatReceiptComment,
+  type Admission,
   shouldDestroyBox,
   quietPreamble,
   renderTemplate,
@@ -14,7 +16,8 @@ import {
   type GithubMatch,
 } from "./triggers.js";
 import {
-  advanceNextFire, chainsAfter, dueSchedules, getTriggerById, markDeliveryFinished, markDeliveryReceipt, markFinished, markFired, markSkipped, type TriggerResult, type TriggerRow,
+  advanceNextFire, chainsAfter, countDeferred, dropDeferred, dueSchedules, enqueueDeferred, getTriggerById, listDeferred, markDeliveryFinished, markDeliveryReceipt, markFinished, markFired, markSkipped, takeDeferred,
+  type TriggerResult, type TriggerRow,
 } from "./trigger-store.js";
 
 /**
@@ -63,6 +66,9 @@ export interface FireContext {
   follow?: { round: number; preface: string };
 }
 
+/** Runs after every fire that passed admission, immediate or deferred (src/repo-watch.ts registers the PRs it follows here). */
+export type AfterFire = (t: TriggerRow, ctx: FireContext, result: TriggerResult) => void;
+
 export function makeDispatcher(d: DispatcherDeps) {
   const now = () => (d.now ? d.now() : Date.now());
   const log = (m: string) => (d.log ? d.log(m) : console.error(m));
@@ -75,6 +81,7 @@ export function makeDispatcher(d: DispatcherDeps) {
   d.db.prepare(`UPDATE trigger_fires SET finished_at = ? WHERE box IS NULL AND finished_at IS NULL`).run(now());
   let ticking = false;
   let lastReconcile = -Infinity;
+  const afterFire: AfterFire[] = [];
 
   const activeCount = (id: string) =>
     (d.db.prepare(`SELECT COUNT(*) AS n FROM trigger_fires WHERE trigger_id = ? AND finished_at IS NULL`).get(id) as { n: number }).n;
@@ -101,15 +108,31 @@ export function makeDispatcher(d: DispatcherDeps) {
     d.db.prepare(`DELETE FROM trigger_fires WHERE finished_at IS NOT NULL AND at < ?`).run(now() - 7 * 86_400_000);
   }
 
+  /** Would a fire start right now? Pure: no row, no log (the watcher asks before it starts a follow round). */
+  const admits = (t: TriggerRow, manual = false): Admission => admit({ enabled: manual ? true : t.enabled }, recentFires(t.id, now()), now());
+
   async function fire(t: TriggerRow, ctx: FireContext = {}): Promise<TriggerResult> {
     const at = now();
-    const recent = recentFires(t.id, at);
     // A manual "Run now" still respects the storm cap, but not the enabled switch: testing a paused
     // automation is exactly what the button is for. Runs already going never block a new one.
-    const adm = admit({ enabled: ctx.manual ? true : t.enabled }, recent, at);
+    const adm = admits(t, ctx.manual);
     if (!adm.ok) {
+      const facts = subjectFacts(ctx.payload, ctx.match?.subject, ctx.match?.subject?.repo ?? (t.repos?.length === 1 ? t.repos[0] : undefined), ctx.event);
+      // An event the storm cap holds back waits its turn rather than vanishing: a PR opened during a
+      // busy hour still gets its review, later. Someone pressing "Run now" gets an answer instead,
+      // a follow round waits in the watcher with its notes (so pushes meanwhile merge into one
+      // round), and a schedule's next slot is its retry.
+      const capped = adm.reason.startsWith("storm cap");
+      if (capped && !ctx.manual && !ctx.follow && (ctx.event || ctx.parent) && countDeferred(d.db, t.id) < MAX_DEFERRED_PER_TRIGGER) {
+        const r: TriggerResult = { at, outcome: "deferred", reason: `${adm.reason}; waits for the window to free` };
+        const logId = markSkipped(d.db, t.id, r, at, facts);
+        enqueueDeferred(d.db, t.id, ctx, at, logId);
+        d.audit?.(t.owner, "trigger.defer", { trigger: t.id, outcome: adm.reason });
+        log(`[triggers] ${t.id} deferred: ${adm.reason}`);
+        return r;
+      }
       const r: TriggerResult = { at, outcome: "skipped", reason: adm.reason };
-      markSkipped(d.db, t.id, r, at);
+      markSkipped(d.db, t.id, r, at, facts);
       d.audit?.(t.owner, "trigger.skip", { trigger: t.id, outcome: adm.reason });
       log(`[triggers] ${t.id} skipped: ${adm.reason}`);
       return r;
@@ -164,7 +187,41 @@ export function makeDispatcher(d: DispatcherDeps) {
     markFired(d.db, t.id, result, at, { ...subjectFacts(ctx.payload, ctx.match?.subject, subjectRepo, ctx.event), ...(ctx.follow ? { round: ctx.follow.round } : {}) });
     d.audit?.(t.owner, "trigger.fire", { trigger: t.id, box: result.box, outcome: result.outcome });
     log(`[triggers] ${t.id} (${t.kind}) → ${result.outcome}${result.box ? ` ${result.box}` : ""}${result.reason ? `: ${result.reason}` : ""}`);
+    for (const f of afterFire) {
+      try {
+        f(t, ctx, result);
+      } catch (e) {
+        log(`[triggers] after-fire hook: ${(e as Error).message.slice(0, 200)}`);
+      }
+    }
     return result;
+  }
+
+  /**
+   * Events the storm cap held back start once their automation's window frees, oldest first, one
+   * automation never starving another. A queue whose automation is gone or paused is dropped (its
+   * rows read "skipped"); the first one still over the cap ends that automation's drain for this tick.
+   */
+  async function drainDeferred(): Promise<void> {
+    for (const [id, queue] of listDeferred(d.db)) {
+      const t = getTriggerById(d.db, id);
+      if (!t) {
+        dropDeferred(d.db, id, "the automation was deleted while this waited for the storm cap");
+        continue;
+      }
+      if (!t.enabled) {
+        const n = dropDeferred(d.db, id, "the automation was paused while this waited for the storm cap");
+        log(`[triggers] ${id}: ${n} deferred event${n === 1 ? "" : "s"} dropped (paused)`);
+        continue;
+      }
+      for (const f of queue) {
+        if (!admits(t).ok) break;
+        takeDeferred(d.db, f);
+        const ctx = (f.ctx && typeof f.ctx === "object" ? f.ctx : {}) as FireContext;
+        log(`[triggers] ${id}: deferred ${ctx.event ?? "event"} from ${new Date(f.at).toISOString()} starts now`);
+        await fire(t, ctx).catch((e) => log(`[triggers] deferred ${id}: ${(e as Error).message}`));
+      }
+    }
   }
 
   /** Fire every due schedule once. Re-entrancy guarded: a slow start never double-fires a minute. */
@@ -182,6 +239,7 @@ export function makeDispatcher(d: DispatcherDeps) {
         advanceNextFire(d.db, t.id, now());
         await fire(t).catch((e) => log(`[triggers] tick ${t.id}: ${(e as Error).message}`));
       }
+      await drainDeferred().catch((e) => log(`[triggers] deferred drain: ${(e as Error).message}`));
     } finally {
       ticking = false;
     }
@@ -252,7 +310,10 @@ export function makeDispatcher(d: DispatcherDeps) {
     return { stop: () => clearInterval(timer) };
   }
 
-  return { fire, tick, onRunFinished, forget, start, activeCount, reconcile, quietTriggerOf };
+  /** Register a hook that runs after every fire (immediate or deferred) with its context and result. */
+  const onFire = (f: AfterFire) => void afterFire.push(f);
+
+  return { fire, admits, onFire, tick, onRunFinished, forget, start, activeCount, reconcile, quietTriggerOf };
 }
 
 export type Dispatcher = ReturnType<typeof makeDispatcher>;

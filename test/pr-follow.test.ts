@@ -6,6 +6,7 @@ import { makeSecretBox } from "../src/secretbox.ts";
 import { normalizeFollow, normalizeTrigger } from "../src/triggers.ts";
 import { createTrigger, deleteTrigger } from "../src/trigger-store.ts";
 import { diffReviewComments, makeRepoWatcher, watchMatches, type WatchGet, type WatchHit } from "../src/repo-watch.ts";
+import type { AfterFire } from "../src/trigger-dispatch.ts";
 import { FOLLOW_MARK, followDecision, followPr, followPreface, getFollowed, listFollows, noteRoundStarted, queueNote, roundGate, settleFollow } from "../src/pr-follow.ts";
 
 const T0 = Date.UTC(2026, 10, 22, 10, 0);
@@ -123,9 +124,19 @@ test("watcher: a following automation re-reviews its PR on a push and others' co
   };
   const fired: Array<{ event?: string; round?: number; preface?: string; task?: string }> = [];
   let boxes = 0;
+  const hooks: AfterFire[] = [];
   const w = makeRepoWatcher({
     db, get, redact: (s) => s, now: () => now, log: () => {},
-    dispatcher: { fire: async (_t, ctx) => { fired.push({ event: ctx.event, round: ctx.follow?.round, preface: ctx.follow?.preface }); return { at: now, outcome: "started" as const, box: `b${++boxes}` }; } },
+    dispatcher: {
+      fire: async (t, ctx) => {
+        fired.push({ event: ctx.event, round: ctx.follow?.round, preface: ctx.follow?.preface });
+        const r = { at: now, outcome: "started" as const, box: `b${++boxes}` };
+        for (const h of hooks) h(t, ctx, r);
+        return r;
+      },
+      admits: () => ({ ok: true as const }),
+      onFire: (h) => hooks.push(h),
+    },
   });
   const tick = async () => { now += 15_000; await w.tick(); };
 
@@ -179,4 +190,73 @@ test("watcher: a following automation re-reviews its PR on a push and others' co
   await tick();
   await tick();
   assert.equal(fired.length, 3);
+});
+
+test("watcher: a round the storm cap holds waits with its notes; pushes meanwhile join it; it starts when the window frees", async () => {
+  const db = openMemoryDb();
+  const box = makeSecretBox(crypto.randomBytes(32));
+  const v = normalizeTrigger({ name: "Review", kind: "watch", repo: "o/r", taskTemplate: "Review #{{pr.number}}", spec: { watch: ["pr_opened"], follow: { ...FOLLOW, rounds: 5 } } });
+  assert.ok(v.ok);
+  if (!v.ok) return;
+  const { row: t } = createTrigger(db, box, "u1", v.trigger);
+  let now = T0;
+  const pr = (sha: string) => ({
+    number: 7, state: "open", draft: false, merged_at: null, created_at: new Date(T0 + 20_000).toISOString(), updated_at: new Date(now).toISOString(),
+    user: { login: "bob" }, head: { sha, ref: "feat", repo: { full_name: "o/r" } }, base: { ref: "main", repo: { full_name: "o/r" } },
+  });
+  let pulls: unknown[] = [];
+  let version = 0;
+  const get: WatchGet = async (_o, _r, path, etag) => {
+    if (path === "/repos/o/r") return { notModified: false, data: { full_name: "o/r", default_branch: "main" }, login: "me" };
+    if (!path.includes("/pulls?")) return etag === '"c"' ? { notModified: true } : { notModified: false, data: [], etag: '"c"', login: "me" };
+    const tag = `"p${version}"`;
+    return etag === tag ? { notModified: true } : { notModified: false, data: pulls, etag: tag, login: "me" };
+  };
+  const fired: Array<{ event?: string; round?: number; preface?: string }> = [];
+  let capped = false;
+  let boxes = 0;
+  const hooks: AfterFire[] = [];
+  const w = makeRepoWatcher({
+    db, get, redact: (s) => s, now: () => now, log: () => {},
+    dispatcher: {
+      fire: async (tr, ctx) => {
+        fired.push({ event: ctx.event, round: ctx.follow?.round, preface: ctx.follow?.preface });
+        const r = { at: now, outcome: "started" as const, box: `b${++boxes}` };
+        for (const h of hooks) h(tr, ctx, r);
+        return r;
+      },
+      admits: () => (capped ? { ok: false as const, reason: "storm cap: 30 fires in the last hour" } : { ok: true as const }),
+      onFire: (h) => hooks.push(h),
+    },
+  });
+  const tick = async () => { now += 15_000; await w.tick(); };
+
+  await tick();
+  pulls = [pr("a1")];
+  version++;
+  await tick();
+  assert.equal(fired.length, 1);
+  assert.equal(getFollowed(db, t.id, "o/r", 7)?.box, "b1", "registered through the after-fire hook");
+  db.prepare(`UPDATE trigger_fires SET finished_at = ? WHERE box = ?`).run(now, "b1");
+
+  // The cap is on: a push is noted, not fired; a second push joins the note; nothing starts.
+  capped = true;
+  pulls = [pr("a2")];
+  version++;
+  await tick();
+  pulls = [pr("a3")];
+  version++;
+  await tick();
+  await tick();
+  assert.equal(fired.length, 1, "no round while the cap holds");
+  const held = getFollowed(db, t.id, "o/r", 7)!;
+  assert.deepEqual([held.rounds, held.box, held.pending.map((n) => n.sha)], [0, null, ["a2", "a3"]]);
+
+  // The window frees: one round, with both pushes, starts on the next poll.
+  capped = false;
+  await tick();
+  assert.equal(fired.length, 2);
+  assert.deepEqual([fired[1].event, fired[1].round], ["pr_pushed", 1]);
+  assert.ok(fired[1].preface!.includes("head is now a3"), "the round reviews the latest head");
+  assert.deepEqual([getFollowed(db, t.id, "o/r", 7)!.rounds, getFollowed(db, t.id, "o/r", 7)!.pending], [1, []]);
 });

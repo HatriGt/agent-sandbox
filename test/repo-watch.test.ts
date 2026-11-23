@@ -101,6 +101,8 @@ test("watcher tick: conditional reads, one fire per change across ticks, 304 fir
         fired.push({ event: ctx.event, n: ctx.match?.subject?.number, payload: ctx.payload });
         return { at: now, outcome: "started" as const, box: "b" };
       },
+      admits: () => ({ ok: true as const }),
+      onFire: () => {},
     },
   });
 
@@ -152,7 +154,7 @@ test("watcher tick: a 403 pauses every repo of that owner until Retry-After, the
     if (!path.includes("/pulls")) return { notModified: false, data: { full_name: path.slice(7), default_branch: "main" }, login: "me" };
     return { notModified: false, data: [], etag: '"x"', login: "me", rate: { remaining: 4000 } };
   };
-  const w = makeRepoWatcher({ db, get, redact: (s) => s, now: () => now, log: () => {}, dispatcher: { fire: async () => ({ at: now, outcome: "started" as const, box: "b" }) } });
+  const w = makeRepoWatcher({ db, get, redact: (s) => s, now: () => now, log: () => {}, dispatcher: { fire: async () => ({ at: now, outcome: "started" as const, box: "b" }), admits: () => ({ ok: true as const }), onFire: () => {} } });
   await w.tick();
   assert.equal(calls.length, 4);
   limited = true;

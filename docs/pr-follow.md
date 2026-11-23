@@ -54,8 +54,32 @@ watcher) can tell its words from the author's.
 - **No self-feeding.** The connected account's comments, bot comments, receipts, follow-up replies
   and marked round comments never start a round. Forks follow the automation's *Also run on PRs
   from forks* switch.
-- **Storm cap and dedupe.** Rounds go through the same dispatcher as every fire: the 12-per-hour
-  cap applies, and each change is claimed once under `follow:<key>` in `trigger_deliveries`.
+- **Storm cap and dedupe.** Rounds go through the same dispatcher as every fire: the 30-per-hour
+  cap applies, and each change is claimed once under `follow:<key>` in `trigger_deliveries`. A
+  round the cap would refuse is not fired and dropped: the watcher asks the dispatcher first
+  (`admits`), keeps the change as a queued note (changes meanwhile join it) and starts one round
+  at the end of the first poll after the window frees. A fresh `pr_*` event over the cap is
+  deferred by the dispatcher itself (below) and registers its PR when it finally starts.
+
+## The storm cap: delayed, never dropped
+
+`MAX_FIRES_PER_HOUR` (src/triggers.ts, 30) bounds how many runs one automation starts per rolling
+hour, counted from `trigger_fires`. It was 12 until 2026-11-23, when Deal Reviewer on two busy
+repos saw seven PRs opened and four pushed within an hour, hit the cap, and every later event was
+consumed (its delivery key claimed) and lost: a PR opened in that hour was never reviewed, and the
+runs page showed rows reading only "storm cap: 12 fires in the last hour".
+
+Now an event over the cap waits:
+
+- The dispatcher writes a `trigger_deferred` row with the whole fire context (payload, event,
+  subject, chain parent) and a delivery log row with outcome `deferred` (the UI reads "waiting ·
+  limit reached") that names the PR, so the runs page shows *what* waits.
+- Every dispatcher tick (20 s) drains each automation's queue oldest first while admission allows,
+  replacing the waiting row with the fire's own. The after-fire hook runs for a deferred start as
+  for an immediate one, so a deferred review still puts its PR under follow.
+- "Run now" over the cap is still refused on the spot (the person is there to read the answer),
+  a schedule's next slot is its retry, and a paused or deleted automation drops its queue (the rows
+  turn into skips that say so). An automation holds at most 100 deferred events.
 - **Polling cost.** A following automation reads the repo's pulls source whether or not it fires
   on PR events, and the comment sources (`/issues/comments`, `/pulls/comments`) when comments are
   followed. All reads are conditional; a 304 is free.
