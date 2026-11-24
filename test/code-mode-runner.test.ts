@@ -124,7 +124,7 @@ test("runner: the script reaches nothing of the host — no process, require, fe
   assert.equal(v.fromCall, "EvalError");
   assert.equal(v.evalCall, "EvalError");
   assert.equal(v.viaError, "EvalError");
-  assert.deepEqual(v.globals, ["call", "console", "input", "recall", "saveFile", "sleep"]);
+  assert.deepEqual(v.globals, ["call", "console", "recall", "saveFile", "sleep"]);
 });
 
 test("runner: a script that rewrites Promise and JSON cannot redirect the bridge", async () => {
@@ -177,12 +177,6 @@ test("runner: object fields returned as undefined are counted (array holes and t
   assert.deepEqual({ ...odd.undef }, { x: 1 });
 });
 
-test("runner: `input` is the value run was given, undefined when none", async () => {
-  const r = await runInSandbox("return [typeof input, input.rows.length, input.who]", { sandbox, program, hooks: stub(), timeoutMs: 10_000, input: JSON.stringify({ rows: [1, 2, 3], who: "x" }) });
-  assert.deepEqual(JSON.parse(r.value!), ["object", 3, "x"]);
-  const none = await run("return typeof input");
-  assert.equal(JSON.parse(none.value!), "undefined");
-});
 
 test("runner: a call hook that throws RunPaused stops the run as paused; the call is reported paused, the rest unfinished", async () => {
   const hooks = stub({

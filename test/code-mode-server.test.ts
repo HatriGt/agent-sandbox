@@ -269,31 +269,6 @@ test("server: a write tool pauses the run, asks the operator through the box's q
   assert.match(gone.text, /no paused run/);
 });
 
-test("server: a clean script with three calls is kept, listed by search, and reruns by name with input", async () => {
-  const c = clients[0];
-  const r = await tool(c, "run", {
-    code: '// titles of the given ids\nconst ids = input?.ids ?? ["IT-1000"]\nconst rows = await Promise.all(ids.map((id) => call("mcp__tracker__get_item", { id })))\nreturn rows.map((r) => r.title.slice(0, 11))',
-    input: { ids: ["IT-1000", "IT-1002", "IT-1003"] },
-  });
-  assert.equal(r.isError, false, r.text);
-  assert.deepEqual(JSON.parse(r.text.split("\n")[0]), ["Item number", "Item number", "Item number"]);
-  const knowledge = JSON.parse(readFileSync(join(stateDir, "knowledge.json"), "utf8"));
-  const name = "tracker.get_item";
-  assert.equal(knowledge.snippets[name].description, "titles of the given ids");
-  assert.deepEqual(knowledge.snippets[name].calls, ["mcp__tracker__get_item"]);
-  const s = await tool(c, "search", { query: "titles" });
-  assert.match(s.text, /Saved scripts from earlier runs[^\n]*\n- tracker\.get_item: titles of the given ids \(calls mcp__tracker__get_item; \d+ chars\)/);
-  const again = await tool(c, "run", { snippet: name, input: { ids: ["IT-1005"] } });
-  assert.equal(JSON.parse(again.text.split("\n")[0]).length, 1);
-  const named = await tool(c, "run", { code: 'return (await call("mcp__tracker__get_item", { id: "IT-1000" })).status', save: "one item", description: "status of IT-1000" });
-  assert.equal(named.isError, false);
-  assert.match(JSON.stringify(JSON.parse(readFileSync(join(stateDir, "knowledge.json"), "utf8")).snippets["one-item"]), /status of IT-1000/);
-  const nope = await tool(c, "run", { snippet: "one-itme" });
-  assert.match(nope.text, /no saved script "one-itme"; nearest: one-item/);
-  // The run description names them too, newest first, for a run that never searches.
-  const run = (await c.listTools()).tools.find((t) => t.name === "run")!;
-  assert.match(run.description ?? "", /\nSaved scripts \(run \{snippet: name, input\}; search for more\): one-item — status of IT-1000; tracker\.get_item — titles of the given ids$/);
-});
 
 test("box modules import only each other, node built-ins and (type-only) the SDK", () => {
   // They are shipped as four loose files into ~/.claude/code-mode; anything else would not resolve there.

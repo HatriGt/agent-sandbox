@@ -9,24 +9,12 @@
  */
 import { readFileSync } from "node:fs";
 
-/** A script a run kept for later runs (box/server.ts keepSnippet): `run {snippet, input}` reruns it. */
-export interface McpSnippet {
-  description: string;
-  code: string;
-  /** The mcp__server__tool names it called. */
-  calls: string[];
-  savedAt: number;
-  runs: number;
-}
-
 /** What an owner's runs learned about their servers (src/code-mode/knowledge.ts keeps and merges it). */
 export interface McpKnowledge {
   /** mcp__server__tool → the shape of its last result (never values; box/result.ts shapeOf). */
   shapes: Record<string, string>;
   /** server → tools it listed when last connected. */
   toolCounts: Record<string, number>;
-  /** name → saved script. */
-  snippets: Record<string, McpSnippet>;
   updatedAt?: number;
 }
 
@@ -35,7 +23,7 @@ export const CODE_MODE_KNOWLEDGE_FILE = "knowledge.json";
 
 /** The file contents the install ships into the box (no timestamp: the box never needs it). */
 export function knowledgeFile(k: McpKnowledge): string {
-  return JSON.stringify({ shapes: k.shapes, toolCounts: k.toolCounts, ...(Object.keys(k.snippets ?? {}).length ? { snippets: k.snippets } : {}) }) + "\n";
+  return JSON.stringify({ shapes: k.shapes, toolCounts: k.toolCounts }) + "\n";
 }
 
 /** The compiled box modules; server.js imports the other three. */
@@ -66,8 +54,7 @@ export const CODE_MODE_PROMPT =
   "re-reads an earlier result without calling the tool again. " +
   "The tools behind code mode are not in ToolSearch and are never called directly: mcp__code-mode__run's description names them per server, " +
   "and search with select:<name> gives one tool's argument types. A call to a tool that creates, changes or removes something pauses the run " +
-  "and asks the operator itself (an Approve/Decline card): end your turn, and when their answer comes back as yes call run with the resume id it gave you. " +
-  "A saved script from an earlier run (search lists them) reruns with run {snippet, input}.";
+  "and asks the operator itself (an Approve/Decline card): end your turn, and when their answer comes back as yes call run with the resume id it gave you.";
 
 /**
  * The paragraph for one install: the bench text, then which servers are behind the script and which

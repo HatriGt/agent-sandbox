@@ -672,17 +672,17 @@ hosts with `.shots/cm-2b/live-v2.mjs` (phases `audit`, `approve --box=`, `reuse`
    each; readers rank above writers unless the query asks for a change; `select:a,b` (the
    ToolSearch syntax the model reaches for) or exact names return just those. Live: the model's
    first search was a `select:` of seven names and it wrote the whole audit from that one answer.
-2. **The run description names every tool per server** (`renderIndex`, 2.5k chars, readers first)
-   and the saved scripts (newest first, 700 chars), and the prompt says the wrapped tools are not
-   in ToolSearch and never direct. A tools/list answered while an upstream was still connecting is
+2. **The run description names every tool per server** (`renderIndex`, 2.5k chars, readers first),
+   and the prompt says the wrapped tools are not in ToolSearch and never direct. A tools/list answered while an upstream was still connecting is
    offered again (`list_changed`) once it is up.
 3. **Previews on every call's summary line**: a short result whole, else one sample value per
    field, so the model stops recalling a result to learn how a field is spelt.
-4. **Saved scripts.** A clean script with three or more calls (or one named with
-   `save`/`description`) is kept in knowledge.json, rides the owner's blob to the next box, search
-   and the run description list the ones that match, and `run {snippet, input}` reruns it with
-   `input` as a script global. `GET`/`DELETE /code-mode/snippets.json`; a list with Remove on the
-   MCP page's code-mode card. Live: two scripts saved from the audit and the label change.
+4. **Saved scripts: built, then removed the same day.** A clean script with three or more calls
+   was kept in the owner's blob, listed by search and the run description, and rerun with
+   `run {snippet, input}`. Live, the model was offered the saved audit script twice and wrote its
+   own anyway, and the owner's call was that a script is made at run time, used and dropped: the
+   persistence (blob field, two routes, the MCP page list, the `input` global and the prompt text
+   every run paid for) left in the commit after 0c72a50. Nothing in the approval replay depended on it.
 5. **Approval.** A call to a tool that creates, changes or removes something (the server's
    `readOnlyHint`/`destructiveHint`, else the words of its name; a server's `approve`/`allow` lists
    in the MCP JSON add or exempt tools, `allow: ["*"]` turns it off) pauses the run with nothing
@@ -718,9 +718,9 @@ Readings:
   guessed names.
 - The enforced pause costs one extra turn: the ask turn's cache write (46k) is the new system
   prompt after the deploy, not the pause; the resume turn is almost all cache read.
-- Open: the model was offered the saved audit script twice (run description and search) and still
-  wrote its own, even when the task said to reuse one. The auto description ("If no targeted
-  space, pick first available", from the script's first comment) does not say what the script
-  answers; a better description (the task's first line, or the return shape) is the next lever.
-  The pause's card wording and the replay rule are enforced; the model's note before ending its
+- The "scripts offered" audit row above was the saved-script test: the model was offered the
+  saved audit script twice (run description and search) and still wrote its own, even when the task
+  said to reuse one. That, and the owner's preference for scripts that live only for the run, is why
+  item 4 was removed; the row stands as a plain second audit.
+- The pause's card wording and the replay rule are enforced; the model's note before ending its
   turn is not, and it wrote one unasked.

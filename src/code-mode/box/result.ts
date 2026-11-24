@@ -352,7 +352,7 @@ const oneLine = (s: string, max: number) => {
 
 /** Globals a script has, appended to a ReferenceError so the model stops guessing at others. */
 export const SCRIPT_GLOBALS =
-  "call(name, args), recall(n), saveFile(name, data), sleep(ms), input (the value run was given), console.log/warn/error and the JavaScript built-ins (JSON, Math, Array, Object, Promise, Date, …). There is no fetch, require, import, process, setTimeout or file system.";
+  "call(name, args), recall(n), saveFile(name, data), sleep(ms), console.log/warn/error and the JavaScript built-ins (JSON, Math, Array, Object, Promise, Date, …). There is no fetch, require, import, process, setTimeout or file system.";
 
 /** A script error as the model should read it. */
 export function explainError(message: string): string {

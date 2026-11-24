@@ -4,7 +4,7 @@
  *
  * The script is prompt-injectable (it is written by a model that reads MCP results), so it runs in a
  * separate node process with nothing to steal, and the layers are independent:
- *  1. a `vm` context whose global has only call/recall/saveFile/sleep/input/console and the JS built-ins,
+ *  1. a `vm` context whose global has only call/recall/saveFile/sleep/console and the JS built-ins,
  *     with code generation from strings disabled; only strings cross into or out of it;
  *  2. the child process has an empty environment (the upstream tokens live in the server, not here),
  *     `--disallow-code-generation-from-strings` for the whole process, and `--permission` with read
@@ -39,7 +39,7 @@ function childMain(): void {
   // a script that replaces Promise.prototype.then or JSON.parse cannot redirect the bridge, and it
   // keeps the one host function it is given (`send`) in a closure the script cannot reach. `send`
   // takes primitives only and returns nothing, so no host-realm object ever enters the context.
-  const PRELUDE = `(function (send, LOG_CAP, INPUT) {
+  const PRELUDE = `(function (send, LOG_CAP) {
   "use strict";
   const P = Promise, then = P.prototype.then, apply = Reflect.apply, parse = JSON.parse, stringify = JSON.stringify, isArray = Array.isArray;
   const Str = String, Err = Error, TypeErr = TypeError, create = Object.create, define = Object.defineProperty, freeze = Object.freeze;
@@ -79,8 +79,6 @@ function childMain(): void {
     },
     sleep(ms) { return ask("sleep", Str(Number(ms) || 0)); },
     console: freeze({ log: log(""), info: log(""), debug: log(""), warn: log("[warn] "), error: log("[error] ") }),
-    // What run() was given as input (a saved script's parameters); undefined when nothing was.
-    input: typeof INPUT === "string" ? parse(INPUT) : undefined,
   };
   for (const k of Object.keys(globals)) define(globalThis, k, { value: globals[k], enumerable: true, writable: false, configurable: false });
   function deliver(id, ok, payload) {
@@ -143,9 +141,9 @@ function childMain(): void {
       // Writing to a closed stdout: the host is gone and will kill us.
     }
   }
-  function start(code: string, logCap: number, input: string | undefined): void {
+  function start(code: string, logCap: number): void {
     const ctx = vm.createContext(Object.create(null), { name: "script", codeGeneration: { strings: false, wasm: false } });
-    bridge = new vm.Script(PRELUDE).runInContext(ctx)(send, logCap, input);
+    bridge = new vm.Script(PRELUDE).runInContext(ctx)(send, logCap);
     let fn: unknown;
     try {
       fn = new vm.Script(`(async function () {\n${code}\n})`, { filename: "script.js", lineOffset: -1 }).runInContext(ctx);
@@ -164,13 +162,13 @@ function childMain(): void {
     for (let i; (i = buf.indexOf("\n")) >= 0; ) {
       const line = buf.slice(0, i);
       buf = buf.slice(i + 1);
-      let m: { t?: string; id?: number; ok?: boolean; payload?: string; code?: string; logCap?: number; input?: string };
+      let m: { t?: string; id?: number; ok?: boolean; payload?: string; code?: string; logCap?: number };
       try {
         m = JSON.parse(line);
       } catch {
         continue;
       }
-      if (m.t === "start" && !bridge) start(String(m.code), Number(m.logCap) || 0, typeof m.input === "string" ? m.input : undefined);
+      if (m.t === "start" && !bridge) start(String(m.code), Number(m.logCap) || 0);
       else if (m.t === "res") deliver(Number(m.id), m.ok === true, String(m.payload));
     }
   });
@@ -291,8 +289,6 @@ export interface RunOptions {
   hooks: BridgeHooks;
   timeoutMs: number;
   maxInFlight?: number;
-  /** JSON text the script sees as `input`; absent when run was given none. */
-  input?: string;
 }
 
 /**
@@ -424,6 +420,6 @@ export function runInSandbox(code: string, opts: RunOptions): Promise<BridgeResu
       finish({ error: `the sandbox stopped before the script finished: ${why}${stderr.trim() ? `\n${stderr.trim()}` : ""}` });
     });
     child.stdin.on("error", () => {});
-    child.stdin.write(JSON.stringify({ t: "start", code, logCap: CHILD_LOG_CAP, input: opts.input }) + "\n");
+    child.stdin.write(JSON.stringify({ t: "start", code, logCap: CHILD_LOG_CAP }) + "\n");
   });
 }

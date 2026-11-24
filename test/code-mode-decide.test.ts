@@ -44,18 +44,18 @@ test("decide: auto wraps big and unknown servers, keeps small and step-by-step o
 });
 
 test("knowledge: parse drops what is malformed, merge keeps the newest and caps, grew says when a harvest is worth saving", () => {
-  assert.deepEqual(parseKnowledge(undefined), { shapes: {}, toolCounts: {}, snippets: {} });
-  assert.deepEqual(parseKnowledge("not json"), { shapes: {}, toolCounts: {}, snippets: {} });
+  assert.deepEqual(parseKnowledge(undefined), { shapes: {}, toolCounts: {} });
+  assert.deepEqual(parseKnowledge("not json"), { shapes: {}, toolCounts: {} });
   const k = parseKnowledge(JSON.stringify({ shapes: { mcp__a__t: "{id}", bad: 5, "../x": "{}" }, toolCounts: { a: 12, b: "7", c: -1, d: 2.5 }, updatedAt: 5 }));
-  assert.deepEqual(k, { shapes: { mcp__a__t: "{id}" }, toolCounts: { a: 12 }, snippets: {}, updatedAt: 5 });
-  const merged = mergeKnowledge({ shapes: { x: "1", y: "1" }, toolCounts: { a: 1 }, snippets: {} }, { shapes: { x: "2", z: "1" }, toolCounts: { b: 2 }, snippets: {} }, 99);
-  assert.deepEqual(merged, { shapes: { y: "1", x: "2", z: "1" }, toolCounts: { a: 1, b: 2 }, snippets: {}, updatedAt: 99 });
-  const many = { shapes: Object.fromEntries(Array.from({ length: 600 }, (_, i) => [`s${i}`, "{}"])), toolCounts: {}, snippets: {} };
+  assert.deepEqual(k, { shapes: { mcp__a__t: "{id}" }, toolCounts: { a: 12 }, updatedAt: 5 });
+  const merged = mergeKnowledge({ shapes: { x: "1", y: "1" }, toolCounts: { a: 1 } }, { shapes: { x: "2", z: "1" }, toolCounts: { b: 2 } }, 99);
+  assert.deepEqual(merged, { shapes: { y: "1", x: "2", z: "1" }, toolCounts: { a: 1, b: 2 }, updatedAt: 99 });
+  const many = { shapes: Object.fromEntries(Array.from({ length: 600 }, (_, i) => [`s${i}`, "{}"])), toolCounts: {} };
   const capped = mergeKnowledge(emptyKnowledge(), many, 1);
   assert.equal(Object.keys(capped.shapes).length, 500);
   assert.ok("s599" in capped.shapes && !("s0" in capped.shapes), "the oldest entries go first");
-  assert.equal(knowledgeGrew(merged, { shapes: { x: "2" }, toolCounts: { b: 2 }, snippets: {} }), false);
-  assert.equal(knowledgeGrew(merged, { shapes: {}, toolCounts: { b: 3 }, snippets: {} }), true);
+  assert.equal(knowledgeGrew(merged, { shapes: { x: "2" }, toolCounts: { b: 2 } }), false);
+  assert.equal(knowledgeGrew(merged, { shapes: {}, toolCounts: { b: 3 } }), true);
   assert.equal(knowledgeFile(merged), JSON.stringify({ shapes: merged.shapes, toolCounts: merged.toolCounts }) + "\n", "the shipped file carries no timestamp");
 });
 
@@ -81,7 +81,7 @@ test("configs: the mixed one is the wrapper plus the direct servers, the upstrea
 test("files: the prompt and the knowledge ride with the server modules (from the built controller only)", () => {
   let files: ReturnType<typeof codeModeFiles>;
   try {
-    files = codeModeFiles({ prompt: "P", knowledge: { shapes: { a: "{}" }, toolCounts: { s: 2 }, snippets: {} } });
+    files = codeModeFiles({ prompt: "P", knowledge: { shapes: { a: "{}" }, toolCounts: { s: 2 } } });
   } catch {
     return; // under tsx there is no dist/code-mode/box; installMcpConfig notes the fallback
   }
@@ -111,24 +111,3 @@ test("digest: the mcp block carries the split and counts the run's scripts and t
   assert.deepEqual(inferred.provenance?.mcp, { mode: "script", scripts: 1, calls: 2 }, "an older box without notes still shows the scripts it ran");
 });
 
-test("knowledge: saved scripts parse, merge newest-wins with the higher run count, cap at 40, and ride in the shipped file", () => {
-  const snip = { description: "d", code: "return 1", calls: ["mcp__a__t"], savedAt: 5, runs: 2 };
-  const k = parseKnowledge(JSON.stringify({ snippets: { good: snip, "bad name!": snip, nocode: { description: "x" }, loose: { code: "return 2", calls: [5, "mcp__b__u"] } } }));
-  assert.deepEqual(Object.keys(k.snippets), ["good", "loose"]);
-  assert.deepEqual(k.snippets.good, snip);
-  assert.deepEqual(k.snippets.loose, { description: "", code: "return 2", calls: ["mcp__b__u"], savedAt: 0, runs: 0 });
-  const merged = mergeKnowledge(
-    { shapes: {}, toolCounts: {}, snippets: { a: { ...snip, runs: 7 }, b: snip } },
-    { shapes: {}, toolCounts: {}, snippets: { a: { ...snip, code: "return 3", runs: 1 } } },
-    1
-  );
-  assert.deepEqual(Object.keys(merged.snippets), ["b", "a"], "the box's copy comes last (newest)");
-  assert.equal(merged.snippets.a.code, "return 3");
-  assert.equal(merged.snippets.a.runs, 7, "a run count never goes down");
-  const many = { shapes: {}, toolCounts: {}, snippets: Object.fromEntries(Array.from({ length: 50 }, (_, i) => [`s${i}`, snip])) };
-  assert.equal(Object.keys(mergeKnowledge(emptyKnowledge(), many, 1).snippets).length, 40);
-  assert.equal(knowledgeGrew(merged, { shapes: {}, toolCounts: {}, snippets: { a: merged.snippets.a } }), false);
-  assert.equal(knowledgeGrew(merged, { shapes: {}, toolCounts: {}, snippets: { a: { ...merged.snippets.a, runs: 8 } } }), true);
-  assert.equal(knowledgeFile(merged), JSON.stringify({ shapes: {}, toolCounts: {}, snippets: merged.snippets }) + "\n");
-  assert.equal(knowledgeFile(emptyKnowledge()), '{"shapes":{},"toolCounts":{}}\n', "no snippets key when there are none");
-});
