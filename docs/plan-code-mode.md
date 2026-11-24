@@ -624,3 +624,39 @@ pause-for-approval flow (headless by design), wrapping Bash/Read/Edit (§9).
 
 Still open from §13.4: the real-server bench and thresholds (step 4), snippets / OpenAPI connector /
 deny-list editor (step 5), and `search` still waits up to 10 s for a connecting upstream.
+
+### 13.6 Real-server bench (2026-11-25, operator account, Instabox hosts)
+
+`.shots/cm-2b/bench-live.mjs`: the same task text delegated twice, once with the setting `on` and
+once `off`, under the operator account against the live controller. Numbers are from each box's
+log: `⟦usage⟧` totals (total input = uncached + cache read + cache write), `⟦ctx⟧` lines (requests),
+`→` tool rows. "Agent s" is first-to-last `⟦at⟧`, which leaves box start-up out (it varied 30–60 s
+between hosts and dominated wall time). Cost uses Claude Opus 5.5 list rates ($4 in, $0.20 cache
+read, $5 cache write, $20 out per MTok) as an estimate; the box does not log its model.
+
+| Task | Mode | Requests | Total input | Cache read | Cache write | Output | Final ctx | Agent s | MCP calls | Est. $ |
+|---|---|---|---|---|---|---|---|---|---|---|
+| HANA sweep (deal-hana-btp): 40 DEAL tables, top 6 by rows, columns, PK, FKs | on | 5 | 163k | 138k | 25k | 4.2k | 37.9k | 54 | 6 in 3 scripts | 0.235 |
+| | off | 7 | 256k | 226k | 29k | 4.4k | 41.6k | 55 | 5 direct | 0.279 |
+| CF space audit (btp-cf): org/space, 12 apps, state, instances, memory, last log | on | 7 | 270k | 236k | 34k | 4.2k | 46.8k | 70 | 29 in 3 scripts | 0.300 |
+| | off | 10 | 387k | 347k | 40k | 5.5k | 52.4k | 70 | 28 direct | 0.380 |
+| HANA one call (deal-qa-system, server down, both modes hit the same refusal) | on | 3 | 89k | 71k | 18k | 0.4k | 31.2k | 6 | 1 in 1 script | 0.112 |
+| | off | 4 | 127k | 107k | 20k | 0.5k | 32.5k | 10 | 2 direct | 0.132 |
+
+Readings:
+
+- The two fan-out tasks returned the same answer in both modes (the HANA sweep's six-table result
+  was identical to the row). Code mode spent 30–36 % fewer total input tokens, 2–3 fewer requests
+  and 16–21 % less estimated money; agent time was equal. The dollar saving is smaller than the
+  token saving because cache writes (system prompt + tool definitions, written once per run) and
+  output are the same size in both modes and dominate the bill at these sizes.
+- The one-call case did not show the §7 penalty here: direct mode paid for Claude Code's
+  `ToolSearch` round trip to load the server's definitions, which cost about what the code-mode
+  search did. So "small server direct" is still the right default for interactive and tiny servers,
+  but the bench gives no reason to raise the 10-tool threshold; if anything it could go lower.
+- Two failures were the model's, not the mode's: in `off`, the one-call task on deal-hana-btp
+  stopped to ask which database (the server says not to guess) while the `on` script guessed
+  `btp-qa`; and the first sweep attempt on deal-qa-system failed in both modes because HANA closed
+  the socket at the TLS handshake for both Instabox hosts (stopped instance or an IP allowlist).
+- Still open: Jira JQL (atlassian-rovo-mcp is direct under auto with 4 tools, so it would need the
+  `wrap` override to bench), and a run on Freestyle hosts for the start-up time.
