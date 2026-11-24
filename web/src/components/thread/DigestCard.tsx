@@ -48,6 +48,14 @@ function receiptFacts(digest: RunDigest): string[] {
     out.push(`${asked} asked · ${answered} answered`);
   }
   if (digest.usage) out.push(`${fmtTokens(digest.usage.inputTokens + digest.usage.outputTokens)} tokens`);
+  // Code mode for MCP: only when the run had it (or fell back from it); a plain direct run says nothing.
+  const mcp = p?.mcp;
+  if (mcp?.fallback) out.push("code mode fell back");
+  else if (mcp && mcp.mode !== "direct") {
+    const scripts = mcp.scripts ?? 0;
+    const calls = mcp.calls ?? 0;
+    out.push(scripts ? `code mode · ${scripts} ${scripts === 1 ? "script" : "scripts"} · ${calls} ${calls === 1 ? "call" : "calls"}` : "code mode · no scripts");
+  }
   return out;
 }
 

@@ -1,23 +1,32 @@
 import * as React from "react";
 import { AlertTriangle, Code2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type AgentPrefs, type McpServersResponse } from "@/lib/api";
-import { Switch } from "@/components/ui/switch";
+import { api, type AgentPrefs, type CodeModeSetting as Setting, type McpServersResponse } from "@/lib/api";
+import { Segmented } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
 
 /** The package the in-box code-mode server needs baked into the image (src/code-mode). */
 const SDK = "@modelcontextprotocol/sdk";
 
+const LABELS: Record<Setting, string> = { auto: "Auto", on: "Always", off: "Never" };
+const TOASTS: Record<Setting, string> = {
+  auto: "Code mode on auto — decided per server from each thread's next run",
+  on: "Code mode on for every server — from each thread's next run",
+  off: "Code mode off — from each thread's next run",
+};
+
 /**
- * Code mode for MCP (docs/plan-code-mode.md): the switch above the server list, bound to the
- * caller's agent-prefs `codeMode`. The POST echoes the stored driver and model, because a prefs body
- * without them resets those (the server keeps only autoCompact/codeMode when absent). Two states come
- * from the last box that reported: an image without the SDK (runs fall back to direct servers) and
- * the last fallback reason the install recorded.
+ * Code mode for MCP (docs/plan-code-mode.md §13): the three-way control above the server list,
+ * bound to the caller's agent-prefs `codeMode`. Auto lets the controller decide per server (big
+ * servers behind the script tool, small or step-by-step ones direct; a server's own `codeMode`
+ * key overrides); Always wraps every server; Never none. An owner who never chose shows the
+ * deployment default. The POST echoes the stored driver and model, because a prefs body without
+ * them resets those. Two states come from the last box that reported: an image without the SDK
+ * (runs fall back to direct servers) and the last install's split or fallback reason.
  */
 export function CodeModeSetting({ data, enabledServers }: { data: McpServersResponse | null; enabledServers: number }) {
   const [prefs, setPrefs] = React.useState<AgentPrefs | null>(null);
-  const [busy, setBusy] = React.useState(false);
+  const [busy, setBusy] = React.useState<Setting | null>(null);
 
   React.useEffect(() => {
     const ctrl = new AbortController();
@@ -25,32 +34,36 @@ export function CodeModeSetting({ data, enabledServers }: { data: McpServersResp
     return () => ctrl.abort();
   }, []);
 
-  const on = prefs?.codeMode === "on";
-  const toggle = async (next: boolean) => {
-    if (!prefs || busy) return;
-    setBusy(true);
+  const value: Setting = prefs?.codeMode ?? prefs?.codeModeDefault ?? "off";
+  const chosen = prefs?.codeMode !== undefined;
+  const pick = async (next: Setting) => {
+    if (!prefs || busy || next === value) return;
+    setBusy(next);
     try {
       const choice = prefs.agents.find((a) => a.id === prefs.defaultAgent);
       const saved = await api.saveAgentPrefs({
         defaultAgent: prefs.defaultAgent,
         defaultModel: prefs.defaultModel ?? "",
-        codeMode: next ? "on" : "off",
+        codeMode: next,
         ...(choice?.supervised === false ? { allowPartialSupervision: true } : {}),
       });
       setPrefs(saved);
-      toast.success(next ? "Code mode on — from each thread's next run" : "Code mode off — from each thread's next run");
+      toast.success(TOASTS[next]);
     } catch (e) {
       toast.error("Could not save", { description: e instanceof Error ? e.message : String(e) });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
   const baked = data?.baked;
   // Only a box that reported its packages can say the SDK is missing; before that, say nothing.
   const needsRebake = !!baked && Object.keys(baked).length > 0 && !(SDK in baked);
-  const fallback = data?.lastProvision?.codeModeFallback;
+  const last = data?.lastProvision;
+  const fallback = last?.codeModeFallback;
+  const split = last?.codeMode;
   const inert = enabledServers === 0;
+  const active = value !== "off";
 
   return (
     <div className={cn("border-border bg-card mb-3 rounded-lg border p-3", inert && "opacity-70")}>
@@ -65,11 +78,21 @@ export function CodeModeSetting({ data, enabledServers }: { data: McpServersResp
           </div>
           <p className="text-muted-foreground mt-0.5 text-micro">
             Claude reaches your MCP servers through one script tool instead of calling each tool directly, and filters results inside the script, so only what the task needs enters the conversation.
+            Auto puts servers with many tools behind it and keeps small or step-by-step ones (a browser) direct; a server's own <code className="font-mono">codeMode</code> key overrides.
             In a 4-task bench: −57% context, −56% cost, −72% wall time vs direct calls; +4% on a one-call task; 20/20 correct.
           </p>
-          <p className="text-faint mt-1 text-micro">Claude Code threads only; omp and Codex keep direct servers. Applies from each thread's next run.</p>
+          <p className="text-faint mt-1 text-micro">
+            Claude Code threads only; omp and Codex keep direct servers. Applies from each thread's next run.
+            {!chosen && prefs && ` Showing the default (${LABELS[value].toLowerCase()}); pick one to keep it.`}
+          </p>
           {inert && <p className="text-faint mt-1 text-micro">No server is on, so this changes nothing yet.</p>}
-          {on && needsRebake && (
+          {active && split && !fallback && (
+            <p className="text-faint mt-1 text-micro [overflow-wrap:anywhere]">
+              Last run: {split.wrapped.length ? `${split.wrapped.join(", ")} through code mode` : "nothing through code mode"}
+              {split.direct.length ? ` · ${split.direct.join(", ")} direct` : ""}.
+            </p>
+          )}
+          {active && needsRebake && (
             <p role="status" className="mt-1.5 flex items-start gap-1.5 text-micro text-amber-600 dark:text-amber-300">
               <AlertTriangle className="mt-px size-3 shrink-0" aria-hidden />
               <span>
@@ -77,19 +100,25 @@ export function CodeModeSetting({ data, enabledServers }: { data: McpServersResp
               </span>
             </p>
           )}
-          {on && fallback && (
+          {active && fallback && (
             <p role="status" className="mt-1.5 flex items-start gap-1.5 text-micro text-amber-600 dark:text-amber-300">
               <AlertTriangle className="mt-px size-3 shrink-0" aria-hidden />
               <span className="min-w-0 [overflow-wrap:anywhere]">Last run fell back to direct servers: {fallback}</span>
             </p>
           )}
         </div>
-        <Switch
-          checked={on}
-          onCheckedChange={(v) => void toggle(v)}
-          disabled={!prefs || busy || (inert && !on)}
-          aria-labelledby="code-mode-h"
-          className="mt-0.5"
+        <Segmented
+          ariaLabel="Code mode"
+          value={value}
+          onChange={(v) => void pick(v)}
+          busy={busy}
+          disabled={!prefs || (inert && value === "off")}
+          options={(["auto", "on", "off"] as const).map((v) => ({
+            value: v,
+            label: LABELS[v],
+            title: v === "auto" ? "The controller decides per server" : v === "on" ? "Every server behind the script tool" : "Every server called directly",
+          }))}
+          className="mt-0.5 shrink-0"
         />
       </div>
     </div>

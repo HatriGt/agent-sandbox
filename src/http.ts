@@ -3247,6 +3247,8 @@ app.get("/agent-prefs.json", (req: Request, res: Response) => {
   res.json({
     ...loadAgentPrefs(p.kind === "user" ? p.userId : OPERATOR_OWNER),
     agents: agentChoices(),
+    // What an owner who never chose gets (Config.codeModeDefault), so the control shows the truth.
+    codeModeDefault: cfg.codeModeDefault,
   });
 });
 app.post("/agent-prefs.json", (req: Request, res: Response) => {
@@ -3267,7 +3269,7 @@ app.post("/agent-prefs.json", (req: Request, res: Response) => {
     // The pool follows this setting (only the picked agent's flavor stays warm) — reconcile now
     // instead of waiting for the maintainer tick, so the first task after switching is warm too.
     for (const c of hostPool.warmCfgs()) void refillPool(c);
-    res.json({ ...prefs, agents: agentChoices() });
+    res.json({ ...prefs, agents: agentChoices(), codeModeDefault: cfg.codeModeDefault });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
   }

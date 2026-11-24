@@ -106,9 +106,27 @@ export interface AgentPrefs {
   defaultModel?: string;
   /** When Claude Code compacts the conversation on its own; absent = "standard". */
   autoCompact?: "standard" | "early" | "off";
-  /** Code mode for MCP (docs/plan-code-mode.md): Claude reaches MCP servers through one script tool. Absent = off. */
-  codeMode?: "on";
+  /**
+   * Code mode for MCP (docs/plan-code-mode.md §13): "auto" lets the controller decide per server,
+   * "on" puts every server behind the script tool, "off" none. Absent = never chosen: codeModeDefault applies.
+   */
+  codeMode?: CodeModeSetting;
+  /** The deployment's default for owners who never chose. */
+  codeModeDefault?: CodeModeSetting;
   agents: AgentChoice[];
+}
+
+export type CodeModeSetting = "auto" | "on" | "off";
+
+/** The last install's split (`code-mode: on (wrapped: …; direct: …)`); absent = every server direct. */
+export interface McpLastProvision {
+  at: number;
+  box: string;
+  skipped: string[];
+  failed: string[];
+  dropped: string[];
+  codeModeFallback?: string;
+  codeMode?: { wrapped: string[]; direct: string[] };
 }
 
 export interface RepoInfo {
@@ -197,7 +215,7 @@ export interface McpServersResponse {
   config: { mcpServers: Record<string, unknown> };
   /** Globally installed npm packages the boxes are born with (name → version), once a box has reported. */
   baked?: Record<string, string>;
-  lastProvision?: { at: number; box: string; skipped: string[]; failed: string[]; dropped: string[]; codeModeFallback?: string } | null;
+  lastProvision?: McpLastProvision | null;
 }
 
 /** How an npx server's package reaches a box: baked into the image, installed every run, or left out of the last run. */
@@ -222,6 +240,8 @@ export interface McpServerView {
   /** Why this server never reaches a sandbox: it can only run on the operator's machine, or it
    *  carries the controller's own operator token (a box holding that would hold the whole fleet). */
   excluded?: "host-bound" | "operator-token";
+  /** The owner's per-server code mode override (the `codeMode` key in its JSON); absent = the auto rule decides. */
+  codeMode?: "wrap" | "direct";
 }
 
 /** Outcome of `mcpTest`; `tools` only when the server answered `tools/list`. */
@@ -663,7 +683,7 @@ export interface HealthResponse {
   orphanSweep: { at: number; removed: string[]; freedMib?: number; error?: string } | null;
   startFailures: { streak: number; last?: { box: string; at: number; tail: string }; alertedAt: number };
   baked: Record<string, string>;
-  lastProvision: { at: number; box: string; skipped: string[]; failed: string[]; dropped: string[]; codeModeFallback?: string } | null;
+  lastProvision: McpLastProvision | null;
   rebakeDue: { name: string; baked: string; latest: string }[];
   rebakeCheckedAt: number;
   /** Null for a signed-in user who is not an admin: where boxes boot from is the operator's business. */
@@ -715,7 +735,15 @@ export interface RunDigest {
   /** Post-run verification, when the task was delegated with a `verify` clause. */
   verified?: { mode: "command" | "criterion"; pass: boolean; detail: string };
   /** Receipt provenance: which agent ran and on which model, only when known. */
-  provenance?: { agent?: string; agentLabel?: string; model?: string; provider?: string; skills?: { name: string; how: "explicit" | "auto" }[] };
+  provenance?: {
+    agent?: string;
+    agentLabel?: string;
+    model?: string;
+    provider?: string;
+    skills?: { name: string; how: "explicit" | "auto" }[];
+    /** Code mode for MCP: the install's split and what the run did with it (src/digest.ts). */
+    mcp?: { mode: "script" | "mixed" | "direct"; wrapped?: string[]; direct?: string[]; fallback?: string; scripts?: number; calls?: number };
+  };
   /** The run never had a turn: the sandbox failed it (a full disk, a crashed CLI). `tail` is what the box said last. */
   startFailure?: { tail: string };
 }
@@ -1383,7 +1411,8 @@ export const api = {
   agentPrefs: (signal?: AbortSignal) =>
     fetch(url("/agent-prefs.json"), { headers: authHeaders, signal }).then(parse<AgentPrefs>),
   /** `defaultModel: ""` clears the preference (the agent's own default applies). */
-  saveAgentPrefs: (body: { defaultAgent: AgentId; allowPartialSupervision?: boolean; defaultModel?: string; autoCompact?: "standard" | "early" | "off"; codeMode?: "on" | "off" }) => post<AgentPrefs>("/agent-prefs.json", body),
+  saveAgentPrefs: (body: { defaultAgent: AgentId; allowPartialSupervision?: boolean; defaultModel?: string; autoCompact?: "standard" | "early" | "off"; codeMode?: CodeModeSetting }) =>
+    post<AgentPrefs>("/agent-prefs.json", body),
 
   /** Model providers: the caller's own keys/endpoints. Keys come back masked only. */
   providers: (signal?: AbortSignal) => fetch(url("/providers.json"), { headers: authHeaders, signal }).then(parse<ProvidersResponse>),

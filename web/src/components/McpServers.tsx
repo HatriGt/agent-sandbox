@@ -118,7 +118,8 @@ export function McpServers({ scope }: { scope?: { org: OrgRef } } = {}) {
   });
   const noMatchLine = { all: "", on: "No servers are on.", off: "Every server is on.", stdio: "No command servers.", remote: "No remote servers." }[filter];
   const verdicts = visible.filter((s) => s.type !== "stdio" && health[s.name]);
-  const columns = React.useMemo(() => serverColumns(health, testing), [health, testing]);
+  const lastMode = cached.data?.lastProvision?.codeMode;
+  const columns = React.useMemo(() => serverColumns(health, testing, lastMode), [health, testing, lastMode]);
   const hasServers = !!servers && servers.length > 0;
 
   return (
@@ -264,7 +265,20 @@ const TONE: Record<Status["kind"], React.ComponentProps<typeof StatusDot>["tone"
   excluded: "attention",
 };
 
-function serverColumns(health: Record<string, Health>, testing: Record<string, boolean>): Column<McpServerView>[] {
+/**
+ * How a server reached the last box, in one or two words (docs/plan-code-mode.md §13): the owner's
+ * own override first, else what the last install decided. Nothing when no install has said yet.
+ */
+function codeModeWord(s: McpServerView, last: { wrapped: string[]; direct: string[] } | undefined): React.ReactNode {
+  if (s.codeMode === "wrap") return <span title="Always behind code mode (this server's codeMode: wrap)">code mode, always</span>;
+  if (s.codeMode === "direct") return <span title="Always called directly (this server's codeMode: direct)">direct, always</span>;
+  if (!last) return null;
+  if (last.wrapped.includes(s.name)) return <span title="The last run reached this server through code mode: one script tool, results filtered in the script">through code mode</span>;
+  if (last.direct.includes(s.name)) return <span title="The last run called this server's tools directly">direct</span>;
+  return null;
+}
+
+function serverColumns(health: Record<string, Health>, testing: Record<string, boolean>, lastMode?: { wrapped: string[]; direct: string[] }): Column<McpServerView>[] {
   return [
     {
       id: "server",
@@ -309,6 +323,8 @@ function serverColumns(health: Record<string, Health>, testing: Record<string, b
                       left out of the last run
                     </span>
                   ) : null,
+                  // Code mode: behind the script tool or direct, from the owner's override or the last install.
+                  s.enabled && !s.excluded ? codeModeWord(s, lastMode) : null,
                 ]}
               />
             </span>
