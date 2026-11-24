@@ -517,3 +517,110 @@ account). What the run surfaced, and what changed because of it:
   distinct stems or a trigger phrase before it suggests a skill (src/skill-match.ts).
 - Not ours: `deal-hana-btp` fails with "Invalid Compact JWS" (the token in the operator's MCP config)
   and the three `s4-*` tunnels were down. Both should show on the MCP page as failing servers.
+
+## 13. Frame for the next round (2026-11-24)
+
+### 13.1 What we found live
+
+Nine days after shipping: the flag is on for the operator owner only (the one agent-prefs blob);
+every operator box got the wrapper (no fallback in 48 h of logs; probed
+delegate-1795536839075-2n0hkq on instabox-b: wrapper, 8 upstreams, alwaysLoad). Of 101 archived runs
+since 2026-11-16, two called `mcp__code-mode__run` — both Deal Reviewer PR reviews guessing
+`mcp__github__list_commits` on a server that does not exist, without a `search` first, refused
+before running — and one user run made a single direct HANA query (that owner has no prefs). The
+digest records nothing about code mode, so the dashboard cannot say whether a run had it.
+
+Cloudflare's `@cloudflare/codemode` (cloudflare/agents) is the same two-tool shape with a Workers
+isolate as the sandbox; its executor needs a `WorkerLoader` binding, so it cannot run in a box. Worth
+taking from it: the model always sees the namespaces it may call, saved snippets per owner, and an
+OpenAPI connector that needs no MCP server to stay alive.
+
+### 13.2 Where we are going
+
+**The product goal is not "code mode". It is: an MCP-heavy run (HANA, Jira, BTP, GitHub) finishes
+cheaper and more reliably, for every owner, with nobody thinking about a toggle.** Code mode is the
+mechanism; the frame below is what makes it seamless and solid.
+
+Seamless means:
+
+1. **No decision for the user.** The controller decides per server, per run: wrapped (through the
+   script server) or direct. `codeMode` becomes `scriptMode: "auto" | "always" | "never"`, default
+   `auto`; the stored `"on"` maps to `always`. Auto = wrap a server whose tool count is known to be
+   ≥ 10 (HANA 34, Atlassian 38, btp-cf 34), keep small or step-by-step servers (cds-mcp, chrome-
+   devtools) direct; unknown counts wrap on the first run and are learned from it (13.3). The MCP
+   page shows the decision next to each server as a plain word, with a per-server override.
+2. **Both at once.** Claude Code's config takes the wrapper AND the direct servers side by side:
+   the upstream file holds only the wrapped ones. That is the per-server "direct only" of phase 4
+   with no new mechanism.
+3. **The model is never guessing.** The prompt paragraph and the `run` description are generated
+   at install time and name the wrapped servers (one line, ~40 tokens); a refusal names them too and
+   says "search first". With the servers named, the github guess cannot happen.
+4. **Knowledge survives the box.** Result shapes, learned tool counts and (later) saved snippets
+   live per owner in a controller blob (`mcp-knowledge`), shipped in with the install and
+   harvested out with the per-turn transcript copy that threads already do. A fresh delegate box
+   starts knowing what the last one learned.
+5. **Nothing is silent.** The run digest carries `mcp: { mode: "script" | "direct" | "mixed",
+   fallback?, scripts, innerCalls }`; the thread header shows a chip; the MCP page shows the last
+   decision and any fallback per server, not one controller-wide line.
+
+Solid means:
+
+- The decision is a pure function with tests (`decideMcpMode(store, knowledge, prefs)`), and the
+  install shell is still the one exec `mcpInstallSh` builds — only its plan changes.
+- One live proof script, `.shots/live-code-mode-e2e.mjs`, runs a real multi-query HANA task as a
+  USER owner through the live controller and asserts: wrapper + direct side by side, `search` then
+  `run`, inner calls counted in the digest, mode recorded, a second run that starts with the
+  remembered shapes. It runs before every deploy that touches `src/code-mode` or `mcpInstallSh`.
+- The §7 real-server bench (HANA on QA, Jira JQL) is finally run, with `auto` against direct, and
+  its table goes into this doc. Auto's default thresholds are set from that table, not from the
+  fake tracker.
+- Reliability inside the server: `search` answers at once with whatever is connected and lists the
+  rest as connecting (no 10 s wait per lookup); a failed upstream is reported through the existing
+  provision notes so the MCP page shows it as failing; the deny list gets its editor on the MCP page.
+
+### 13.3 How the pieces fit
+
+```
+MCP store (owner + orgs) ──┐
+agent prefs scriptMode ────┼─▶ decideMcpMode() ─▶ plan { wrapped[], direct[], prompt line }
+mcp-knowledge blob ────────┘         │
+  (shapes, toolCounts, snippets)     ▼
+                        mcpInstallSh(plan) ─▶ box: .agent-mcp.json = wrapper + direct servers
+                                                   .agent-mcp.upstream.json = wrapped only
+                                                   ~/.claude/code-mode/{server, knowledge.json}
+                                  run ─▶ server writes knowledge.json (shapes, tool counts)
+                       turn copy ◀── harvest knowledge.json ─▶ merge into mcp-knowledge blob
+                       digest ◀── stream-fmt counts scripts + inner calls, install notes give mode
+```
+
+### 13.4 Order of work
+
+| Step | What | Why first |
+|---|---|---|
+| 1 | Server names in prompt + `run` description + refusals; `mcp` block in the digest; thread chip | Fixes the one failure seen live; makes every later step measurable |
+| 2 | `mcp-knowledge` blob: shapes and tool counts shipped in, harvested out | Removes the shape-probing `run`; gives auto its input |
+| 3 | `scriptMode: auto` + wrapper and direct side by side + per-server word on the MCP page | The seamless part; retires the toggle as a decision |
+| 4 | Live e2e script as a user owner; real-server bench; thresholds from the table | The solid part; gate before auto becomes the default for users |
+| 5 | Saved snippets per owner; OpenAPI connector for BTP/GitHub REST; deny-list editor | Cloudflare's ideas, each on its own evidence |
+
+Not doing: adopting `@cloudflare/codemode` (Workers-only executor), typed namespace proxies in place
+of `call()` (the measured prompt is tuned to `call()`; naming the servers is the cheaper fix), any
+pause-for-approval flow (headless by design), wrapping Bash/Read/Edit (§9).
+
+
+### 13.5 Shipped (2026-11-25): steps 1–3 and the e2e of step 4
+
+| Piece | Where | Status |
+|---|---|---|
+| Setting `auto` / `on` / `off`, deployment default `CODE_MODE_DEFAULT` (off) | `src/agent-kind.ts`, `src/config.ts` | shipped |
+| Per-server override `codeMode: "wrap" \| "direct"` in a server's JSON | `src/mcp-store.ts` | shipped |
+| The decision: `decideCodeMode` (pure; 10+ tools or unknown → wrap, browser/debugger → direct, override wins) | `src/code-mode/decide.ts` | shipped, unit-tested |
+| Wrapper + direct side by side: upstream file = wrapped servers, mixed config = wrapper + direct, moved over the config when `--check` passes | `src/msb.ts` `mcpInstallSh`, `codeModeMixedConfig` | shipped, run for real in the install test |
+| Server names in the system-prompt paragraph, the MCP instructions, the `run` description, a no-hit search and every refusal | `codeModePromptFor`, `box/server.ts`, `box/tools.ts` | shipped |
+| `mcp-knowledge` blob per owner: shapes + tool counts shipped in as `knowledge.json`, harvested at the finish edge, merged with caps | `src/code-mode/knowledge.ts`, `harvestCodeModeKnowledge`, `absorbKnowledge` in `http.ts` | shipped |
+| Install note `code-mode: on (wrapped: …; direct: …)`, `lastProvision.codeMode`, digest `provenance.mcp` {mode, wrapped, direct, fallback, scripts, calls} | `mcpModeFromNotes`, `src/digest.ts` | shipped |
+| MCP page: three-way control, last-run split line, per-server word; receipt line `code mode · N scripts · M calls` | `CodeModeSetting.tsx`, `McpServers.tsx`, `DigestCard.tsx` | shipped |
+| Live e2e | `.shots/live-code-mode-e2e.mjs` | see the run log below |
+
+Still open from §13.4: the real-server bench and thresholds (step 4), snippets / OpenAPI connector /
+deny-list editor (step 5), and `search` still waits up to 10 s for a connecting upstream.
