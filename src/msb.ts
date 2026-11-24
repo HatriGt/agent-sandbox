@@ -76,7 +76,7 @@ import { parseBakedManifest, type LastProvision } from "./package-watch.js";
 import { ensureHostGuard, hostGuardFlags } from "./host-guard.js";
 import { sleepFor } from "./host-sleep.js";
 import { BLANK_OWNER, ownerTag } from "./warm-owners.js";
-import { sharedOwners, withOwner } from "./user-store.js";
+import { ownerKey, sharedOwners, withOwner } from "./user-store.js";
 import { MOLI_BIN, MOLI_PROMPT_HINT, browserToolSetup, moliInstallSh } from "./browser.js";
 import { orphanSandboxDirs, parseDfPk, parseDirListing, type DiskReading } from "./host-disk.js";
 import { PKG_STORE_MOUNT, STORE_BOX_PREFIX, isStoreBox, makePkgStore, specName, storable, storeKey, storedPathSh } from "./pkg-store.js";
@@ -1899,10 +1899,12 @@ export async function harvestCodeModeKnowledge(cfg: Config, box: string): Promis
 export const MCP_NOTES_PATH = "/root/.agent-mcp.notes";
 
 // What the controller knows about MCP package provisioning, for the MCP settings page: the baked
-// manifest the last box reported, and the decisions of the last install. Process memory — both
-// are re-learned on the next task start, and neither is worth a table.
+// manifest the last box reported, and the decisions of the last install PER OWNER (an install runs
+// under the box owner's ambient principal, and the page reads under the caller's, so one owner's
+// code-mode split never shows on another's page). Process memory — both are re-learned on the
+// next task start, and neither is worth a table.
 let bakedPackages: Record<string, string> = {};
-let lastProvision: LastProvision | undefined;
+const lastProvision = new Map<string, LastProvision>();
 
 function rememberBaked(json: string): void {
   const m = parseBakedManifest(json);
@@ -1910,13 +1912,13 @@ function rememberBaked(json: string): void {
 }
 
 /** mcp-skip:'spec' free=…k / mcp-fail:'spec' / mcp-drop:name,name / code-mode: on (…) / code-mode: fallback (why) → the last provision record. */
-export function rememberProvision(box: string, notes: readonly string[]): void {
+export function rememberProvision(box: string, notes: readonly string[], owner = ownerKey()): void {
   const specOf = (l: string) => (l.match(/^mcp-(?:skip|fail):'([^']+)'/)?.[1] ?? l.replace(/^mcp-(?:skip|fail):/, "").split(" ")[0].replace(/^'|'$/g, "")).trim();
   const skipped = notes.filter((l) => l.startsWith("mcp-skip:")).map(specOf);
   const failed = notes.filter((l) => l.startsWith("mcp-fail:")).map(specOf);
   const dropped = notes.filter((l) => l.startsWith("mcp-drop:")).flatMap((l) => l.slice("mcp-drop:".length).split(",").map((s) => s.trim()).filter(Boolean));
   const mode = mcpModeFromNotes(notes);
-  lastProvision = {
+  lastProvision.set(owner, {
     at: Date.now(),
     box,
     skipped,
@@ -1924,7 +1926,7 @@ export function rememberProvision(box: string, notes: readonly string[]): void {
     dropped,
     ...(mode.fallback !== undefined ? { codeModeFallback: mode.fallback } : {}),
     ...(mode.mode !== "direct" ? { codeMode: { wrapped: mode.wrapped, direct: mode.direct } } : {}),
-  };
+  });
 }
 
 /** How one install's servers reach the model, read back from its notes (the box keeps them; the probe reports them). */
@@ -1955,8 +1957,9 @@ export function mcpModeFromNotes(notes: readonly string[] | undefined): McpModeN
   return out;
 }
 
-export function mcpProvisionState(): { baked: Record<string, string>; last: LastProvision | undefined } {
-  return { baked: { ...bakedPackages }, last: lastProvision ? { ...lastProvision } : undefined };
+export function mcpProvisionState(owner = ownerKey()): { baked: Record<string, string>; last: LastProvision | undefined } {
+  const last = lastProvision.get(owner);
+  return { baked: { ...bakedPackages }, last: last ? { ...last } : undefined };
 }
 
 /**
