@@ -11,6 +11,8 @@ const RESTORE = flag("restore", "auto");
 const ONLY = flag("only", "").split(",").filter(Boolean);
 const HANA = flag("hana", "deal-qa-system");
 const TAG = flag("tag", "");
+/** Which waves to run: `on,off` (default), `on` or `off` (a rerun of one side after a fix). */
+const MODES = flag("modes", "on,off").split(",").filter((m) => m === "on" || m === "off");
 const TOKEN = process.env.ASB_TOKEN;
 if (!TOKEN) throw new Error("ASB_TOKEN is required");
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -42,6 +44,33 @@ const TASKS = {
   t3: {
     label: "HANA one call",
     task: `Using the ${HANA} HANA MCP server only: test the connection and reply with one line giving the HANA version and the current schema. Nothing else.`,
+  },
+  // Round-three scenarios (2026-11-25): a different server (Jira), two servers in one task, a
+  // multi-step HANA investigation, a CF log sweep, and a one-call docs lookup on a tiny server.
+  s1: {
+    label: "Jira triage (atlassian-rovo-mcp)",
+    task:
+      "Using the atlassian-rovo-mcp MCP server only (read-only): find Jira issues assigned to me or reported by me that were updated in the last 30 days (up to 30). Report them in one markdown table grouped by project: key, summary (at most 60 chars), status, updated date. End with one line saying how many of them are unresolved. No other tools, no files.",
+  },
+  s2: {
+    label: "CF + HANA cross-server",
+    task:
+      `Using the btp-cf and ${HANA} MCP servers only (read-only; HANA database btp-qa): (a) in the Cloud Foundry space the server is targeted at (or the first available), find every app whose name contains "deal" and report name, state and instance count; (b) in HANA, in the configured schema, count the rows of the three largest tables whose name contains DEAL. Give one markdown table for each part, then one line relating them (which deal app runs against how much deal data). No other tools, no files.`,
+  },
+  s3: {
+    label: "HANA investigation (multi-step)",
+    task:
+      `Using the ${HANA} MCP server only (read-only, database btp-qa): in the configured schema, find the tables whose name contains DEAL and that have a column named MODIFIEDAT or MODIFIED_AT. For the 3 such tables with the most rows, fetch the 5 most recently modified rows (only the key columns, STATUS if present, and the modified timestamp) and show them as one markdown table per table. End with one line naming the most recently modified record overall. No other tools, no files.`,
+  },
+  s4: {
+    label: "CF error-log sweep (fan-out)",
+    task:
+      "Using the btp-cf MCP server only (read-only): in the org and space the server is targeted at (or the first available), for every app (up to 15) fetch its recent log lines with errors only and count them per app. Report one markdown table: app, state, error-line count, most recent error line (at most 100 chars). Flag apps with more than 10 error lines. End with a one-line summary. No other tools, no files.",
+  },
+  s5: {
+    label: "CAP docs one call (cds-mcp)",
+    task:
+      "Using the cds-mcp MCP server only: search the CAP documentation for how to define a managed to-many composition in CDS and answer in at most 5 bullet lines, naming the documentation sections you used. No other tools, no files.",
   },
 };
 const ids = Object.keys(TASKS).filter((k) => !ONLY.length || ONLY.includes(k));
@@ -139,10 +168,9 @@ if (!prefs?.defaultAgent) throw new Error("GET /agent-prefs.json failed");
 log("caller setting before:", prefs.codeMode, "default:", prefs.codeModeDefault);
 const results = [];
 try {
-  const on = await startWave("on", prefs);
-  const off = await startWave("off", prefs);
+  const all = [];
+  for (const mode of MODES) all.push(...(await startWave(mode, prefs)));
   await setMode(prefs, RESTORE);
-  const all = [...on, ...off];
   await waitAll(all);
   for (const run of all) {
     const w = (await call("GET", `/watch.json?box=${run.box}`)).json;

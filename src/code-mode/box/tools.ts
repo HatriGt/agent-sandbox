@@ -61,6 +61,31 @@ export function isWriteTool(t: Pick<ToolDef, "name" | "readOnly" | "destructive"
   return tokens(t.name).some((w) => WRITE_WORDS.has(w));
 }
 
+/** Argument names that carry a statement the tool runs as given. */
+const STATEMENT_ARGS = new Set(["query", "sql", "statement", "stmt", "q", "command", "cql", "jql", "cypher", "expression"]);
+const READ_START = /^\s*(?:--[^\n]*\n\s*|\/\*[\s\S]*?\*\/\s*)*(?:select|with|show|describe|desc|explain|values|table)\b/i;
+const WRITE_WORD_IN_STATEMENT = /\b(?:insert|update|delete|merge|upsert|replace|drop|alter|create|truncate|grant|revoke|exec|execute|call|commit|rollback|set|load|import|copy|rename|lock|unload|into)\b/i;
+
+/**
+ * Whether the call's arguments are a read-only statement: every statement-like argument (query,
+ * sql, …) begins like a read (SELECT, WITH, SHOW, EXPLAIN, …) and contains no write keyword. A
+ * server that marks its query tool destructive because it CAN write (hana_execute_query) would
+ * otherwise pause every plain SELECT, which the live bench hit on both HANA tasks; the read
+ * passes and the same tool with an UPDATE still waits. False when no argument is a statement.
+ */
+export function isReadStatement(argsJson: string): boolean {
+  let args: unknown;
+  try {
+    args = JSON.parse(argsJson);
+  } catch {
+    return false;
+  }
+  if (!args || typeof args !== "object" || Array.isArray(args)) return false;
+  const statements = Object.entries(args as Record<string, unknown>).filter(([k, v]) => STATEMENT_ARGS.has(k.toLowerCase()) && typeof v === "string");
+  if (!statements.length) return false;
+  return statements.every(([, v]) => READ_START.test(v as string) && !WRITE_WORD_IN_STATEMENT.test((v as string).replace(/'(?:[^']|'')*'/g, "''")));
+}
+
 // ---------------------------------------------------------------------------------------------
 // JSON schema → TypeScript-style type text
 

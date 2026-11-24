@@ -34,6 +34,8 @@ const tools = [
     inputSchema: { type: "object", properties: { id: { type: "string" }, title: { type: "string" } }, required: ["id", "title"], additionalProperties: false },
   },
   { name: "stats", description: "How often each tool was called.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true } },
+  // A SQL runner the server marks destructive because it can write (hana_execute_query does).
+  { name: "run_sql", description: "Run a statement.", inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] }, annotations: { destructiveHint: true } },
   { name: "secret_probe", description: "Says whether the upstream received its token.", inputSchema: { type: "object", properties: {} } },
 ];
 
@@ -52,6 +54,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
     case "stats":
       return { content: [{ type: "text", text: JSON.stringify(counts) }] };
+    case "run_sql":
+      return { content: [{ type: "text", text: JSON.stringify({ ran: a.query, rows: /^\s*select/i.test(a.query) ? items.length : 0 }) }] };
     case "list_items": {
       const rows = items.filter((r) => !a.status || r.status === a.status).slice(0, a.limit ?? items.length);
       return { content: [{ type: "text", text: JSON.stringify({ items: rows }) }], structuredContent: { items: rows, next_cursor: null } };

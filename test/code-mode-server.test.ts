@@ -214,7 +214,7 @@ test("server: CODE_MODE_CATALOG puts the tool list and the upstream notes into t
 
 test("server: the run description names every tool per server, readers first, and says who is not up", async () => {
   const run = (await clients[0].listTools()).tools.find((t) => t.name === "run")!;
-  assert.match(run.description ?? "", /\nTools \(argument types: search\):\nmcp__tracker__: get_item, list_items, secret_probe, stats, update_item\n/);
+  assert.match(run.description ?? "", /\nTools \(argument types: search\):\nmcp__tracker__: get_item, list_items, secret_probe, stats, run_sql, update_item\n/);
   assert.doesNotMatch(run.description ?? "", /fail_tool/, "denied tools stay out of the index");
   assert.match(run.description ?? "", /^not connected yet: broken/m);
   assert.match(run.description ?? "", /pauses the run and puts an Approve\/Decline question to the operator itself/);
@@ -290,4 +290,18 @@ test("briefError keeps the status and title of a JSON error body and drops the r
   assert.equal(briefError(rpc), "HTTP: -32600 Invalid Compact JWS");
   assert.equal(briefError("spawn npx ENOENT\n  at x"), "spawn npx ENOENT at x");
   assert.equal(briefError("x".repeat(300)).length, 160);
+});
+
+test("server: a SQL tool the server marks destructive runs a SELECT without a pause and still pauses on an UPDATE", async () => {
+  const c = clients[0];
+  const read = await tool(c, "run", { code: 'return call("mcp__tracker__run_sql", { query: "SELECT id FROM items WHERE status = \'open\'" })' });
+  assert.equal(read.isError, false, read.text);
+  assert.deepEqual(JSON.parse(read.text.split("\n")[0]), { ran: "SELECT id FROM items WHERE status = 'open'", rows: 400 });
+  const write = await tool(c, "run", { code: 'return call("mcp__tracker__run_sql", { query: "UPDATE items SET status = \'closed\'" })' });
+  assert.match(write.text, /^Paused: call #\d+ mcp__tracker__run_sql \{"query":"UPDATE items SET status = 'closed'"\} changes something/);
+  assert.match(write.text, /mcp__tracker__run_sql is marked destructive by its server/);
+  rmSync(questionFile, { force: true });
+  const marked = await tool(c, "search", { query: "select:mcp__tracker__run_sql" });
+  assert.match(marked.text, /### mcp__tracker__run_sql \[approval\]/, "the tool can write, so search still marks it");
+  assert.match(marked.text, /a read-only statement \(a plain SELECT\) given to a SQL tool passes without a pause/);
 });

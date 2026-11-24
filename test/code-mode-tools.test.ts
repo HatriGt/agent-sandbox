@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   deniedBy,
+  isReadStatement,
   isWriteTool,
   literalCalls,
   literalKeys,
@@ -288,4 +289,22 @@ test("renderIndex: one line per server, readers first, within the budget; a big 
   assert.ok(text.length <= 400, `${text.length} chars`);
   assert.match(text, /^mcp__s__: tool_number_0, .*, \+\d+ more$/m);
   assert.match(text, /^mcp__t__: one$/m, "the small server keeps its whole line");
+});
+
+test("isReadStatement: a SELECT/WITH/SHOW/EXPLAIN statement argument reads; a write keyword, no statement argument or bad JSON does not", () => {
+  const j = (o: unknown) => JSON.stringify(o);
+  assert.equal(isReadStatement(j({ database: "btp-qa", query: "SELECT TABLE_NAME FROM SYS.M_TABLES WHERE SCHEMA_NAME = 'X' ORDER BY RECORD_COUNT DESC", maxRows: 10 })), true);
+  assert.equal(isReadStatement(j({ sql: "\n-- top rows\nWITH t AS (SELECT 1 FROM DUMMY) SELECT * FROM t" })), true);
+  assert.equal(isReadStatement(j({ statement: "explain plan for select * from a" })), true);
+  assert.equal(isReadStatement(j({ query: "SELECT * FROM a WHERE note = 'please update me'" })), true, "a write word inside a string literal is data");
+  assert.equal(isReadStatement(j({ query: "UPDATE a SET b = 1" })), false);
+  assert.equal(isReadStatement(j({ query: "SELECT 1; DELETE FROM a" })), false);
+  assert.equal(isReadStatement(j({ query: "select * from a; create table b (x int)" })), false);
+  assert.equal(isReadStatement(j({ query: "CALL my_proc()" })), false);
+  assert.equal(isReadStatement(j({ query: "INSERT INTO a SELECT * FROM b" })), false);
+  assert.equal(isReadStatement(j({ query: "SELECT 1", sql: "DROP TABLE a" })), false, "every statement argument must read");
+  assert.equal(isReadStatement(j({ id: "IT-1", title: "SELECT me" })), false, "no statement argument");
+  assert.equal(isReadStatement(j({ query: 42 })), false);
+  assert.equal(isReadStatement("not json"), false);
+  assert.equal(isReadStatement(j([])), false);
 });

@@ -20,6 +20,7 @@ import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   deniedBy,
+  isReadStatement,
   isWriteTool,
   MAX_RESULTS,
   renderCatalog,
@@ -299,7 +300,7 @@ class Upstream {
 const HOW_TO =
   'Call these from mcp__code-mode__run: `const r = await call("mcp__server__tool", { ...args });`, then filter in the script and return only what the task needs. ' +
   "call() resolves to the tool's structured result when it has one (use its fields directly: r.rows, not r.structuredContent.rows), else to its text parsed as JSON when it is JSON, else the text; a failed call throws, so wrap a call you can do without in try/catch. " +
-  "A tool marked [approval] changes something: its call pauses the run until the operator approves (run tells you how to resume).";
+  "A tool marked [approval] changes something: its call pauses the run until the operator approves (run tells you how to resume); a read-only statement (a plain SELECT) given to a SQL tool passes without a pause.";
 
 /**
  * An upstream's connect error, short enough to repeat in every search result. Transport errors
@@ -453,10 +454,14 @@ export class CodeMode {
    * Whether a call to this tool waits for the operator: the owner's allow list wins, then their
    * approve list, then the tool's own annotation or the words of its name (isWriteTool).
    */
-  needsApproval(tool: ToolDef): boolean {
+  needsApproval(tool: ToolDef, argsJson?: string): boolean {
     if (deniedBy(tool.full, this.config.allow)) return false;
     if (deniedBy(tool.full, this.config.approve)) return true;
-    return isWriteTool(tool);
+    if (!isWriteTool(tool)) return false;
+    // A tool the server marks destructive because it can write (a SQL runner) is a read when the
+    // statement it is given is one; the name-based rule never sees a statement (its tools change
+    // things by name, not by argument), and the approve list above is the operator's word.
+    return !(tool.destructive === true && argsJson !== undefined && isReadStatement(argsJson));
   }
 
   private renderHit(t: ToolDef, level: Detail): string {
@@ -727,7 +732,7 @@ export class CodeMode {
     }
     const args = JSON.parse(argsJson);
     if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error(`call("${name}", args): args must be an object`);
-    if (this.needsApproval(tool) && !run.approved.some((a) => a.seq === seq && a.name === name && a.argsJson === argsJson)) {
+    if (this.needsApproval(tool, argsJson) && !run.approved.some((a) => a.seq === seq && a.name === name && a.argsJson === argsJson)) {
       run.pending = { seq, n, name, argsJson };
       throw new RunPaused(`${name} ${deniedBy(name, this.config.approve) ? "is on the approve list" : tool.destructive ? "is marked destructive by its server" : "creates, changes or removes something by its name"}`);
     }
