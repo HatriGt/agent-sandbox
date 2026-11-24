@@ -660,3 +660,67 @@ Readings:
   the socket at the TLS handshake for both Instabox hosts (stopped instance or an IP allowlist).
 - Still open: Jira JQL (atlassian-rovo-mcp is direct under auto with 4 tools, so it would need the
   `wrap` override to bench), and a run on Freestyle hosts for the start-up time.
+
+### 13.7 Round three, learned from Cloudflare's codemode (shipped 2026-11-25)
+
+Commits 1eae60b, 25f308c, 673e135. Six changes to the box server, each with a unit test
+(`test/code-mode-*.test.ts`, 106 pass) and proven live under the operator account on Instabox
+hosts with `.shots/cm-2b/live-v2.mjs` (phases `audit`, `approve --box=`, `reuse`; traces under
+`.shots/cm-2b/trace-v2-*.log`).
+
+1. **Compact search.** The first 12 hits at the asked detail within 4k chars, the rest one line
+   each; readers rank above writers unless the query asks for a change; `select:a,b` (the
+   ToolSearch syntax the model reaches for) or exact names return just those. Live: the model's
+   first search was a `select:` of seven names and it wrote the whole audit from that one answer.
+2. **The run description names every tool per server** (`renderIndex`, 2.5k chars, readers first)
+   and the saved scripts (newest first, 700 chars), and the prompt says the wrapped tools are not
+   in ToolSearch and never direct. A tools/list answered while an upstream was still connecting is
+   offered again (`list_changed`) once it is up.
+3. **Previews on every call's summary line**: a short result whole, else one sample value per
+   field, so the model stops recalling a result to learn how a field is spelt.
+4. **Saved scripts.** A clean script with three or more calls (or one named with
+   `save`/`description`) is kept in knowledge.json, rides the owner's blob to the next box, search
+   and the run description list the ones that match, and `run {snippet, input}` reruns it with
+   `input` as a script global. `GET`/`DELETE /code-mode/snippets.json`; a list with Remove on the
+   MCP page's code-mode card. Live: two scripts saved from the audit and the label change.
+5. **Approval.** A call to a tool that creates, changes or removes something (the server's
+   `readOnlyHint`/`destructiveHint`, else the words of its name; a server's `approve`/`allow` lists
+   in the MCP JSON add or exempt tools, `allow: ["*"]` turns it off) pauses the run with nothing
+   sent. The first live try showed the gap: the pause text asked the model to ask the operator, and
+   the model answered its own question ("you explicitly asked for this change, so I'll proceed")
+   and resumed, so the PATCH went through unapproved. 673e135 closes it the way every box question
+   is enforced: **the server writes the box's question file itself** (an Approve/Decline card with
+   the arguments, why it waits and the resume id), the ask-gate hook denies every further tool call,
+   the turn ends at the pause, and a resume while the question is still open is refused by the
+   server too. The operator's answer continues the session; a yes is followed by `run {resume}`,
+   which replays the recorded calls (name and arguments must match, else live from there) and lets
+   the approved call through; paused runs survive a new server process (paused.json).
+6. **Water-fill return cap**: the budget is shared over a value's children, so one huge field no
+   longer starves its siblings.
+
+Live numbers (same CF audit task as §13.6; per turn, from the `⟦usage⟧` lines; cost at the §13.6
+list rates):
+
+| Turn | Requests | Total input | Cache read | Cache write | Output | Searches | Scripts | MCP calls | Agent s | Est. $ |
+|---|---|---|---|---|---|---|---|---|---|---|
+| CF audit, round two (§13.6 trace, baseline) | 9 | 362k | 316k | 46k | 5.3k | 3 | 2 | 16 | 84 | 0.398 |
+| CF audit, round three (new box) | 4 | 136k | 98k | 38k | 2.8k | 1 | 2 | 27 | 47 | 0.268 |
+| CF audit again, scripts offered (new box) | 4 | 134k | 94k | 40k | 2.8k | 2 | 1 | 28 | 45 | 0.273 |
+| Label change, first try (model self-approved) | 4 | 171k | 164k | 6k | 1.7k | 1 | 2 | 5 | 35 | 0.099 |
+| Label change, enforced pause: ask turn | 2 | 91k | 45k | 46k | 0.7k | 0 | 1 | 2 | 20 | 0.254 |
+| Label change, enforced pause: resume turn | 2 | 94k | 92k | 1k | 0.1k | 0 | 1 | 3 | 9 | 0.027 |
+
+Readings:
+
+- The audit went from 9 requests and 362k input tokens to 4 and 136k (−62 %), 84 s to 47 s, with
+  the same answer (adev01-dev/dev, twelve stopped `-db` apps). The difference is the compact
+  `select:` search plus the tool index in the run description: one search instead of three, and no
+  guessed names.
+- The enforced pause costs one extra turn: the ask turn's cache write (46k) is the new system
+  prompt after the deploy, not the pause; the resume turn is almost all cache read.
+- Open: the model was offered the saved audit script twice (run description and search) and still
+  wrote its own, even when the task said to reuse one. The auto description ("If no targeted
+  space, pick first available", from the script's first comment) does not say what the script
+  answers; a better description (the task's first line, or the return shape) is the next lever.
+  The pause's card wording and the replay rule are enforced; the model's note before ending its
+  turn is not, and it wrote one unasked.
