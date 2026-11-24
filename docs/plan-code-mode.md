@@ -724,3 +724,52 @@ Readings:
   item 4 was removed; the row stands as a plain second audit.
 - The pause's card wording and the replay rule are enforced; the model's note before ending its
   turn is not, and it wrote one unasked.
+
+### 13.8 Five real-time scenarios, on vs off (2026-11-25, operator account)
+
+Five tasks the operator could ask on any day, each run once with code mode on and once off
+against the real servers (`.shots/cm-2b/bench-live.mjs --only=s1..s5`; traces in
+`.shots/cm-2b/trace-r3-<mode>-<id>.log`, results in `bench-r3-*.json` and `bench-r3b-*.json`).
+The first wave paused both HANA tasks in code mode because deal-hana-btp marks
+`hana_execute_query` destructive (it can run an UPDATE), so a plain SELECT waited for the
+operator while direct mode, with no gate, ran it. c0bcc5c lets a read-only statement through such
+a tool (`isReadStatement`: every statement argument begins like a read and carries no write
+keyword outside string literals; an UPDATE or a second statement still pauses, the operator's
+approve list still wins); the code-mode rows for s2, s3 and s5 below are the rerun after that
+deploy. Cost at the §13.6 list rates; "MCP calls" for code mode is calls made from scripts.
+
+| Scenario | Mode | Outcome | Requests | Total input | Cache read | Cache write | Output | MCP calls | Agent s | Est. $ |
+|---|---|---|---|---|---|---|---|---|---|---|
+| s1 Jira triage (atlassian-rovo-mcp) | direct | blocked, asked | 8 | 473k | 399k | 75k | 4.0k | 1 | 59 | 0.532 |
+| s1 Jira triage | code mode | blocked, asked | 7 | 229k | 192k | 37k | 3.9k | 4 in 2 scripts, 3 searches | 59 | 0.303 |
+| s2 CF + HANA cross-server | direct | done | 13 | 922k | 819k | 104k | 12.2k | 14 | 182 | 0.927 |
+| s2 CF + HANA cross-server | code mode | done | 12 | 590k | 521k | 69k | 8.5k | 65 in 8 scripts, 2 searches | 143 | 0.619 |
+| s3 HANA investigation | direct | done | 13 | 586k | 535k | 51k | 8.2k | 14 | 108 | 0.523 |
+| s3 HANA investigation | code mode | done | 8 | 317k | 284k | 34k | 4.8k | 7 in 5 scripts, 1 search | 67 | 0.322 |
+| s4 CF error-log sweep (15 apps) | direct | done | 7 | 304k | 262k | 42k | 4.3k | 19 | 52 | 0.347 |
+| s4 CF error-log sweep | code mode | done | 4 | 129k | 108k | 21k | 1.9k | 18 in 1 script, 2 searches | 24 | 0.164 |
+| s5 CAP docs lookup (cds-mcp) | direct | tool failed | 4 | 126k | 105k | 21k | 1.1k | 3 | 19 | 0.147 |
+| s5 CAP docs lookup | code mode | tool failed | 4 | 113k | 98k | 15k | 1.3k | 4 in 2 scripts, 1 search | 29 | 0.124 |
+
+Readings:
+
+- Across the five, code mode used 36–58 % less input and cost 33–53 % less on the four tasks that
+  touched a real server more than once (s1–s4); the one-call docs task (s5) is a wash (−10 %
+  input, +10 s: the script round trip costs more than it saves when there is one call to make).
+- Same answers where both finished: s3 named the same three tables and the same rows, s4 the same
+  fifteen apps with zero error lines. s2 differs in interpretation, not data: the CF server is not
+  scoped to a space and lists all 319 apps in 11 spaces; direct mode took the first space (`dev`,
+  22 deal apps, all stopped) and code mode chose `Quality` to match the btp-qa database (the
+  running `deal-management-srv`, 3 instances); the HANA half (the same three DEAL tables, 24.3M
+  rows) agrees.
+- s1 is blocked the same way in both modes: atlassian-rovo-mcp exposes only Teamwork Graph tools
+  that need a cloudId the operator has not configured, so both runs ended at a question. Code mode
+  reached that question at half the input (the search returned the tool list compactly; direct
+  mode spent four ToolSearch rounds to learn the same).
+- s5 fails identically in both modes and it is not code mode: `@cap-js/mcp-server` builds its
+  embeddings index inside its own package directory at first use, and that directory is a link
+  into the read-only package store (`/opt/asb-store/p_@cap-js_mcp-server/…/embeddings`, ENOENT on
+  mkdir). Open: build the embeddings when the store entry is built, or point the server at a
+  writable cache. Until then cds-mcp answers nothing on store-backed hosts.
+- The read-statement rule is what made s2 and s3 possible in code mode: before it, both paused at
+  the first SELECT. The gate is unchanged for anything that writes.
