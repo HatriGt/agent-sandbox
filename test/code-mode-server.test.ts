@@ -276,6 +276,9 @@ test("server: a clean script with three calls is kept, listed by search, and rer
   assert.match(JSON.stringify(JSON.parse(readFileSync(join(stateDir, "knowledge.json"), "utf8")).snippets["one-item"]), /status of IT-1000/);
   const nope = await tool(c, "run", { snippet: "one-itme" });
   assert.match(nope.text, /no saved script "one-itme"; nearest: one-item/);
+  // The run description names them too, newest first, for a run that never searches.
+  const run = (await c.listTools()).tools.find((t) => t.name === "run")!;
+  assert.match(run.description ?? "", /\nSaved scripts \(run \{snippet: name, input\}; search for more\): one-item — status of IT-1000; tracker\.get_item — titles of the given ids$/);
 });
 
 test("box modules import only each other, node built-ins and (type-only) the SDK", () => {

@@ -61,6 +61,8 @@ const PAUSED_PERSIST_MAX = 4_000_000;
 const KNOWLEDGE_FILE = "knowledge.json";
 /** The per-server tool names the `run` description carries (every request; the prompt cache keeps it). */
 const INDEX_MAX = 2_500;
+/** And the saved scripts it names after the tools. */
+const INDEX_SNIPPETS_MAX = 700;
 const SAVE_MAX_CHARS = 50_000_000;
 /** CODE_MODE_CATALOG: how long tools/list waits for upstreams so the catalog can list their tools. */
 const CATALOG_WAIT_MS = 2_500;
@@ -833,6 +835,20 @@ export class CodeMode {
     const later = ups.filter((u) => u.state !== "ready");
     this.listedIncomplete = later.some((u) => u.state !== "failed");
     if (later.length) lines.push(`${visible.length ? "not connected yet" : "servers still connecting"}: ${later.map((u) => u.name).join(", ")} (search lists their tools once they are up)`);
+    // The saved scripts too, newest first, so a run that never searches still knows it can rerun one.
+    const snips = [...this.snippets].sort((a, b) => b[1].savedAt - a[1].savedAt);
+    if (snips.length) {
+      let line = "Saved scripts (run {snippet: name, input}; search for more): ";
+      let shown = 0;
+      for (const [name, s] of snips) {
+        const piece = `${shown ? "; " : ""}${name} — ${s.description.slice(0, 80)}`;
+        if (line.length + piece.length > INDEX_SNIPPETS_MAX) break;
+        line += piece;
+        shown++;
+      }
+      if (shown < snips.length) line += `; +${snips.length - shown} more`;
+      lines.push(line);
+    }
     return lines.join("\n");
   }
 
