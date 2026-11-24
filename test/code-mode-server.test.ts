@@ -4,13 +4,14 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { briefError, parseConfig } from "../src/code-mode/box/server.ts";
+import { briefError, parseConfig, QUESTION_FILE_DEFAULT } from "../src/code-mode/box/server.ts";
+import { QUESTION_MARK } from "../src/drivers/sentinels.ts";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const serverTs = join(root, "src", "code-mode", "box", "server.ts");
@@ -18,6 +19,7 @@ const upstream = join(root, "test", "fixtures", "code-mode-upstream.mjs");
 const dir = mkdtempSync(join(tmpdir(), "code-mode-it-"));
 const stateDir = join(dir, "state");
 const outDir = join(dir, "out");
+const questionFile = join(dir, "question");
 const configPath = join(dir, "upstream.json");
 writeFileSync(
   configPath,
@@ -35,7 +37,7 @@ async function connect(extraEnv: Record<string, string> = {}): Promise<Client> {
     command: process.execPath,
     args: ["--import", "tsx", serverTs, configPath],
     cwd: root,
-    env: { ...(process.env as Record<string, string>), CODE_MODE_STATE_DIR: stateDir, CODE_MODE_OUT_DIR: outDir, ...extraEnv },
+    env: { ...(process.env as Record<string, string>), CODE_MODE_STATE_DIR: stateDir, CODE_MODE_OUT_DIR: outDir, CODE_MODE_QUESTION_FILE: questionFile, ...extraEnv },
     stderr: "pipe",
   });
   const client = new Client({ name: "test", version: "1" });
@@ -215,7 +217,7 @@ test("server: the run description names every tool per server, readers first, an
   assert.match(run.description ?? "", /\nTools \(argument types: search\):\nmcp__tracker__: get_item, list_items, secret_probe, stats, update_item\n/);
   assert.doesNotMatch(run.description ?? "", /fail_tool/, "denied tools stay out of the index");
   assert.match(run.description ?? "", /^not connected yet: broken/m);
-  assert.match(run.description ?? "", /pauses the run for the operator's approval/);
+  assert.match(run.description ?? "", /pauses the run and puts an Approve\/Decline question to the operator itself/);
 });
 
 test("server: select:<name> returns exactly those tools, a write tool is marked, and a miss names the nearest", async () => {
@@ -227,7 +229,8 @@ test("server: select:<name> returns exactly those tools, a write tool is marked,
   assert.doesNotMatch(names.text, /list_items \[approval\]/, "a reader is not marked");
 });
 
-test("server: a write tool pauses the run; resume replays the calls made and lets the write through", async () => {
+test("server: a write tool pauses the run, asks the operator through the box's question file, and resumes only once it is answered; the resume replays the calls made and lets the write through", async () => {
+  assert.equal(QUESTION_FILE_DEFAULT, QUESTION_MARK, "the pause writes the driver's question file");
   const c = clients[0];
   const before = JSON.parse((await tool(c, "run", { code: 'return call("mcp__tracker__stats", {})' })).text.split("\n")[0]);
   const r = await tool(c, "run", {
@@ -237,7 +240,18 @@ test("server: a write tool pauses the run; resume replays the calls made and let
   const id = r.text.match(/\{"resume": "([a-z0-9]+)"\}/)?.[1];
   assert.ok(id, r.text);
   assert.match(r.text, /^Paused: call #\d+ mcp__tracker__update_item \{"id":"IT-1001","title":"renamed by the script"\} changes something/);
+  assert.match(r.text, /\nThe operator has been asked \(a card with Approve and Decline; mcp__tracker__update_item creates, changes or removes something by its name\)\. End your turn now, with a short note of what waits: every further tool call is denied until they answer, and a resume before their answer is refused\. /);
   assert.match(r.text, /the 1 call already made is answered from its recorded result/);
+  assert.doesNotMatch(r.text, /Ask the operator/, "the server asked; the model is not asked to");
+  // The question file in the card's shape: one sentence, context, an Options block.
+  const q = readFileSync(questionFile, "utf8");
+  assert.match(q, /^Approve call #\d+ mcp__tracker__update_item\? It changes something, so the script paused before sending it\.\n\nArguments: \{"id":"IT-1001","title":"renamed by the script"\}\nWhy it waits: mcp__tracker__update_item creates, changes or removes something by its name\.\n1 call already made replays from its record; nothing was sent for this one \(run [a-z0-9]+\)\.\n\nOptions:\n- Approve \| send the call and finish the script\n- Decline \| send nothing and report what was not done\n$/);
+  // Unanswered (the file still there): no resume.
+  const early = await tool(c, "run", { resume: id });
+  assert.equal(early.isError, true);
+  assert.match(early.text, /the operator has not answered yet/);
+  rmSync(questionFile);
+  assert.equal(existsSync(questionFile), false);
   assert.match(r.text, /--- 2 MCP calls before the pause ---\n#\d+ mcp__tracker__get_item \d+ \{id, title, status, owner: \{email\}\} e\.g\. \{id: "IT-1001", title: "Item number 1 with a reasonably long t…, status: "closed", owner: \{email\}\}\n#\d+ mcp__tracker__update_item paused: waits for the operator's approval$/);
   const mid = JSON.parse((await tool(c, "run", { code: 'return call("mcp__tracker__stats", {})' })).text.split("\n")[0]);
   assert.equal(mid.update_item, undefined, "nothing was sent for the paused call");

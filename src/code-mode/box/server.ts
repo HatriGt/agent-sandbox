@@ -12,7 +12,7 @@
  * Nothing here waits for a human: a refused call fails at once with the rule that refused it.
  */
 import { createRequire } from "node:module";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -63,6 +63,14 @@ const KNOWLEDGE_FILE = "knowledge.json";
 const INDEX_MAX = 2_500;
 /** And the saved scripts it names after the tools. */
 const INDEX_SNIPPETS_MAX = 700;
+/**
+ * The box's question file (src/drivers/sentinels.ts QUESTION_MARK): the driver's one channel to
+ * the operator. While it exists every tool call the agent makes is denied (the ask-gate hook), so
+ * a pause that writes it ends the turn at the pause — the model cannot approve on its own, which
+ * it did when the pause only asked it to ask ("you explicitly asked for this change, so I'll
+ * proceed", then run {resume}). The resume path deletes the file with the operator's answer.
+ */
+export const QUESTION_FILE_DEFAULT = "/workspace/.agent.question";
 const SAVE_MAX_CHARS = 50_000_000;
 /** CODE_MODE_CATALOG: how long tools/list waits for upstreams so the catalog can list their tools. */
 const CATALOG_WAIT_MS = 2_500;
@@ -331,6 +339,8 @@ export interface Paths {
   stateDir: string;
   /** The only directory saveFile writes into. */
   outDir: string;
+  /** The box's question file: a pause writes the approval question there (none: the model is told to ask). */
+  questionFile?: string;
 }
 
 /** A script kept for later runs: the owner's blob carries it to the next box (knowledge.ts). */
@@ -370,6 +380,8 @@ interface RunState {
   /** The call the run stopped at, waiting for the operator. */
   pending?: Approved & { n: number };
   pausedAt?: number;
+  /** The pause wrote the operator's question itself (the question file), so the turn ends there. */
+  asked?: boolean;
   /** Per execution: the next sequence number and the n → seq map the hooks share. */
   seq: number;
   seqOf: Map<number, number>;
@@ -596,6 +608,13 @@ export class CodeMode {
         isError: true,
       };
     }
+    // The approval is the operator's: while their question is still open nothing resumes.
+    if (run.asked && this.paths.questionFile && existsSync(this.paths.questionFile)) {
+      return {
+        text: `Error: the operator has not answered yet — the approval question for run ${id} is still open. End your turn now; their answer continues this session, and only a yes resumes.`,
+        isError: true,
+      };
+    }
     this.paused.delete(id);
     if (run.pending) run.approved.push({ seq: run.pending.seq, name: run.pending.name, argsJson: run.pending.argsJson });
     run.pending = undefined;
@@ -651,11 +670,18 @@ export class CodeMode {
     const p = run.pending!;
     const argsText = p.argsJson.length > 600 ? `${p.argsJson.slice(0, 599)}…` : p.argsJson;
     const done = run.record.length;
+    run.asked = this.askOperator(run, paused, argsText);
+    this.persistPaused();
+    const replay = `the ${done} call${done === 1 ? "" : "s"} already made ${done === 1 ? "is" : "are"} answered from ${done === 1 ? "its" : "their"} recorded result${done === 1 ? "" : "s"} (no new calls), and this call goes through`;
     const out = [
       `Paused: call #${p.n} ${p.name} ${argsText} changes something, so it waits for the operator's approval; nothing was sent for it.`,
-      `Ask the operator whether to go ahead, naming the tool and its arguments (${paused}). ` +
-        `If they approve, call mcp__code-mode__run with {"resume": "${run.id}"}: the script runs again, the ${done} call${done === 1 ? "" : "s"} already made ${done === 1 ? "is" : "are"} answered from ${done === 1 ? "its" : "their"} recorded result${done === 1 ? "" : "s"} (no new calls), and this call goes through. ` +
-        "If they decline, do not resume: report what was not done. A different script needs no resume.",
+      run.asked
+        ? `The operator has been asked (a card with Approve and Decline; ${paused}). End your turn now, with a short note of what waits: every further tool call is denied until they answer, and a resume before their answer is refused. ` +
+          `Their answer continues this session. If it is yes, call mcp__code-mode__run with {"resume": "${run.id}"}: the script runs again, ${replay}. ` +
+          "If it is no, do not resume: report what was not done. A different script needs no resume."
+        : `Ask the operator whether to go ahead, naming the tool and its arguments (${paused}). ` +
+          `If they approve, call mcp__code-mode__run with {"resume": "${run.id}"}: the script runs again, ${replay}. ` +
+          "If they decline, do not resume: report what was not done. A different script needs no resume.",
     ];
     const log = logs.join("\n");
     if (log) out.push("--- console ---", log.slice(0, 4000));
@@ -664,6 +690,36 @@ export class CodeMode {
       for (const c of calls) out.push(callLine(c));
     }
     return out.join("\n");
+  }
+
+  /**
+   * Put the approval question in front of the operator: the question file, in the shape the
+   * controller's card parses (one sentence, context lines, an Options block; src/drivers/prompts.ts).
+   * False when there is no file to write (a server outside a box) or the write failed, in which
+   * case the pause text asks the model to ask.
+   */
+  private askOperator(run: RunState, why: string, argsText: string): boolean {
+    if (!this.paths.questionFile || !run.pending) return false;
+    const p = run.pending;
+    const done = run.record.length;
+    const text = [
+      `Approve call #${p.n} ${p.name}? It changes something, so the script paused before sending it.`,
+      "",
+      `Arguments: ${argsText.length > 300 ? `${argsText.slice(0, 299)}…` : argsText}`,
+      `Why it waits: ${why}.`,
+      `${done} call${done === 1 ? "" : "s"} already made replay${done === 1 ? "s" : ""} from ${done === 1 ? "its" : "their"} record; nothing was sent for this one (run ${run.id}).`,
+      "",
+      "Options:",
+      "- Approve | send the call and finish the script",
+      "- Decline | send nothing and report what was not done",
+      "",
+    ].join("\n");
+    try {
+      writeFileSync(this.paths.questionFile, text);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private persistPaused(): void {
@@ -676,7 +732,7 @@ export class CodeMode {
       }
       const plain: Record<string, unknown> = {};
       for (const [id, r] of this.paused) {
-        plain[id] = { code: r.code, inputJson: r.inputJson, record: r.record, approved: r.approved, pending: r.pending, pausedAt: r.pausedAt, save: r.save, description: r.description, snippet: r.snippet };
+        plain[id] = { code: r.code, inputJson: r.inputJson, record: r.record, approved: r.approved, pending: r.pending, pausedAt: r.pausedAt, asked: r.asked, save: r.save, description: r.description, snippet: r.snippet };
       }
       const text = JSON.stringify(plain);
       // A record too big for the disk stays in memory only (a new process would ask again).
@@ -932,7 +988,7 @@ const TOOLS = [
   {
     name: "run",
     description:
-      "Run JavaScript — the body of an async function — that calls MCP tools and returns only what the task needs. In the script: `await call(\"mcp__server__tool\", { ...args })` returns the tool's result (parsed JSON when the tool returns JSON); `await recall(n)` returns result #n of an earlier call again without calling; `await saveFile(name, data)` writes /workspace/.agent-out/<name> (CSV for an array with .csv, JSONL with .jsonl, else JSON or text) and returns the path; `await sleep(ms)`; `console.log`; `input` is the value run was given. Up to 8 calls run at once (use Promise.all). Filter, count and pick fields in the script and `return` a small value. No fetch, require, process, files or network. Limits: 120 s; return value 20k chars; console 4k. The script sees every tool result whole, so filter big results there. Names and arguments are checked before the script runs; argument types come from search. A call to a tool that creates, changes or removes something pauses the run for the operator's approval: ask them, then run {resume: id} (calls already made are replayed from their record). {snippet, input} reruns a saved script; {save, description} with code keeps this one.",
+      "Run JavaScript — the body of an async function — that calls MCP tools and returns only what the task needs. In the script: `await call(\"mcp__server__tool\", { ...args })` returns the tool's result (parsed JSON when the tool returns JSON); `await recall(n)` returns result #n of an earlier call again without calling; `await saveFile(name, data)` writes /workspace/.agent-out/<name> (CSV for an array with .csv, JSONL with .jsonl, else JSON or text) and returns the path; `await sleep(ms)`; `console.log`; `input` is the value run was given. Up to 8 calls run at once (use Promise.all). Filter, count and pick fields in the script and `return` a small value. No fetch, require, process, files or network. Limits: 120 s; return value 20k chars; console 4k. The script sees every tool result whole, so filter big results there. Names and arguments are checked before the script runs; argument types come from search. A call to a tool that creates, changes or removes something pauses the run and puts an Approve/Decline question to the operator itself: end your turn, and after their yes run {resume: id} (calls already made are replayed from their record). {snippet, input} reruns a saved script; {save, description} with code keeps this one.",
     inputSchema: {
       type: "object",
       properties: {
@@ -955,6 +1011,7 @@ async function serve(configPath: string): Promise<void> {
   const mode = new CodeMode(parsed.config, sdk, {
     stateDir: process.env.CODE_MODE_STATE_DIR || home,
     outDir: process.env.CODE_MODE_OUT_DIR || "/workspace/.agent-out",
+    questionFile: process.env.CODE_MODE_QUESTION_FILE || QUESTION_FILE_DEFAULT,
   });
   const server = new sdk.Server(
     { name: "code-mode", version: "1" },

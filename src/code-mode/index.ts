@@ -66,7 +66,7 @@ export const CODE_MODE_PROMPT =
   "re-reads an earlier result without calling the tool again. " +
   "The tools behind code mode are not in ToolSearch and are never called directly: mcp__code-mode__run's description names them per server, " +
   "and search with select:<name> gives one tool's argument types. A call to a tool that creates, changes or removes something pauses the run " +
-  "for the operator's approval: ask them, and when they say yes call run with the resume id it gave you. " +
+  "and asks the operator itself (an Approve/Decline card): end your turn, and when their answer comes back as yes call run with the resume id it gave you. " +
   "A saved script from an earlier run (search lists them) reruns with run {snippet, input}.";
 
 /**
