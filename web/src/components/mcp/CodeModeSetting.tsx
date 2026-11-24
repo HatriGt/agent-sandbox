@@ -1,8 +1,9 @@
 import * as React from "react";
 import { AlertTriangle, Code2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type AgentPrefs, type CodeModeSetting as Setting, type McpServersResponse } from "@/lib/api";
+import { api, type AgentPrefs, type CodeModeSetting as Setting, type CodeModeSnippet, type McpServersResponse } from "@/lib/api";
 import { Segmented } from "@/components/ui/segmented";
+import { fmtAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /** The package the in-box code-mode server needs baked into the image (src/code-mode). */
@@ -27,12 +28,32 @@ const TOASTS: Record<Setting, string> = {
 export function CodeModeSetting({ data, enabledServers }: { data: McpServersResponse | null; enabledServers: number }) {
   const [prefs, setPrefs] = React.useState<AgentPrefs | null>(null);
   const [busy, setBusy] = React.useState<Setting | null>(null);
+  const [snippets, setSnippets] = React.useState<CodeModeSnippet[]>([]);
+  const [removing, setRemoving] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const ctrl = new AbortController();
     api.agentPrefs(ctrl.signal).then(setPrefs).catch(() => {});
+    api
+      .codeModeSnippets(ctrl.signal)
+      .then((r) => setSnippets(r.snippets))
+      .catch(() => {});
     return () => ctrl.abort();
   }, []);
+
+  const remove = async (name: string) => {
+    if (removing) return;
+    setRemoving(name);
+    try {
+      await api.deleteCodeModeSnippet(name);
+      setSnippets((list) => list.filter((s) => s.name !== name));
+      toast.success(`Removed the saved script ${name}`);
+    } catch (e) {
+      toast.error("Could not remove", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setRemoving(null);
+    }
+  };
 
   const value: Setting = prefs?.codeMode ?? prefs?.codeModeDefault ?? "off";
   const chosen = prefs?.codeMode !== undefined;
@@ -105,6 +126,36 @@ export function CodeModeSetting({ data, enabledServers }: { data: McpServersResp
               <AlertTriangle className="mt-px size-3 shrink-0" aria-hidden />
               <span className="min-w-0 [overflow-wrap:anywhere]">Last run fell back to direct servers: {fallback}</span>
             </p>
+          )}
+          {active && snippets.length > 0 && (
+            <div className="mt-2.5">
+              <p className="text-faint text-micro">
+                Saved scripts — a run keeps a script that ran clean, and later runs rerun it by name instead of writing it again.
+              </p>
+              <ul className="mt-1 divide-y divide-border/60">
+                {snippets.map((s) => (
+                  <li key={s.name} className="flex items-baseline gap-3 py-1.5">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-mono text-micro text-foreground" title={s.description}>
+                        {s.name}
+                      </span>
+                      <span className="text-faint block truncate text-micro">
+                        {s.description || "no description"} · {s.calls.length} tool{s.calls.length === 1 ? "" : "s"} · {s.runs} run{s.runs === 1 ? "" : "s"}
+                        {s.savedAt ? ` · ${fmtAgo(Math.floor(s.savedAt / 1000))}` : ""}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void remove(s.name)}
+                      disabled={removing === s.name}
+                      className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer text-micro underline-offset-2 hover:underline disabled:opacity-50"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
         <Segmented

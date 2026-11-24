@@ -20,21 +20,27 @@ import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   deniedBy,
+  isWriteTool,
   MAX_RESULTS,
   renderCatalog,
+  renderIndex,
   fullName,
   literalCalls,
   nearest,
   normalizeCode,
   precheck,
   renderTool,
+  SEARCH_BUDGET,
   searchTools,
+  selectTools,
+  SHOWN_RESULTS,
   splitName,
+  tokens,
   type Detail,
   type ToolDef,
 } from "./tools.js";
-import { capValue, explainError, fileContents, formatRun, safeFileName, shapeOf, toJson, unwrapResult, UPSTREAM_MAX, type McpResult } from "./result.js";
-import { describeSandbox, probeSandbox, runInSandbox, writeChildProgram, type BridgeHooks, type Sandbox } from "./runner.js";
+import { callLine, capValue, explainError, fileContents, formatRun, previewOf, safeFileName, shapeOf, size, toJson, unwrapResult, UPSTREAM_MAX, type CallLine, type McpResult } from "./result.js";
+import { describeSandbox, probeSandbox, runInSandbox, RunPaused, writeChildProgram, type BridgeHooks, type CallReply, type Sandbox } from "./runner.js";
 
 const RUN_TIMEOUT_MS = 120_000;
 const CONNECT_TIMEOUT_MS = 30_000;
@@ -43,8 +49,18 @@ const SEARCH_WAIT_MS = 10_000;
 const RECALL_KEEP = 50;
 const RECALL_MAX_CHARS = 8_000_000;
 const SHAPES_MAX = 500;
-/** Where remembered shapes and tool counts live (src/code-mode/knowledge.ts ships and harvests it). */
+/** Saved scripts kept per box (the owner's blob keeps as many; knowledge.ts caps it the same). */
+const SNIPPETS_MAX = 40;
+/** A clean script with this many calls is worth keeping for the next run without being asked. */
+const SNIPPET_MIN_CALLS = 3;
+/** Runs waiting for the operator's approval, newest kept; and the file they survive a new process in. */
+const PAUSED_MAX = 8;
+const PAUSED_FILE = "paused.json";
+const PAUSED_PERSIST_MAX = 4_000_000;
+/** Where remembered shapes, tool counts and saved scripts live (src/code-mode/knowledge.ts ships and harvests it). */
 const KNOWLEDGE_FILE = "knowledge.json";
+/** The per-server tool names the `run` description carries (every request; the prompt cache keeps it). */
+const INDEX_MAX = 2_500;
 const SAVE_MAX_CHARS = 50_000_000;
 /** CODE_MODE_CATALOG: how long tools/list waits for upstreams so the catalog can list their tools. */
 const CATALOG_WAIT_MS = 2_500;
@@ -103,14 +119,18 @@ export interface UpstreamConfig {
   servers: Record<string, UpstreamSpec>;
   /** Tools a script may not call, hidden from search too: "mcp__s__t" or with `*` (deniedBy). */
   deny: string[];
+  /** Tools whose call pauses the run for the operator, on top of the write tools found by name/annotation. */
+  approve: string[];
+  /** Tools that never pause, whatever their name says (`*` turns approval off). */
+  allow: string[];
 }
 
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const strMap = (v: unknown) => !v || (typeof v === "object" && !Array.isArray(v) && Object.values(v).every((x) => typeof x === "string"));
 
-/** Read `{mcpServers, codeMode?: {deny}}`; every problem is reported, a bad server is not skipped. */
+/** Read `{mcpServers, codeMode?: {deny, approve, allow}}`; every problem is reported, a bad server is not skipped. */
 export function parseConfig(text: string): { config: UpstreamConfig } | { error: string } {
-  let raw: { mcpServers?: unknown; codeMode?: { deny?: unknown } };
+  let raw: { mcpServers?: unknown; codeMode?: { deny?: unknown; approve?: unknown; allow?: unknown } };
   try {
     raw = JSON.parse(text);
   } catch (e) {
@@ -143,11 +163,15 @@ export function parseConfig(text: string): { config: UpstreamConfig } | { error:
       } else problems.push(`${name}: unknown type ${JSON.stringify(type)}`);
     }
   }
-  const deny = raw.codeMode?.deny ?? [];
-  if (!Array.isArray(deny) || !deny.every((d) => typeof d === "string")) problems.push("codeMode.deny must be a list of tool names");
+  const lists: Record<"deny" | "approve" | "allow", string[]> = { deny: [], approve: [], allow: [] };
+  for (const key of ["deny", "approve", "allow"] as const) {
+    const v = raw.codeMode?.[key] ?? [];
+    if (!Array.isArray(v) || !v.every((d) => typeof d === "string")) problems.push(`codeMode.${key} must be a list of tool names`);
+    else lists[key] = v as string[];
+  }
   if (problems.length) return { error: problems.join("; ") };
   if (!Object.keys(servers).length) return { error: "mcpServers is empty" };
-  return { config: { servers, deny: deny as string[] } };
+  return { config: { servers, ...lists } };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -236,7 +260,16 @@ class Upstream {
       do {
         const page = await client.listTools(cursor ? { cursor } : undefined);
         for (const t of page.tools) {
-          tools.push({ server: this.name, name: t.name, full: fullName(this.name, t.name), description: t.description ?? "", inputSchema: t.inputSchema });
+          const a = (t.annotations ?? {}) as { readOnlyHint?: unknown; destructiveHint?: unknown };
+          tools.push({
+            server: this.name,
+            name: t.name,
+            full: fullName(this.name, t.name),
+            description: t.description ?? "",
+            inputSchema: t.inputSchema,
+            ...(a.readOnlyHint === true ? { readOnly: true } : {}),
+            ...(a.destructiveHint === true ? { destructive: true } : {}),
+          });
         }
         cursor = page.nextCursor;
       } while (cursor);
@@ -262,7 +295,8 @@ class Upstream {
 
 const HOW_TO =
   'Call these from mcp__code-mode__run: `const r = await call("mcp__server__tool", { ...args });`, then filter in the script and return only what the task needs. ' +
-  "call() resolves to the tool's structured result when it has one (use its fields directly: r.rows, not r.structuredContent.rows), else to its text parsed as JSON when it is JSON, else the text; a failed call throws, so wrap a call you can do without in try/catch.";
+  "call() resolves to the tool's structured result when it has one (use its fields directly: r.rows, not r.structuredContent.rows), else to its text parsed as JSON when it is JSON, else the text; a failed call throws, so wrap a call you can do without in try/catch. " +
+  "A tool marked [approval] changes something: its call pauses the run until the operator approves (run tells you how to resume).";
 
 /**
  * An upstream's connect error, short enough to repeat in every search result. Transport errors
@@ -297,17 +331,78 @@ export interface Paths {
   outDir: string;
 }
 
+/** A script kept for later runs: the owner's blob carries it to the next box (knowledge.ts). */
+export interface Snippet {
+  description: string;
+  code: string;
+  /** The tools it called, for search and for the model to judge it by. */
+  calls: string[];
+  savedAt: number;
+  runs: number;
+}
+
+/** One call a run made, so a resumed run answers it from here instead of calling again. */
+interface Recorded {
+  n: number;
+  name: string;
+  argsJson: string;
+  reply?: CallReply;
+  error?: string;
+}
+
+/** A call the operator approved, matched by its place in the sequence and what it was. */
+interface Approved {
+  seq: number;
+  name: string;
+  argsJson: string;
+}
+
+/** What one `run` carries from start to finish, and across a pause. */
+interface RunState {
+  id?: string;
+  code: string;
+  inputJson?: string;
+  /** Calls in the order the script made them (the same script makes them in the same order). */
+  record: Recorded[];
+  approved: Approved[];
+  /** The call the run stopped at, waiting for the operator. */
+  pending?: Approved & { n: number };
+  pausedAt?: number;
+  /** Per execution: the next sequence number and the n → seq map the hooks share. */
+  seq: number;
+  seqOf: Map<number, number>;
+  replayed: Set<number>;
+  /** Naming for the saved script (`save`) or the saved script this run came from. */
+  save?: string;
+  description?: string;
+  snippet?: string;
+}
+
+export interface RunArgs {
+  code?: unknown;
+  snippet?: unknown;
+  input?: unknown;
+  resume?: unknown;
+  save?: unknown;
+  description?: unknown;
+}
+
 export class CodeMode {
   readonly upstreams: Map<string, Upstream>;
   private shapes = new Map<string, string>();
   /** server → tools it listed, from this and earlier boxes; what the controller's auto decision reads. */
   private toolCounts = new Map<string, number>();
+  /** Scripts kept for later runs, from this and earlier boxes; search lists the ones that match. */
+  private snippets = new Map<string, Snippet>();
+  private paused = new Map<string, RunState>();
   private kept = new Map<number, { value: unknown; chars: number }>();
   private keptChars = 0;
   /** Call numbers continue across server processes (`claude -c` starts a new one), so #n never means two results. */
   private n = 0;
   /** Servers whose notes this session has already shown (in a search or the catalog). */
   private told = new Set<string>();
+  /** The last tools/list answered while an upstream was still connecting (so a list_changed is owed). */
+  listedIncomplete = false;
   private sandbox?: Sandbox;
   private program?: string;
 
@@ -318,9 +413,25 @@ export class CodeMode {
   ) {
     this.upstreams = new Map(Object.entries(config.servers).map(([name, spec]) => [name, new Upstream(name, spec, sdk)]));
     try {
-      const k = JSON.parse(readFileSync(join(paths.stateDir, KNOWLEDGE_FILE), "utf8")) as { shapes?: Record<string, unknown>; toolCounts?: Record<string, unknown> };
+      const k = JSON.parse(readFileSync(join(paths.stateDir, KNOWLEDGE_FILE), "utf8")) as {
+        shapes?: Record<string, unknown>;
+        toolCounts?: Record<string, unknown>;
+        snippets?: Record<string, unknown>;
+      };
       for (const [name, v] of Object.entries(k.shapes ?? {})) if (typeof v === "string") this.shapes.set(name, v);
       for (const [name, v] of Object.entries(k.toolCounts ?? {})) if (typeof v === "number") this.toolCounts.set(name, v);
+      for (const [name, v] of Object.entries(k.snippets ?? {})) {
+        const s = v as Partial<Snippet> | undefined;
+        if (s && typeof s.code === "string" && s.code.trim()) {
+          this.snippets.set(name, {
+            description: typeof s.description === "string" ? s.description : "",
+            code: s.code,
+            calls: Array.isArray(s.calls) ? s.calls.filter((c): c is string => typeof c === "string") : [],
+            savedAt: typeof s.savedAt === "number" ? s.savedAt : 0,
+            runs: typeof s.runs === "number" ? s.runs : 0,
+          });
+        }
+      }
     } catch {
       // Nothing learned yet: the owner's first run, or a box from before knowledge.json.
       try {
@@ -336,6 +447,17 @@ export class CodeMode {
       if (Number.isSafeInteger(n) && n > 0) this.n = n;
     } catch {
       // First session in this box: numbering starts at #1.
+    }
+    try {
+      // A run that paused in an earlier process (the operator answered after a `claude -c`) resumes here.
+      const p = JSON.parse(readFileSync(join(paths.stateDir, PAUSED_FILE), "utf8")) as Record<string, RunState>;
+      for (const [id, r] of Object.entries(p)) {
+        if (r && typeof r.code === "string" && Array.isArray(r.record) && r.pending) {
+          this.paused.set(id, { ...r, id, approved: Array.isArray(r.approved) ? r.approved : [], seq: 0, seqOf: new Map(), replayed: new Set() });
+        }
+      }
+    } catch {
+      // Nothing paused.
     }
   }
 
@@ -354,32 +476,134 @@ export class CodeMode {
     clearTimeout(timer);
   }
 
+  /**
+   * Whether a call to this tool waits for the operator: the owner's allow list wins, then their
+   * approve list, then the tool's own annotation or the words of its name (isWriteTool).
+   */
+  needsApproval(tool: ToolDef): boolean {
+    if (deniedBy(tool.full, this.config.allow)) return false;
+    if (deniedBy(tool.full, this.config.approve)) return true;
+    return isWriteTool(tool);
+  }
+
+  private renderHit(t: ToolDef, level: Detail): string {
+    const text = renderTool(t, level, this.shapes.get(t.full));
+    return this.needsApproval(t) ? text.replace(t.full, `${t.full} [approval]`) : text;
+  }
+
+  /**
+   * One search answer: exact names (`select:a,b`) or ranked words, the first SHOWN_RESULTS hits at
+   * the asked detail while SEARCH_BUDGET lasts, the rest one line each up to MAX_RESULTS, then a
+   * count; saved scripts that match; the servers that are down. Readers rank first (searchTools).
+   */
   async search(query: string, detail: Detail = "signatures"): Promise<string> {
     await this.settle([...this.upstreams.values()], SEARCH_WAIT_MS);
     const q = String(query ?? "").trim();
+    const visible = this.visibleTools();
+    const picked = selectTools(visible, q);
     const level: Detail = q ? (["names", "signatures", "full"].includes(detail) ? detail : "signatures") : "names";
-    const all = searchTools(this.visibleTools(), q, Infinity);
-    const hits = q ? all.slice(0, MAX_RESULTS) : all;
+    const all = picked ? picked.hits : searchTools(visible, q, Infinity);
     const out = [HOW_TO, ""];
+    if (picked?.missing.length) {
+      for (const m of picked.missing) {
+        const near = nearest(m, visible.map((t) => t.full));
+        out.push(`no tool ${JSON.stringify(m)}${near ? `; nearest: ${near}` : ""}`);
+      }
+      out.push("");
+    }
     for (const u of this.upstreams.values()) {
-      if (u.state !== "ready" || !u.notes || this.told.has(u.name) || !hits.some((t) => t.server === u.name)) continue;
+      if (u.state !== "ready" || !u.notes || this.told.has(u.name) || !all.some((t) => t.server === u.name)) continue;
       this.told.add(u.name);
       out.push(`${u.name} says: ${u.notes}`, "");
     }
-    if (hits.length) out.push(...hits.map((t) => renderTool(t, level, this.shapes.get(t.full))).join(level === "names" ? "\n" : "\n\n").split("\n"));
-    else out.push(`No tool matched ${JSON.stringify(q)} on ${this.serverNames().join(", ")}. Try fewer or other words, or an empty query to list every tool.`);
-    if (all.length > hits.length) out.push("", `${hits.length} of ${all.length} matching tools shown; use more specific words for the rest.`);
+    let rendered = 0, named = 0, used = 0;
+    for (const t of all) {
+      if (q && rendered + named >= MAX_RESULTS) break;
+      const asLevel = level !== "names" && rendered < SHOWN_RESULTS && used < SEARCH_BUDGET;
+      const text = this.renderHit(t, asLevel ? level : "names");
+      out.push(...text.split("\n"));
+      if (asLevel) (out.push(""), rendered++);
+      else named++;
+      used += text.length;
+    }
+    if (!all.length && !picked) out.push(`No tool matched ${JSON.stringify(q)} on ${this.serverNames().join(", ")}. Try fewer or other words, or an empty query to list every tool.`);
+    if (named && level !== "names") out.push("", `(one line each above the fold: argument types with select:<name>)`);
+    if (all.length > rendered + named) out.push("", `${rendered + named} of ${all.length} matching tools shown; use more specific words, or select:<name> for one.`);
+    const snips = this.matchSnippets(q);
+    if (snips.length) {
+      out.push("", "Saved scripts from earlier runs — rerun one with mcp__code-mode__run {snippet: <name>, input: {...}} (the script reads `input`):");
+      for (const [name, s] of snips) out.push(`- ${name}: ${s.description || "(no description)"} (calls ${s.calls.join(", ") || "none"}; ${size(s.code.length)} chars)`);
+    }
     const down = [...this.upstreams.values()].filter((u) => u.state !== "ready");
     if (down.length) {
       out.push("", "unavailable:");
       for (const u of down) out.push(u.state === "failed" ? `- ${u.name}: ${u.error}` : `- ${u.name}: still connecting; search again in a few seconds`);
     }
-    return out.join("\n");
+    return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
+  }
+
+  /** Saved scripts whose name, description or called tools share a word with the query (all, for an empty one). */
+  private matchSnippets(q: string): Array<[string, Snippet]> {
+    const words = tokens(q);
+    const list = [...this.snippets].sort((a, b) => b[1].savedAt - a[1].savedAt);
+    if (!words.length) return list.slice(0, 10);
+    return list.filter(([name, s]) => {
+      const have = new Set(tokens(`${name} ${s.description} ${s.calls.join(" ")}`));
+      return words.some((w) => have.has(w));
+    }).slice(0, 10);
   }
 
   /** The text for one `run` and whether it is an error result. */
-  async run(code: string): Promise<{ text: string; isError: boolean }> {
-    const norm = normalizeCode(String(code ?? ""));
+  async run(args: RunArgs): Promise<{ text: string; isError: boolean }> {
+    if (args.resume !== undefined && args.resume !== null && args.resume !== "") return this.resume(String(args.resume));
+    let code = typeof args.code === "string" ? args.code : "";
+    let snippet: string | undefined;
+    if (args.snippet !== undefined && args.snippet !== null && args.snippet !== "") {
+      snippet = String(args.snippet);
+      const s = this.snippets.get(snippet);
+      if (!s) {
+        const near = nearest(snippet, [...this.snippets.keys()]);
+        return { text: `Error: no saved script ${JSON.stringify(snippet)}${near ? `; nearest: ${near}` : ""}. search lists the saved scripts.`, isError: true };
+      }
+      code = s.code;
+      s.runs++;
+    }
+    if (!code.trim()) return { text: "Error: run needs code (the body of an async function), or snippet (a saved script's name), or resume (a paused run's id).", isError: true };
+    const run: RunState = {
+      code,
+      inputJson: args.input === undefined ? undefined : toJson(args.input),
+      record: [],
+      approved: [],
+      seq: 0,
+      seqOf: new Map(),
+      replayed: new Set(),
+      save: typeof args.save === "string" && args.save.trim() ? args.save.trim() : undefined,
+      description: typeof args.description === "string" ? args.description : undefined,
+      snippet,
+    };
+    return this.execute(run);
+  }
+
+  /** The operator approved the call a run paused at: the same script, its calls so far replayed. */
+  private async resume(id: string): Promise<{ text: string; isError: boolean }> {
+    const run = this.paused.get(id);
+    if (!run) {
+      const ids = [...this.paused.keys()];
+      return {
+        text: `Error: no paused run ${JSON.stringify(id)}${ids.length ? ` (paused: ${ids.join(", ")})` : ""}. Run the script again; the call that needs approval pauses it again.`,
+        isError: true,
+      };
+    }
+    this.paused.delete(id);
+    if (run.pending) run.approved.push({ seq: run.pending.seq, name: run.pending.name, argsJson: run.pending.argsJson });
+    run.pending = undefined;
+    run.pausedAt = undefined;
+    this.persistPaused();
+    return this.execute(run);
+  }
+
+  private async execute(run: RunState): Promise<{ text: string; isError: boolean }> {
+    const norm = normalizeCode(run.code);
     if ("error" in norm) return { text: `Error: the script did not compile — ${norm.error}`, isError: true };
     const names = literalCalls(norm.code).map((c) => splitName(c.name, [...this.upstreams.keys()])?.server);
     const named = [...new Set(names)].filter((s): s is string => !!s).map((s) => this.upstreams.get(s)!);
@@ -390,16 +614,132 @@ export class CodeMode {
 
     this.sandbox ??= probeSandbox();
     this.program ??= writeChildProgram();
-    const r = await runInSandbox(norm.code, { sandbox: this.sandbox, program: this.program, hooks: this.hooks(), timeoutMs: RUN_TIMEOUT_MS });
+    run.seq = 0;
+    run.seqOf = new Map();
+    run.replayed = new Set();
+    const r = await runInSandbox(norm.code, { sandbox: this.sandbox, program: this.program, hooks: this.hooks(run), timeoutMs: RUN_TIMEOUT_MS, input: run.inputJson });
+    for (const c of r.calls) if (run.replayed.has(c.n)) c.replayed = true;
+    if (r.paused !== undefined) {
+      const text = this.pause(run, r.paused, r.logs, r.calls);
+      this.saveKnowledge();
+      return { text, isError: false };
+    }
+    if (r.error === undefined) this.keepSnippet(run, r.calls);
     this.saveKnowledge();
     const text = formatRun({ ...r, error: r.error === undefined ? undefined : explainError(r.error) });
     return { text, isError: r.error !== undefined };
   }
 
-  private hooks(): BridgeHooks {
+  /**
+   * The run stopped at a call that needs the operator: keep it (and what it already got) under an
+   * id, and tell the model how to ask and how to resume. Nothing was sent for the paused call.
+   */
+  private pause(run: RunState, paused: string, logs: string[], calls: CallLine[]): string {
+    run.id ??= Math.random().toString(36).slice(2, 8);
+    run.pausedAt = Date.now();
+    // Only complete calls replay; the record ends at the first one that had no answer.
+    const firstHole = run.record.findIndex((c) => !c || (c.reply === undefined && c.error === undefined));
+    if (firstHole >= 0) run.record.length = firstHole;
+    this.paused.set(run.id, run);
+    for (const k of this.paused.keys()) {
+      if (this.paused.size <= PAUSED_MAX) break;
+      this.paused.delete(k);
+    }
+    this.persistPaused();
+    const p = run.pending!;
+    const argsText = p.argsJson.length > 600 ? `${p.argsJson.slice(0, 599)}…` : p.argsJson;
+    const done = run.record.length;
+    const out = [
+      `Paused: call #${p.n} ${p.name} ${argsText} changes something, so it waits for the operator's approval; nothing was sent for it.`,
+      `Ask the operator whether to go ahead, naming the tool and its arguments (${paused}). ` +
+        `If they approve, call mcp__code-mode__run with {"resume": "${run.id}"}: the script runs again, the ${done} call${done === 1 ? "" : "s"} already made ${done === 1 ? "is" : "are"} answered from ${done === 1 ? "its" : "their"} recorded result${done === 1 ? "" : "s"} (no new calls), and this call goes through. ` +
+        "If they decline, do not resume: report what was not done. A different script needs no resume.",
+    ];
+    const log = logs.join("\n");
+    if (log) out.push("--- console ---", log.slice(0, 4000));
+    if (calls.length) {
+      out.push(`--- ${calls.length} MCP call${calls.length === 1 ? "" : "s"} before the pause ---`);
+      for (const c of calls) out.push(callLine(c));
+    }
+    return out.join("\n");
+  }
+
+  private persistPaused(): void {
+    try {
+      mkdirSync(this.paths.stateDir, { recursive: true });
+      const file = join(this.paths.stateDir, PAUSED_FILE);
+      if (!this.paused.size) {
+        rmSync(file, { force: true });
+        return;
+      }
+      const plain: Record<string, unknown> = {};
+      for (const [id, r] of this.paused) {
+        plain[id] = { code: r.code, inputJson: r.inputJson, record: r.record, approved: r.approved, pending: r.pending, pausedAt: r.pausedAt, save: r.save, description: r.description, snippet: r.snippet };
+      }
+      const text = JSON.stringify(plain);
+      // A record too big for the disk stays in memory only (a new process would ask again).
+      if (text.length <= PAUSED_PERSIST_MAX) writeFileSync(file, text);
+    } catch {
+      // Persistence is a convenience; a read-only disk must not fail the run.
+    }
+  }
+
+  /**
+   * Keep a script for later runs: when the model named it (`save`), or on its own when it ran clean
+   * with SNIPPET_MIN_CALLS calls or more. A rerun of a saved script is counted, not re-saved. The
+   * name is the model's, else the server and the tools it called; the description the model's, else
+   * the script's first comment line.
+   */
+  private keepSnippet(run: RunState, calls: CallLine[]): void {
+    if (run.snippet && !run.save) return;
+    const ok = calls.filter((c) => c.state === "ok");
+    if (!run.save && (ok.length < SNIPPET_MIN_CALLS || ok.length < calls.length)) return;
+    const tools = [...new Set(ok.map((c) => c.name))];
+    const names = [...this.upstreams.keys()];
+    const bare = (full: string) => splitName(full, names)?.tool ?? full;
+    const servers = [...new Set(tools.map((t) => splitName(t, names)?.server).filter(Boolean))];
+    const auto = `${servers.join("+") || "script"}.${tools.slice(0, 3).map(bare).join("+")}${tools.length > 3 ? `+${tools.length - 3}` : ""}`;
+    const name = (run.save ?? auto).replace(/[^\w.+-]+/g, "-").slice(0, 80);
+    const comment = run.code.split("\n").map((l) => l.trim()).find((l) => l.startsWith("//"))?.replace(/^\/\/\s*/, "");
+    const description = (run.description ?? comment ?? `calls ${tools.map(bare).join(", ")}`).replace(/\s+/g, " ").slice(0, 200);
+    this.snippets.delete(name);
+    this.snippets.set(name, { description, code: run.code, calls: tools, savedAt: Date.now(), runs: 1 });
+    for (const k of this.snippets.keys()) {
+      if (this.snippets.size <= SNIPPETS_MAX) break;
+      this.snippets.delete(k);
+    }
+  }
+
+  private hooks(run: RunState): BridgeHooks {
     return {
-      nextN: () => ++this.n,
-      call: (n, name, argsJson, signal) => this.callUpstream(n, name, argsJson, signal),
+      nextN: () => {
+        const seq = run.seq++;
+        const rec = run.record[seq];
+        const n = rec ? rec.n : ++this.n;
+        run.seqOf.set(n, seq);
+        return n;
+      },
+      call: async (n, name, argsJson, signal) => {
+        const seq = run.seqOf.get(n) ?? run.seq++;
+        const rec = run.record[seq];
+        if (rec && rec.name === name && rec.argsJson === argsJson) {
+          if (rec.reply) {
+            run.replayed.add(n);
+            return rec.reply;
+          }
+          if (rec.error !== undefined) throw new Error(rec.error);
+        }
+        // A call the record does not have (or has differently: the script changed): from here on live.
+        if (rec) run.record.length = seq;
+        try {
+          const reply = await this.callUpstream(run, seq, n, name, argsJson, signal);
+          run.record[seq] = { n, name, argsJson, reply };
+          return reply;
+        } catch (e) {
+          if (!(e instanceof RunPaused)) run.record[seq] = { n, name, argsJson, error: String((e as Error)?.message ?? e) };
+          throw e;
+        }
+      },
       recall: (n) => {
         const k = this.kept.get(n);
         if (k) return toJson(k.value);
@@ -419,7 +759,7 @@ export class CodeMode {
     };
   }
 
-  private async callUpstream(n: number, name: string, argsJson: string, signal: AbortSignal) {
+  private async callUpstream(run: RunState, seq: number, n: number, name: string, argsJson: string, signal: AbortSignal): Promise<CallReply> {
     const rule = deniedBy(name, this.config.deny);
     if (rule) throw new Error(`refused: ${name} is denied by the rule "${rule}" (codeMode.deny)`);
     const split = splitName(name, [...this.upstreams.keys()]);
@@ -427,12 +767,17 @@ export class CodeMode {
     const up = this.upstreams.get(split.server)!;
     await up.ensure();
     if (up.state !== "ready" || !up.client) throw new Error(`${split.server} is unavailable: ${up.error || "not connected"}`);
-    if (!up.tools.some((t) => t.name === split.tool)) {
+    const tool = up.tools.find((t) => t.name === split.tool);
+    if (!tool) {
       const near = nearest(name, this.visibleTools().map((t) => t.full));
       throw new Error(`${name} does not exist${near ? `; nearest: ${near}` : ""}`);
     }
     const args = JSON.parse(argsJson);
     if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error(`call("${name}", args): args must be an object`);
+    if (this.needsApproval(tool) && !run.approved.some((a) => a.seq === seq && a.name === name && a.argsJson === argsJson)) {
+      run.pending = { seq, n, name, argsJson };
+      throw new RunPaused(`${name} ${deniedBy(name, this.config.approve) ? "is on the approve list" : tool.destructive ? "is marked destructive by its server" : "creates, changes or removes something by its name"}`);
+    }
     const raw = (await up.client.callTool({ name: split.tool, arguments: args }, undefined, {
       signal,
       timeout: RUN_TIMEOUT_MS,
@@ -451,7 +796,7 @@ export class CodeMode {
     // The script gets the whole result; only one too big to hold (UPSTREAM_MAX) is cut, and the
     // marker says so. What reaches the model is capped later, at the returned value (RETURN_CAP).
     const capped = capValue(value, UPSTREAM_MAX, `; the result was over ${UPSTREAM_MAX} chars, narrow the request`);
-    return { json: capped.text, chars: full.length, cut: capped.cut, shape };
+    return { json: capped.text, chars: full.length, cut: capped.cut, shape, preview: previewOf(value) };
   }
 
   private keep(n: number, value: unknown, chars: number): void {
@@ -472,6 +817,23 @@ export class CodeMode {
       if (this.shapes.size <= SHAPES_MAX) break;
       this.shapes.delete(k);
     }
+  }
+
+  /**
+   * The per-server tool names for the `run` description (renderIndex): waits briefly for the
+   * upstreams; one not up by then is named as still connecting, and the list is sent again
+   * (tools/list_changed) once every upstream has settled.
+   */
+  async index(): Promise<string> {
+    const ups = [...this.upstreams.values()];
+    await this.settle(ups, CATALOG_WAIT_MS);
+    const lines: string[] = [];
+    const visible = this.visibleTools();
+    if (visible.length) lines.push(renderIndex(visible, INDEX_MAX));
+    const later = ups.filter((u) => u.state !== "ready");
+    this.listedIncomplete = later.some((u) => u.state !== "failed");
+    if (later.length) lines.push(`${visible.length ? "not connected yet" : "servers still connecting"}: ${later.map((u) => u.name).join(", ")} (search lists their tools once they are up)`);
+    return lines.join("\n");
   }
 
   /**
@@ -517,14 +879,15 @@ export class CodeMode {
 
   /**
    * What this box has learned, for the next server process and for the controller to harvest when
-   * the run ends: every remembered shape and the tool count of every upstream that has connected.
+   * the run ends: every remembered shape, the tool count of every upstream that has connected, and
+   * the saved scripts.
    */
   private saveKnowledge(): void {
     try {
       for (const u of this.upstreams.values()) if (u.state === "ready") this.toolCounts.set(u.name, u.tools.length);
       mkdirSync(this.paths.stateDir, { recursive: true });
       const tmp = join(this.paths.stateDir, `${KNOWLEDGE_FILE}.${process.pid}`);
-      writeFileSync(tmp, JSON.stringify({ shapes: Object.fromEntries(this.shapes), toolCounts: Object.fromEntries(this.toolCounts) }));
+      writeFileSync(tmp, JSON.stringify({ shapes: Object.fromEntries(this.shapes), toolCounts: Object.fromEntries(this.toolCounts), snippets: Object.fromEntries(this.snippets) }));
       renameSync(tmp, join(this.paths.stateDir, KNOWLEDGE_FILE));
       writeFileSync(join(this.paths.stateDir, "calls.json"), JSON.stringify({ n: this.n }));
     } catch {
@@ -540,11 +903,11 @@ const TOOLS = [
   {
     name: "search",
     description:
-      "Find MCP tools to use from `run`. Returns mcp__server__tool names with TypeScript-style argument types and, for tools called before, the shape of their result. detail: \"names\", \"signatures\" (default) or \"full\" (adds parameter docs). An empty query lists every tool. Servers that failed to connect are listed with their error.",
+      "Find MCP tools to use from `run` (they are not in ToolSearch). Words rank tools, readers first; `select:mcp__a__b,mcp__c__d` or exact names return just those. Returns mcp__server__tool names with TypeScript-style argument types, for tools called before the shape of their result, and saved scripts that match. detail: \"names\", \"signatures\" (default) or \"full\" (adds parameter docs). An empty query lists every tool. Servers that failed to connect are listed with their error.",
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "Words to match against tool names, servers and descriptions; empty lists everything." },
+        query: { type: "string", description: "Words to match against tool names, servers and descriptions; select:<name>,<name> for exact names; empty lists everything." },
         detail: { type: "string", enum: ["names", "signatures", "full"] },
       },
       required: ["query"],
@@ -553,11 +916,17 @@ const TOOLS = [
   {
     name: "run",
     description:
-      "Run JavaScript — the body of an async function — that calls MCP tools and returns only what the task needs. In the script: `await call(\"mcp__server__tool\", { ...args })` returns the tool's result (parsed JSON when the tool returns JSON); `await recall(n)` returns result #n of an earlier call again without calling; `await saveFile(name, data)` writes /workspace/.agent-out/<name> (CSV for an array with .csv, JSONL with .jsonl, else JSON or text) and returns the path; `await sleep(ms)`; `console.log`. Up to 8 calls run at once (use Promise.all). Filter, count and pick fields in the script and `return` a small value. No fetch, require, process, files or network. Limits: 120 s; return value 20k chars; console 4k. The script sees every tool result whole, so filter big results there. Names and arguments are checked before the script runs; look them up with search first.",
+      "Run JavaScript — the body of an async function — that calls MCP tools and returns only what the task needs. In the script: `await call(\"mcp__server__tool\", { ...args })` returns the tool's result (parsed JSON when the tool returns JSON); `await recall(n)` returns result #n of an earlier call again without calling; `await saveFile(name, data)` writes /workspace/.agent-out/<name> (CSV for an array with .csv, JSONL with .jsonl, else JSON or text) and returns the path; `await sleep(ms)`; `console.log`; `input` is the value run was given. Up to 8 calls run at once (use Promise.all). Filter, count and pick fields in the script and `return` a small value. No fetch, require, process, files or network. Limits: 120 s; return value 20k chars; console 4k. The script sees every tool result whole, so filter big results there. Names and arguments are checked before the script runs; argument types come from search. A call to a tool that creates, changes or removes something pauses the run for the operator's approval: ask them, then run {resume: id} (calls already made are replayed from their record). {snippet, input} reruns a saved script; {save, description} with code keeps this one.",
     inputSchema: {
       type: "object",
-      properties: { code: { type: "string", description: "JavaScript: the body of an async function. `return` the result." } },
-      required: ["code"],
+      properties: {
+        code: { type: "string", description: "JavaScript: the body of an async function. `return` the result." },
+        input: { description: "Any JSON the script reads as `input`." },
+        snippet: { type: "string", description: "The name of a saved script to run instead of code (search lists them)." },
+        resume: { type: "string", description: "The id of a run that paused for approval; continues it after the operator said yes." },
+        save: { type: "string", description: "Keep this script under this name for later runs." },
+        description: { type: "string", description: "What the saved script does and what `input` it takes." },
+      },
     },
   },
 ];
@@ -574,34 +943,35 @@ async function serve(configPath: string): Promise<void> {
   const server = new sdk.Server(
     { name: "code-mode", version: "1" },
     {
-      capabilities: { tools: {} },
+      capabilities: { tools: { listChanged: true } },
       instructions:
         (process.env.CODE_MODE_CATALOG
           ? "MCP tools are reached through this server: mcp__code-mode__run's description lists them; call them from one mcp__code-mode__run script that sees each result whole, filters it and returns only what is needed. mcp__code-mode__search gives parameter docs and result shapes."
-          : "MCP tools are reached through this server: find them with mcp__code-mode__search, then call them from one mcp__code-mode__run script that sees each result whole, filters it and returns only what is needed.") +
-        ` Servers behind it: ${mode.serverNames().join(", ")}.`,
+          : "MCP tools are reached through this server: mcp__code-mode__run's description names them per server, mcp__code-mode__search gives argument types (select:<name> for one), then call them from one mcp__code-mode__run script that sees each result whole, filters it and returns only what is needed.") +
+        ` Servers behind it: ${mode.serverNames().join(", ")}. Their tools are not in ToolSearch and never direct.`,
     }
   );
   server.setRequestHandler(sdk.types.ListToolsRequestSchema, async () => {
     const catalog = await mode.catalog();
-    // Without the catalog the model still learns which servers exist, so it searches for their
-    // tools instead of guessing a name (what two of the first hundred runs did).
-    if (!catalog) {
-      const run = TOOLS.find((t) => t.name === "run")!;
-      return { tools: TOOLS.map((t) => (t === run ? { ...t, description: `${t.description} Servers: ${mode.serverNames().join(", ")}.` } : t)) };
-    }
     const run = TOOLS.find((t) => t.name === "run")!;
-    // The list below replaces "look them up with search first": search is for what it leaves out.
-    const head = run.description.replace(/ look them up with search first\.$/, " the list below has them; search gives parameter docs and result shapes.");
+    // Without the catalog the description still names every tool per server (renderIndex), so the
+    // model writes its first script without a search and never guesses a name (what two of the
+    // first hundred runs did); search is for argument types and result shapes.
+    if (!catalog) {
+      const index = await mode.index();
+      return { tools: TOOLS.map((t) => (t === run ? { ...t, description: `${t.description}\n\nTools (argument types: search):\n${index}` } : t)) };
+    }
+    // The list below replaces "argument types come from search": search is for what it leaves out.
+    const head = run.description.replace(/ argument types come from search\./, " the list below has them; search gives parameter docs and result shapes.");
     const description = `${head}\n\nTools you can call:\n${catalog}`;
     return { tools: TOOLS.map((t) => (t === run ? { ...t, description } : t)) };
   });
   server.setRequestHandler(sdk.types.CallToolRequestSchema, async (req) => {
-    const args = (req.params.arguments ?? {}) as { query?: string; detail?: Detail; code?: string };
+    const args = (req.params.arguments ?? {}) as { query?: string; detail?: Detail } & RunArgs;
     try {
       if (req.params.name === "search") return { content: [{ type: "text" as const, text: await mode.search(String(args.query ?? ""), args.detail) }] };
       if (req.params.name === "run") {
-        const r = await mode.run(String(args.code ?? ""));
+        const r = await mode.run(args);
         return { content: [{ type: "text" as const, text: r.text }], isError: r.isError };
       }
       return { content: [{ type: "text" as const, text: `unknown tool ${req.params.name}; this server has search and run` }], isError: true };
@@ -617,7 +987,11 @@ async function serve(configPath: string): Promise<void> {
   await server.connect(transport);
   // Start every upstream now, in the background: Claude only waits for this server (two tools,
   // answered at once), and the model's first search should not pay for the upstreams' cold start.
-  for (const u of mode.upstreams.values()) void u.ensure();
+  // Once they have all settled, a tools/list answered while one was still connecting is offered
+  // again, so the run description gets that server's names too.
+  void Promise.all([...mode.upstreams.values()].map((u) => u.ensure())).then(() => {
+    if (mode.listedIncomplete) server.sendToolListChanged().catch(() => {});
+  });
 }
 
 /** `--check`: what Phase 2's install runs before choosing code mode over the direct config. */
@@ -643,6 +1017,8 @@ function check(configPath: string): number {
   }
   for (const [name, s] of Object.entries(parsed.config.servers)) console.log(`server ${name}: ${s.type}`);
   if (parsed.config.deny.length) console.log(`deny: ${parsed.config.deny.join(", ")}`);
+  if (parsed.config.approve.length) console.log(`approve: ${parsed.config.approve.join(", ")}`);
+  if (parsed.config.allow.length) console.log(`allow: ${parsed.config.allow.join(", ")}`);
   console.log(`sandbox: ${describeSandbox(probeSandbox())}`);
   return ok ? 0 : 1;
 }

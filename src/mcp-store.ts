@@ -44,6 +44,14 @@ export interface McpServer {
    * Edited through the JSON config (`"codeMode": "direct"` on the server).
    */
   codeMode?: "wrap" | "direct";
+  /**
+   * Code mode approval for this server's tools (box/server.ts needsApproval): `approve` names tools
+   * (or `*` patterns) whose call pauses the run for the operator on top of the write tools found by
+   * name; `allow` names tools that never pause (`["*"]` turns approval off for the server). Bare
+   * tool names, edited through the JSON config.
+   */
+  approve?: string[];
+  allow?: string[];
 }
 
 export interface McpStore {
@@ -86,6 +94,12 @@ export function normalizeServer(input: Partial<McpServer> & { name: string }, no
   }
   if (input.env && Object.keys(input.env).length) server.env = cleanMap(input.env);
   if (input.codeMode === "wrap" || input.codeMode === "direct") server.codeMode = input.codeMode;
+  for (const key of ["approve", "allow"] as const) {
+    const list = input[key];
+    if (!Array.isArray(list)) continue;
+    const rules = list.map((r) => String(r).trim()).filter((r) => /^[\w.*-]{1,120}$/.test(r));
+    if (rules.length) server[key] = [...new Set(rules)].slice(0, 100);
+  }
   return server;
 }
 
@@ -129,6 +143,8 @@ export function parseMcpImport(json: string, now = Date.now()): McpServer[] {
           headers: (def.headers as Record<string, string>) ?? undefined,
           enabled: def.disabled === true ? false : true,
           codeMode: def.codeMode === "wrap" || def.codeMode === "direct" ? def.codeMode : undefined,
+          approve: Array.isArray(def.approve) ? (def.approve as string[]) : undefined,
+          allow: Array.isArray(def.allow) ? (def.allow as string[]) : undefined,
         },
         now
       )
@@ -278,6 +294,8 @@ export function toEditableConfig(store: McpStore): { mcpServers: Record<string, 
       ...(s.headers ? { headers: maskMap(s.headers) } : {}),
       ...(s.enabled ? {} : { disabled: true }),
       ...(s.codeMode ? { codeMode: s.codeMode } : {}),
+      ...(s.approve?.length ? { approve: s.approve } : {}),
+      ...(s.allow?.length ? { allow: s.allow } : {}),
     };
   }
   return { mcpServers };

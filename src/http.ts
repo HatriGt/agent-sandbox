@@ -70,7 +70,7 @@ import { autoRetryOf, makeVerifyRetrier, verifyPlanOf, type VerifyPlan, type Ver
 import { parseTrace, resizeContinueMessage } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
 import { AGENT_KINDS, AGENT_LABELS, isAgentKind, loadAgentPrefs, normalizeAgentPrefs, saveAgentPrefs } from "./agent-kind.js";
-import { absorbKnowledge } from "./code-mode/knowledge.js";
+import { absorbKnowledge, deleteSnippet, loadKnowledge } from "./code-mode/knowledge.js";
 import { assertSelectable, driverFor, listDrivers } from "./drivers/index.js";
 import { isCompactCommand } from "./drivers/sentinels.js";
 import {
@@ -3250,6 +3250,27 @@ app.get("/agent-prefs.json", (req: Request, res: Response) => {
     // What an owner who never chose gets (Config.codeModeDefault), so the control shows the truth.
     codeModeDefault: cfg.codeModeDefault,
   });
+});
+// Code mode: the scripts the owner's runs kept (src/code-mode/knowledge.ts, the `snippets` of the
+// knowledge blob), for the MCP page; a delete removes one from the blob, so no later box gets it.
+// A box that is still running keeps its own copy until it finishes (the harvest merges it back
+// only when the box re-saved or reran it).
+app.get("/code-mode/snippets.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const k = loadKnowledge(ownerKey(principalOf(res)));
+  const snippets = Object.entries(k.snippets)
+    .map(([name, s]) => ({ name, description: s.description, calls: s.calls, savedAt: s.savedAt, runs: s.runs, chars: s.code.length }))
+    .sort((a, b) => b.savedAt - a.savedAt);
+  res.json({ snippets });
+});
+app.delete("/code-mode/snippets.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { name } = (req.body ?? {}) as { name?: string };
+  if (!name || typeof name !== "string" || !deleteSnippet(name, ownerKey(principalOf(res)))) {
+    res.status(404).json({ error: "no such script" });
+    return;
+  }
+  res.json({ ok: true });
 });
 app.post("/agent-prefs.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;

@@ -1,12 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  callLine,
   capValue,
   CONSOLE_CAP,
   explainError,
   fileContents,
   formatRun,
   isDataKey,
+  previewOf,
   RETURN_CAP,
   safeFileName,
   shapeOf,
@@ -145,4 +147,33 @@ test("saveFile contents and names", () => {
 test("formatRun: a thrown Error is not prefixed twice", () => {
   assert.match(formatRun({ error: "Error: mcp__x__y: bad schema", logs: [], droppedLogChars: 0, calls: [] }), /^Error: mcp__x__y: bad schema$/m);
   assert.doesNotMatch(formatRun({ error: "Error: boom", logs: [], droppedLogChars: 0, calls: [] }), /Error: Error:/);
+});
+
+test("cap: the budget is water-filled, so one huge field no longer starves its siblings", () => {
+  const v = { log: "x".repeat(100_000), name: "app-one", rows: Array.from({ length: 300 }, (_, i) => ({ id: i, state: "STARTED" })) };
+  const r = capValue(v, 6_000);
+  assert.ok(r.cut && r.text.length <= 6_000);
+  const back = JSON.parse(r.text);
+  assert.equal(back.name, "app-one");
+  assert.match(back.log, /more chars\]$/);
+  assert.ok(back.rows.length > 20, `rows kept: ${back.rows.length}`);
+  assert.deepEqual(back.rows[0], { id: 0, state: "STARTED" });
+  assert.match(back.rows[back.rows.length - 1], new RegExp(`^${TRUNCATED} \\d+ more items$`));
+});
+
+test("previewOf: a short value whole, else one sample per field, a list by its first item", () => {
+  assert.equal(previewOf({ ok: true, id: 7 }), '{"ok":true,"id":7}');
+  const long = { name: "a".repeat(120), state: "STARTED", instances: 2, env: { A: 1, B: 2, C: 3, D: 4 }, tags: ["x", "y"] };
+  const p = previewOf(long);
+  assert.match(p, /^\{name: "a{38}…, state: "STARTED", instances: 2, env: \{A, B, C, …\}, tags: \[2 × "x"\]\}$/);
+  const rows = previewOf(Array.from({ length: 50 }, (_, i) => ({ id: i, title: `Item ${i} with a long enough title`, status: "open" })));
+  assert.equal(rows, '[50 × {id: 0, title: "Item 0 with a long enough title", status: "open"}]');
+  assert.ok(previewOf({ a: "x".repeat(500), b: "y".repeat(500), c: "z".repeat(500), d: "w".repeat(500), e: "v".repeat(500), f: 1 }).length <= 220);
+});
+
+test("callLine: a short result shows as its value; a long one its shape and a sample; paused and replayed are said", () => {
+  assert.equal(callLine({ n: 3, name: "mcp__t__get", state: "ok", chars: 18, shape: "{ok, id}", preview: '{"ok":true,"id":7}', sent: 2 }), '#3 mcp__t__get 18 = {"ok":true,"id":7}');
+  assert.equal(callLine({ n: 4, name: "mcp__t__list", state: "ok", chars: 9000, shape: "{rows: [50 × {id}]}", preview: "{rows: [50 × {id: 0}]}", sent: 2 }), "#4 mcp__t__list 9k {rows: [50 × {id}]} e.g. {rows: [50 × {id: 0}]}");
+  assert.equal(callLine({ n: 5, name: "mcp__t__list", state: "ok", chars: 9000, shape: "{rows}", sent: 2, replayed: true }), "#5 mcp__t__list 9k (replayed) {rows}");
+  assert.equal(callLine({ n: 6, name: "mcp__t__update", state: "paused", sent: 20 }), "#6 mcp__t__update paused: waits for the operator's approval");
 });

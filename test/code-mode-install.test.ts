@@ -14,6 +14,7 @@ import { MCP_CONFIG_PATH } from "../src/drivers/sentinels.ts";
 import {
   CODE_MODE_MIXED_PATH,
   codeModePayload,
+  codeModePolicyOf,
   mcpInstallNotes,
   mcpInstallSh,
   mcpProvisionState,
@@ -167,4 +168,11 @@ test("launch: --allowedTools derives mcp__code-mode from the wrapper config; the
     )
   );
   assert.ok(sh.indexOf("AGENT_SYS_PROMPT=") < sh.indexOf('--append-system-prompt "$AGENT_SYS_PROMPT"'));
+});
+
+test("install: a server's approve/allow lists become full-name rules in the upstream file", () => {
+  const store = { servers: { tracker: { name: "tracker", type: "stdio" as const, command: "node", enabled: true, addedAt: 1, approve: ["execute_*"], allow: ["list_items"] } } };
+  assert.deepEqual(codeModePolicyOf(store, ["tracker", "other"]), { approve: ["mcp__tracker__execute_*"], allow: ["mcp__tracker__list_items"] });
+  const sh = mcpInstallSh({ conf: { mcpServers: { tracker: { type: "stdio", command: "node" } } }, specs: [], codeMode: { on: true, wrapped: ["tracker"], direct: [], policy: codeModePolicyOf(store, ["tracker"]) } });
+  assert.ok(sh.includes(JSON.stringify({ deny: [], approve: ["mcp__tracker__execute_*"], allow: ["mcp__tracker__list_items"] })), sh.slice(0, 600));
 });

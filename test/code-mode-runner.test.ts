@@ -3,7 +3,7 @@
 // ulimit -t) and drives it through the bridge with a stub call provider.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { childProgram, MAX_CALLS, probeSandbox, runInSandbox, writeChildProgram, type BridgeHooks, type CallReply } from "../src/code-mode/box/runner.ts";
+import { childProgram, MAX_CALLS, probeSandbox, runInSandbox, RunPaused, writeChildProgram, type BridgeHooks, type CallReply } from "../src/code-mode/box/runner.ts";
 
 const sandbox = probeSandbox();
 const program = writeChildProgram();
@@ -124,7 +124,7 @@ test("runner: the script reaches nothing of the host — no process, require, fe
   assert.equal(v.fromCall, "EvalError");
   assert.equal(v.evalCall, "EvalError");
   assert.equal(v.viaError, "EvalError");
-  assert.deepEqual(v.globals, ["call", "console", "recall", "saveFile", "sleep"]);
+  assert.deepEqual(v.globals, ["call", "console", "input", "recall", "saveFile", "sleep"]);
 });
 
 test("runner: a script that rewrites Promise and JSON cannot redirect the bridge", async () => {
@@ -175,4 +175,27 @@ test("runner: object fields returned as undefined are counted (array holes and t
   const odd = await run("Array.isArray = () => true; return { x: undefined, y: 2 }");
   assert.deepEqual(JSON.parse(odd.value!), { y: 2 });
   assert.deepEqual({ ...odd.undef }, { x: 1 });
+});
+
+test("runner: `input` is the value run was given, undefined when none", async () => {
+  const r = await runInSandbox("return [typeof input, input.rows.length, input.who]", { sandbox, program, hooks: stub(), timeoutMs: 10_000, input: JSON.stringify({ rows: [1, 2, 3], who: "x" }) });
+  assert.deepEqual(JSON.parse(r.value!), ["object", 3, "x"]);
+  const none = await run("return typeof input");
+  assert.equal(JSON.parse(none.value!), "undefined");
+});
+
+test("runner: a call hook that throws RunPaused stops the run as paused; the call is reported paused, the rest unfinished", async () => {
+  const hooks = stub({
+    call: async (_n, name, argsJson) => {
+      if (name === "mcp__s__delete_thing") throw new RunPaused("delete_thing changes something");
+      await new Promise((r) => setTimeout(r, 200));
+      const json = JSON.stringify({ name, args: JSON.parse(argsJson) });
+      return { json, chars: json.length, cut: false, shape: "{name, args}" };
+    },
+  });
+  const r = await run('const a = await call("mcp__s__list", {}); const [x] = await Promise.all([call("mcp__s__slow", {}), call("mcp__s__delete_thing", { id: 1 })]); return x', hooks);
+  assert.equal(r.paused, "delete_thing changes something");
+  assert.equal(r.error, undefined);
+  assert.equal(r.value, undefined);
+  assert.deepEqual(r.calls.map((c) => [c.name, c.state]), [["mcp__s__list", "ok"], ["mcp__s__slow", "unfinished"], ["mcp__s__delete_thing", "paused"]]);
 });

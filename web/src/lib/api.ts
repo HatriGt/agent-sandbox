@@ -100,6 +100,17 @@ export interface AgentChoice {
 }
 
 /** Default coding agent (and, optionally, model) for new threads. */
+/** A script a code-mode run kept (docs/plan-code-mode.md §14): the next run can rerun it by name. */
+export interface CodeModeSnippet {
+  name: string;
+  description: string;
+  /** The mcp__server__tool names it calls. */
+  calls: string[];
+  savedAt: number;
+  runs: number;
+  chars: number;
+}
+
 export interface AgentPrefs {
   defaultAgent: AgentId;
   /** The model the composer preselects for this owner; absent = the agent's own default. */
@@ -1413,6 +1424,10 @@ export const api = {
   /** `defaultModel: ""` clears the preference (the agent's own default applies). */
   saveAgentPrefs: (body: { defaultAgent: AgentId; allowPartialSupervision?: boolean; defaultModel?: string; autoCompact?: "standard" | "early" | "off"; codeMode?: CodeModeSetting }) =>
     post<AgentPrefs>("/agent-prefs.json", body),
+  /** Code mode: the scripts the caller's runs kept for later runs (newest first). */
+  codeModeSnippets: (signal?: AbortSignal) => fetch(url("/code-mode/snippets.json"), { headers: authHeaders, signal }).then(parse<{ snippets: CodeModeSnippet[] }>),
+  deleteCodeModeSnippet: (name: string) =>
+    fetch(url("/code-mode/snippets.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then(parse<{ ok: true }>),
 
   /** Model providers: the caller's own keys/endpoints. Keys come back masked only. */
   providers: (signal?: AbortSignal) => fetch(url("/providers.json"), { headers: authHeaders, signal }).then(parse<ProvidersResponse>),

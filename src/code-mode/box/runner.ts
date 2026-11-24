@@ -4,7 +4,7 @@
  *
  * The script is prompt-injectable (it is written by a model that reads MCP results), so it runs in a
  * separate node process with nothing to steal, and the layers are independent:
- *  1. a `vm` context whose global has only call/recall/saveFile/sleep/console and the JS built-ins,
+ *  1. a `vm` context whose global has only call/recall/saveFile/sleep/input/console and the JS built-ins,
  *     with code generation from strings disabled; only strings cross into or out of it;
  *  2. the child process has an empty environment (the upstream tokens live in the server, not here),
  *     `--disallow-code-generation-from-strings` for the whole process, and `--permission` with read
@@ -39,7 +39,7 @@ function childMain(): void {
   // a script that replaces Promise.prototype.then or JSON.parse cannot redirect the bridge, and it
   // keeps the one host function it is given (`send`) in a closure the script cannot reach. `send`
   // takes primitives only and returns nothing, so no host-realm object ever enters the context.
-  const PRELUDE = `(function (send, LOG_CAP) {
+  const PRELUDE = `(function (send, LOG_CAP, INPUT) {
   "use strict";
   const P = Promise, then = P.prototype.then, apply = Reflect.apply, parse = JSON.parse, stringify = JSON.stringify, isArray = Array.isArray;
   const Str = String, Err = Error, TypeErr = TypeError, create = Object.create, define = Object.defineProperty, freeze = Object.freeze;
@@ -79,6 +79,8 @@ function childMain(): void {
     },
     sleep(ms) { return ask("sleep", Str(Number(ms) || 0)); },
     console: freeze({ log: log(""), info: log(""), debug: log(""), warn: log("[warn] "), error: log("[error] ") }),
+    // What run() was given as input (a saved script's parameters); undefined when nothing was.
+    input: typeof INPUT === "string" ? parse(INPUT) : undefined,
   };
   for (const k of Object.keys(globals)) define(globalThis, k, { value: globals[k], enumerable: true, writable: false, configurable: false });
   function deliver(id, ok, payload) {
@@ -141,9 +143,9 @@ function childMain(): void {
       // Writing to a closed stdout: the host is gone and will kill us.
     }
   }
-  function start(code: string, logCap: number): void {
+  function start(code: string, logCap: number, input: string | undefined): void {
     const ctx = vm.createContext(Object.create(null), { name: "script", codeGeneration: { strings: false, wasm: false } });
-    bridge = new vm.Script(PRELUDE).runInContext(ctx)(send, logCap);
+    bridge = new vm.Script(PRELUDE).runInContext(ctx)(send, logCap, input);
     let fn: unknown;
     try {
       fn = new vm.Script(`(async function () {\n${code}\n})`, { filename: "script.js", lineOffset: -1 }).runInContext(ctx);
@@ -162,13 +164,13 @@ function childMain(): void {
     for (let i; (i = buf.indexOf("\n")) >= 0; ) {
       const line = buf.slice(0, i);
       buf = buf.slice(i + 1);
-      let m: { t?: string; id?: number; ok?: boolean; payload?: string; code?: string; logCap?: number };
+      let m: { t?: string; id?: number; ok?: boolean; payload?: string; code?: string; logCap?: number; input?: string };
       try {
         m = JSON.parse(line);
       } catch {
         continue;
       }
-      if (m.t === "start" && !bridge) start(String(m.code), Number(m.logCap) || 0);
+      if (m.t === "start" && !bridge) start(String(m.code), Number(m.logCap) || 0, typeof m.input === "string" ? m.input : undefined);
       else if (m.t === "res") deliver(Number(m.id), m.ok === true, String(m.payload));
     }
   });
@@ -245,6 +247,20 @@ export interface CallReply {
   chars: number;
   cut: boolean;
   shape: string;
+  /** previewOf the value, for the summary line. */
+  preview?: string;
+}
+
+/**
+ * Thrown by a call hook when the call must wait for the operator: the run stops here with the
+ * message as its `paused` text, the call is reported paused and the others unfinished. A resumed
+ * run replays the calls made so far from its record and lets this one through.
+ */
+export class RunPaused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunPaused";
+  }
 }
 
 export interface BridgeHooks {
@@ -262,6 +278,8 @@ export interface BridgeResult {
   /** Object fields that were undefined in the returned value, with how often. */
   undef?: Record<string, number>;
   error?: string;
+  /** Set when a call hook threw RunPaused: the run stopped to wait for the operator. */
+  paused?: string;
   logs: string[];
   droppedLogChars: number;
   calls: CallLine[];
@@ -273,6 +291,8 @@ export interface RunOptions {
   hooks: BridgeHooks;
   timeoutMs: number;
   maxInFlight?: number;
+  /** JSON text the script sees as `input`; absent when run was given none. */
+  input?: string;
 }
 
 /**
@@ -295,7 +315,7 @@ export function runInSandbox(code: string, opts: RunOptions): Promise<BridgeResu
     const reply = (id: number, ok: boolean, payload: string) => {
       if (!finished) child.stdin.write(JSON.stringify({ t: "res", id, ok, payload }) + "\n");
     };
-    const finish = (r: { value?: string; error?: string; dropped?: number; undef?: Record<string, number> }) => {
+    const finish = (r: { value?: string; error?: string; paused?: string; dropped?: number; undef?: Record<string, number> }) => {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
@@ -303,7 +323,7 @@ export function runInSandbox(code: string, opts: RunOptions): Promise<BridgeResu
       child.kill("SIGKILL");
       for (const c of calls) if (c.state === undefined) c.state = "unfinished";
       const undef = r.undef && typeof r.undef === "object" && Object.keys(r.undef).length ? r.undef : undefined;
-      resolve({ value: r.value, undef, error: r.error, logs, droppedLogChars: r.dropped ?? 0, calls });
+      resolve({ value: r.value, undef, error: r.error, paused: r.paused, logs, droppedLogChars: r.dropped ?? 0, calls });
     };
     const pump = () => {
       while (running < maxInFlight && queue.length) queue.shift()!();
@@ -325,11 +345,15 @@ export function runInSandbox(code: string, opts: RunOptions): Promise<BridgeResu
         opts.hooks.call(line.n, name, argsJson, abort.signal).then(
           (r) => {
             if (finished) return;
-            Object.assign(line, { state: "ok", chars: r.chars, cut: r.cut, shape: r.shape });
+            Object.assign(line, { state: "ok", chars: r.chars, cut: r.cut, shape: r.shape, ...(r.preview !== undefined ? { preview: r.preview } : {}) });
             reply(id, true, r.json);
           },
           (e: unknown) => {
             if (finished) return;
+            if (e instanceof RunPaused) {
+              line.state = "paused";
+              return finish({ paused: e.message });
+            }
             Object.assign(line, { state: "failed", error: String((e as Error)?.message ?? e) });
             reply(id, false, String((e as Error)?.message ?? e));
           }
@@ -400,6 +424,6 @@ export function runInSandbox(code: string, opts: RunOptions): Promise<BridgeResu
       finish({ error: `the sandbox stopped before the script finished: ${why}${stderr.trim() ? `\n${stderr.trim()}` : ""}` });
     });
     child.stdin.on("error", () => {});
-    child.stdin.write(JSON.stringify({ t: "start", code, logCap: CHILD_LOG_CAP }) + "\n");
+    child.stdin.write(JSON.stringify({ t: "start", code, logCap: CHILD_LOG_CAP, input: opts.input }) + "\n");
   });
 }

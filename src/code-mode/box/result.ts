@@ -91,17 +91,75 @@ function shrink(v: unknown, l: Limits, depth = 0): unknown {
   return out;
 }
 
+/** The fewest chars a cut child is worth showing at; below it the tail is dropped instead. */
+const MIN_SHARE = 48;
+
 /**
- * The value as JSON text of at most `max` chars, cut so it is still valid JSON: long strings are
- * shortened first (one huge text field is the usual culprit), then array tails, then object keys.
- * Each cut is marked in the data itself, so a script or a model reading it cannot mistake a partial
- * list for the whole one. Only a value that still does not fit becomes plain cut text.
+ * Water-fill (Cloudflare's truncate.ts does the same): a value cut to `budget` chars by giving each
+ * child an equal share, where a child that needs less hands the rest to the others, so one huge
+ * text field or one long list no longer starves its siblings. Too many children for the budget and
+ * the tail is dropped with a marker. Every cut is marked in the data itself.
+ */
+function fit(v: unknown, budget: number, note: string, depth = 0): unknown {
+  const full = toJson(v);
+  if (full.length <= budget) return v;
+  if (typeof v === "string") {
+    const keep = Math.max(0, budget - 40 - String(v.length).length);
+    return `${v.slice(0, keep)}…[${v.length - keep} more chars]`;
+  }
+  if (!v || typeof v !== "object" || depth > 40) return v;
+  const isArr = Array.isArray(v);
+  const entries = isArr ? (v as unknown[]).map((x, i) => [String(i), x] as const) : Object.entries(v as Record<string, unknown>);
+  const marker = (n: number) => (isArr ? `${TRUNCATED} ${n} more items${note}` : `${n} more keys${note}`);
+  // The chars each child costs beyond its value: a comma, and for an object its quoted key and colon.
+  const fixed = (k: string) => 1 + (isArr ? 0 : toJson(k).length + 1);
+  // How many children fit at all: at least MIN_SHARE each (or whole when smaller).
+  let keep = entries.length;
+  const markerCost = marker(0).length + 24 + (isArr ? 0 : TRUNCATED.length + 3);
+  let avail = budget - 2;
+  for (;;) {
+    const need = entries.slice(0, keep).reduce((n, [k, x]) => n + fixed(k) + Math.min(MIN_SHARE, toJson(x).length), 0) + (keep < entries.length ? markerCost : 0);
+    if (need <= avail || keep <= 1) break;
+    keep = Math.min(keep - 1, Math.floor((keep * avail) / need));
+  }
+  const kept = entries.slice(0, keep);
+  if (keep < entries.length) avail -= markerCost;
+  avail -= kept.reduce((n, [k]) => n + fixed(k), 0);
+  // Water-fill the value budget over the kept children, smallest first.
+  const sizes = kept.map(([, x]) => toJson(x).length);
+  const share = new Map<number, number>();
+  const order = kept.map((_, i) => i).sort((a, b) => sizes[a] - sizes[b]);
+  let left = Math.max(0, avail);
+  order.forEach((i, pos) => {
+    const s = Math.min(sizes[i], Math.floor(left / (order.length - pos)));
+    share.set(i, s);
+    left -= s;
+  });
+  const out = kept.map(([, x], i) => (sizes[i] <= share.get(i)! ? x : fit(x, share.get(i)!, note, depth + 1)));
+  if (isArr) {
+    if (keep < entries.length) out.push(marker(entries.length - keep));
+    return out;
+  }
+  const obj: Record<string, unknown> = {};
+  kept.forEach(([k], i) => (obj[k] = out[i]));
+  if (keep < entries.length) obj[TRUNCATED] = marker(entries.length - keep);
+  return obj;
+}
+
+/**
+ * The value as JSON text of at most `max` chars, cut so it is still valid JSON, by water-filling
+ * the budget over the value's children (fit) and, should that still overshoot, by the older
+ * strings-then-tails-then-keys shrink. Only a value that still does not fit becomes plain cut text.
  */
 export function capValue(v: unknown, max: number, note = ""): { text: string; cut: boolean } {
   const full = toJson(v);
   if (full.length <= max) return { text: full, cut: false };
   const flat = (s: string) => ({ text: toJson(`${s.slice(0, Math.max(0, max - 120 - note.length))}…${TRUNCATED}${note}`), cut: true });
   if (typeof v === "string") return flat(v);
+  for (const factor of [1, 0.9, 0.75]) {
+    const text = toJson(fit(v, Math.floor(max * factor), note));
+    if (text.length <= max) return { text, cut: true };
+  }
   const l: Limits = { str: 2000, arr: 1000, keys: 200, note };
   for (let i = 0; i < 60; i++) {
     const text = toJson(shrink(v, l));
@@ -160,6 +218,41 @@ export function shapeOf(v: unknown, depth = 0): string {
   return `{${shown.join(", ")}${more ? `, …+${more}` : ""}}`;
 }
 
+const PREVIEW_SHORT = 100;
+const PREVIEW_SAMPLE = 40;
+const PREVIEW_MAX = 220;
+
+/**
+ * A glimpse of a result for its summary line, so the model need not recall a value to learn how a
+ * field is spelt or what a status looks like: a value of PREVIEW_SHORT chars or less whole, else one
+ * sample value per top-level field (the first item's for a list), each cut to PREVIEW_SAMPLE chars.
+ */
+export function previewOf(v: unknown): string {
+  const full = toJson(v);
+  if (full.length <= PREVIEW_SHORT) return full;
+  const sample = (x: unknown): string => {
+    if (x && typeof x === "object") {
+      if (Array.isArray(x)) return x.length ? `[${x.length} × ${sample(x[0])}]` : "[]";
+      const keys = Object.keys(x);
+      return keys.length ? `{${keys.slice(0, 3).join(", ")}${keys.length > 3 ? ", …" : ""}}` : "{}";
+    }
+    const s = toJson(x);
+    return s.length > PREVIEW_SAMPLE ? `${s.slice(0, PREVIEW_SAMPLE - 1)}…` : s;
+  };
+  let out: string;
+  if (Array.isArray(v)) {
+    const first = v[0];
+    if (first && typeof first === "object" && !Array.isArray(first)) {
+      const parts = Object.entries(first as Record<string, unknown>).slice(0, 8).map(([k, x]) => `${k}: ${sample(x)}`);
+      out = `[${v.length} × {${parts.join(", ")}}]`;
+    } else out = `[${v.length} × ${sample(first)}]`;
+  } else if (v && typeof v === "object") {
+    const parts = Object.entries(v as Record<string, unknown>).slice(0, 8).map(([k, x]) => `${k}: ${sample(x)}`);
+    out = `{${parts.join(", ")}}`;
+  } else out = sample(v);
+  return out.length > PREVIEW_MAX ? `${out.slice(0, PREVIEW_MAX - 1)}…` : out;
+}
+
 /** 312 → "312", 181_402 → "181k", 2_400_000 → "2.4M": sizes in the summary are chars. */
 export function size(n: number): string {
   if (n < 1000) return String(n);
@@ -171,12 +264,19 @@ export function size(n: number): string {
 export interface CallLine {
   n: number;
   name: string;
-  /** "ok": replied; "failed": threw; "unfinished": no reply before the script ended or was stopped. */
-  state: "ok" | "failed" | "unfinished";
+  /**
+   * "ok": replied; "failed": threw; "unfinished": no reply before the script ended or was stopped;
+   * "paused": the call waits for the operator's approval (the run stopped here, resume continues it).
+   */
+  state: "ok" | "failed" | "unfinished" | "paused";
   chars?: number;
   /** Set when the result was over UPSTREAM_MAX and the script saw a cut copy. */
   cut?: boolean;
   shape?: string;
+  /** previewOf the result: the whole value when short, else one sample per field. */
+  preview?: string;
+  /** A replayed call: answered from the record of the run that paused, no new call made. */
+  replayed?: boolean;
   error?: string;
   /** Argument JSON length, the "out" side of the call. */
   sent: number;
@@ -228,14 +328,21 @@ export function formatRun(o: RunOutcome): string {
     const got = o.calls.reduce((a, c) => a + (c.chars ?? 0), 0);
     const ret = o.value?.length ?? 0;
     out.push(`--- ${o.calls.length} MCP call${o.calls.length === 1 ? "" : "s"}: ${size(got)} chars in, ${size(ret)} out ---`);
-    for (const c of o.calls) {
-      if (c.state === "failed") out.push(`#${c.n} ${c.name} failed: ${oneLine(c.error ?? "", 300)}`);
-      else if (c.state === "unfinished") out.push(`#${c.n} ${c.name} did not finish`);
-      else out.push(`#${c.n} ${c.name} ${size(c.chars ?? 0)}${c.cut ? ` (over ${size(UPSTREAM_MAX)}: the script saw a cut copy)` : ""} ${c.shape ?? ""}`.trimEnd());
-    }
+    for (const c of o.calls) out.push(callLine(c));
     if (o.calls.some((c) => c.state === "ok")) out.push("await recall(n) returns result #n again, with no new call.");
   }
   return out.join("\n");
+}
+
+/** One summary line: number, name, size, shape, then the preview when there is one. */
+export function callLine(c: CallLine): string {
+  if (c.state === "failed") return `#${c.n} ${c.name} failed: ${oneLine(c.error ?? "", 300)}`;
+  if (c.state === "unfinished") return `#${c.n} ${c.name} did not finish`;
+  if (c.state === "paused") return `#${c.n} ${c.name} paused: waits for the operator's approval`;
+  const head = `#${c.n} ${c.name} ${size(c.chars ?? 0)}${c.cut ? ` (over ${size(UPSTREAM_MAX)}: the script saw a cut copy)` : ""}${c.replayed ? " (replayed)" : ""}`;
+  // A short result is its own preview; the shape would only repeat its keys.
+  if (c.preview !== undefined && c.preview.length <= PREVIEW_SHORT && (c.chars ?? 0) <= PREVIEW_SHORT) return `${head} = ${c.preview}`;
+  return `${head} ${c.shape ?? ""}${c.preview ? ` e.g. ${c.preview}` : ""}`.trimEnd();
 }
 
 const oneLine = (s: string, max: number) => {
@@ -245,7 +352,7 @@ const oneLine = (s: string, max: number) => {
 
 /** Globals a script has, appended to a ReferenceError so the model stops guessing at others. */
 export const SCRIPT_GLOBALS =
-  "call(name, args), recall(n), saveFile(name, data), sleep(ms), console.log/warn/error and the JavaScript built-ins (JSON, Math, Array, Object, Promise, Date, …). There is no fetch, require, import, process, setTimeout or file system.";
+  "call(name, args), recall(n), saveFile(name, data), sleep(ms), input (the value run was given), console.log/warn/error and the JavaScript built-ins (JSON, Math, Array, Object, Promise, Date, …). There is no fetch, require, import, process, setTimeout or file system.";
 
 /** A script error as the model should read it. */
 export function explainError(message: string): string {

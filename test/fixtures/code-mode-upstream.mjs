@@ -28,14 +28,30 @@ const tools = [
     inputSchema: { type: "object", properties: { id: { type: "string", description: "Item id, e.g. IT-1000" } }, required: ["id"], additionalProperties: false },
   },
   { name: "fail_tool", description: "Always fails.", inputSchema: { type: "object", properties: {} } },
+  {
+    name: "update_item",
+    description: "Change an item's title.",
+    inputSchema: { type: "object", properties: { id: { type: "string" }, title: { type: "string" } }, required: ["id", "title"], additionalProperties: false },
+  },
+  { name: "stats", description: "How often each tool was called.", inputSchema: { type: "object", properties: {} }, annotations: { readOnlyHint: true } },
   { name: "secret_probe", description: "Says whether the upstream received its token.", inputSchema: { type: "object", properties: {} } },
 ];
 
 const server = new Server({ name: "tracker", version: "1" }, { capabilities: { tools: {} }, instructions: "Statuses are lower case: open or closed." });
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+const counts = {};
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
   const a = req.params.arguments ?? {};
+  counts[req.params.name] = (counts[req.params.name] ?? 0) + 1;
   switch (req.params.name) {
+    case "update_item": {
+      const row = items.find((r) => r.id === a.id);
+      if (!row) return { content: [{ type: "text", text: `no item ${a.id}` }], isError: true };
+      row.title = a.title;
+      return { content: [{ type: "text", text: JSON.stringify({ ok: true, id: row.id, title: row.title }) }] };
+    }
+    case "stats":
+      return { content: [{ type: "text", text: JSON.stringify(counts) }] };
     case "list_items": {
       const rows = items.filter((r) => !a.status || r.status === a.status).slice(0, a.limit ?? items.length);
       return { content: [{ type: "text", text: JSON.stringify({ items: rows }) }], structuredContent: { items: rows, next_cursor: null } };

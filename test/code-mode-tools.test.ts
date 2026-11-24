@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   deniedBy,
+  isWriteTool,
   literalCalls,
   literalKeys,
   maskComments,
@@ -9,9 +10,11 @@ import {
   normalizeCode,
   precheck,
   renderCatalog,
+  renderIndex,
   renderTool,
   schemaToType,
   searchTools,
+  selectTools,
   splitName,
   tokens,
   type ToolDef,
@@ -248,4 +251,41 @@ test("policy: exact names, server wildcards and inner wildcards; nothing else is
   assert.equal(deniedBy("mcp__hana__delete_rows", deny), "mcp__*__delete_*");
   assert.equal(deniedBy("mcp__hana__list", deny), undefined);
   assert.equal(deniedBy("mcp__aXb__t", ["mcp__a.b__t"]), undefined);
+});
+
+// --- approval, exact names, the index ----------------------------------------------------------
+
+test("isWriteTool: the server's annotation decides, else the words of the name; execute/query/run read", () => {
+  assert.equal(isWriteTool(tool("cf", "Apps_create", "")), true);
+  assert.equal(isWriteTool(tool("cf", "CF_AppAction", "")), true);
+  assert.equal(isWriteTool(tool("jira", "transitionJiraIssue", "")), true);
+  assert.equal(isWriteTool(tool("hana", "hana_execute_query", "")), false);
+  assert.equal(isWriteTool(tool("cf", "Apps_list", "")), false);
+  assert.equal(isWriteTool({ ...tool("x", "delete_all", ""), readOnly: true }), false, "readOnlyHint wins over the name");
+  assert.equal(isWriteTool({ ...tool("x", "poke", ""), destructive: true }), true, "destructiveHint wins over the name");
+});
+
+test("search: readers rank above writers unless the query asks for a change", () => {
+  const cat = [tool("cf", "Apps_create", "Create an app."), tool("cf", "Apps_list", "List apps."), tool("cf", "Apps_delete", "Delete an app."), tool("cf", "Apps_get", "Get an app.")];
+  assert.deepEqual(searchTools(cat, "apps").map((t) => t.name), ["Apps_get", "Apps_list", "Apps_create", "Apps_delete"]);
+  assert.equal(searchTools(cat, "delete an app")[0].name, "Apps_delete");
+});
+
+test("selectTools: select:a,b and bare full names return exactly those; words are not a selection", () => {
+  const cat = [tool("cf", "Apps_list", ""), tool("cf", "Apps_get", ""), tool("hana", "hana_list_tables", "")];
+  assert.deepEqual(selectTools(cat, "select:mcp__cf__Apps_get,mcp__hana__hana_list_tables")!.hits.map((t) => t.full), ["mcp__cf__Apps_get", "mcp__hana__hana_list_tables"]);
+  assert.deepEqual(selectTools(cat, "mcp__cf__Apps_list mcp__cf__nope"), { hits: [cat[0]], missing: ["mcp__cf__nope"] });
+  assert.deepEqual(selectTools(cat, "select: Apps_get")!.hits, [cat[1]], "a unique bare name works too");
+  assert.equal(selectTools(cat, "list apps"), undefined);
+  assert.equal(selectTools(cat, ""), undefined);
+});
+
+test("renderIndex: one line per server, readers first, within the budget; a big server loses its tail", () => {
+  const cat = [tool("cf", "Apps_delete", ""), tool("cf", "Apps_list", ""), tool("cf", "Apps_get", ""), tool("hana", "hana_list_tables", "")];
+  assert.equal(renderIndex(cat, 1000), "mcp__cf__: Apps_get, Apps_list, Apps_delete\nmcp__hana__: hana_list_tables");
+  const big = [...Array.from({ length: 60 }, (_, i) => tool("s", `tool_number_${i}`, "")), tool("t", "one", "")];
+  const text = renderIndex(big, 400);
+  assert.ok(text.length <= 400, `${text.length} chars`);
+  assert.match(text, /^mcp__s__: tool_number_0, .*, \+\d+ more$/m);
+  assert.match(text, /^mcp__t__: one$/m, "the small server keeps its whole line");
 });

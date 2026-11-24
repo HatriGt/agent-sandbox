@@ -119,7 +119,7 @@ test("server: run filters in the script and returns the value plus one line per 
   assert.equal(lines[1], "--- console ---");
   assert.equal(lines[2], "open 134");
   assert.match(lines[3], /^--- 2 MCP calls: \d+k chars in, \d+ out ---$/);
-  assert.match(lines[4], /^#1 mcp__tracker__list_items \d+k \{items: \[400 × \{id, title, status, owner: \{email\}\}\], next_cursor\}$/);
+  assert.match(lines[4], /^#1 mcp__tracker__list_items \d+k \{items: \[400 × \{id, title, status, owner: \{email\}\}\], next_cursor\} e\.g\. \{items: \[400 × \{id, title, status, …\}\], next_cursor: null\}$/);
   assert.match(lines[5], /^#2 mcp__tracker__list_items \d+k \{items: \[134 × /);
   assert.equal(lines[6], "await recall(n) returns result #n again, with no new call.");
 });
@@ -208,6 +208,74 @@ test("server: CODE_MODE_CATALOG puts the tool list and the upstream notes into t
   // Off by default: the plain description, nothing listed.
   const plain = (await clients[0].listTools()).tools.find((t) => t.name === "run")!;
   assert.doesNotMatch(plain.description ?? "", /Tools you can call/);
+});
+
+test("server: the run description names every tool per server, readers first, and says who is not up", async () => {
+  const run = (await clients[0].listTools()).tools.find((t) => t.name === "run")!;
+  assert.match(run.description ?? "", /\nTools \(argument types: search\):\nmcp__tracker__: get_item, list_items, secret_probe, stats, update_item\n/);
+  assert.doesNotMatch(run.description ?? "", /fail_tool/, "denied tools stay out of the index");
+  assert.match(run.description ?? "", /^not connected yet: broken/m);
+  assert.match(run.description ?? "", /pauses the run for the operator's approval/);
+});
+
+test("server: select:<name> returns exactly those tools, a write tool is marked, and a miss names the nearest", async () => {
+  const r = await tool(clients[0], "search", { query: "select:mcp__tracker__update_item,mcp__tracker__get_itme" });
+  assert.match(r.text, /### mcp__tracker__update_item \[approval\]\nChange an item's title\.\nargs: \{ id: string; title: string \}/);
+  assert.doesNotMatch(r.text, /### mcp__tracker__list_items/);
+  assert.match(r.text, /no tool "mcp__tracker__get_itme"; nearest: mcp__tracker__get_item/);
+  const names = await tool(clients[0], "search", { query: "items" });
+  assert.doesNotMatch(names.text, /list_items \[approval\]/, "a reader is not marked");
+});
+
+test("server: a write tool pauses the run; resume replays the calls made and lets the write through", async () => {
+  const c = clients[0];
+  const before = JSON.parse((await tool(c, "run", { code: 'return call("mcp__tracker__stats", {})' })).text.split("\n")[0]);
+  const r = await tool(c, "run", {
+    code: 'const one = await call("mcp__tracker__get_item", { id: "IT-1001" })\nconst u = await call("mcp__tracker__update_item", { id: one.id, title: "renamed by the script" })\nreturn { was: one.title, now: u.title }',
+  });
+  assert.equal(r.isError, false, r.text);
+  const id = r.text.match(/\{"resume": "([a-z0-9]+)"\}/)?.[1];
+  assert.ok(id, r.text);
+  assert.match(r.text, /^Paused: call #\d+ mcp__tracker__update_item \{"id":"IT-1001","title":"renamed by the script"\} changes something/);
+  assert.match(r.text, /the 1 call already made is answered from its recorded result/);
+  assert.match(r.text, /--- 2 MCP calls before the pause ---\n#\d+ mcp__tracker__get_item \d+ \{id, title, status, owner: \{email\}\} e\.g\. \{id: "IT-1001", title: "Item number 1 with a reasonably long t…, status: "closed", owner: \{email\}\}\n#\d+ mcp__tracker__update_item paused: waits for the operator's approval$/);
+  const mid = JSON.parse((await tool(c, "run", { code: 'return call("mcp__tracker__stats", {})' })).text.split("\n")[0]);
+  assert.equal(mid.update_item, undefined, "nothing was sent for the paused call");
+  const done = await tool(c, "run", { resume: id });
+  assert.equal(done.isError, false, done.text);
+  const lines = done.text.split("\n");
+  assert.deepEqual(JSON.parse(lines[0]), { was: "Item number 1 with a reasonably long title to make the list large", now: "renamed by the script" });
+  assert.match(done.text, /^#\d+ mcp__tracker__get_item \d+ \(replayed\) /m);
+  assert.match(done.text, /^#\d+ mcp__tracker__update_item \d+ = \{"ok":true,"id":"IT-1001","title":"renamed by the script"\}$/m);
+  const after = JSON.parse((await tool(c, "run", { code: 'return call("mcp__tracker__stats", {})' })).text.split("\n")[0]);
+  assert.equal(after.get_item, mid.get_item, "the replayed call was not made again");
+  assert.equal(after.update_item, (before.update_item ?? 0) + 1);
+  const gone = await tool(c, "run", { resume: id });
+  assert.equal(gone.isError, true);
+  assert.match(gone.text, /no paused run/);
+});
+
+test("server: a clean script with three calls is kept, listed by search, and reruns by name with input", async () => {
+  const c = clients[0];
+  const r = await tool(c, "run", {
+    code: '// titles of the given ids\nconst ids = input?.ids ?? ["IT-1000"]\nconst rows = await Promise.all(ids.map((id) => call("mcp__tracker__get_item", { id })))\nreturn rows.map((r) => r.title.slice(0, 11))',
+    input: { ids: ["IT-1000", "IT-1002", "IT-1003"] },
+  });
+  assert.equal(r.isError, false, r.text);
+  assert.deepEqual(JSON.parse(r.text.split("\n")[0]), ["Item number", "Item number", "Item number"]);
+  const knowledge = JSON.parse(readFileSync(join(stateDir, "knowledge.json"), "utf8"));
+  const name = "tracker.get_item";
+  assert.equal(knowledge.snippets[name].description, "titles of the given ids");
+  assert.deepEqual(knowledge.snippets[name].calls, ["mcp__tracker__get_item"]);
+  const s = await tool(c, "search", { query: "titles" });
+  assert.match(s.text, /Saved scripts from earlier runs[^\n]*\n- tracker\.get_item: titles of the given ids \(calls mcp__tracker__get_item; \d+ chars\)/);
+  const again = await tool(c, "run", { snippet: name, input: { ids: ["IT-1005"] } });
+  assert.equal(JSON.parse(again.text.split("\n")[0]).length, 1);
+  const named = await tool(c, "run", { code: 'return (await call("mcp__tracker__get_item", { id: "IT-1000" })).status', save: "one item", description: "status of IT-1000" });
+  assert.equal(named.isError, false);
+  assert.match(JSON.stringify(JSON.parse(readFileSync(join(stateDir, "knowledge.json"), "utf8")).snippets["one-item"]), /status of IT-1000/);
+  const nope = await tool(c, "run", { snippet: "one-itme" });
+  assert.match(nope.text, /no saved script "one-itme"; nearest: one-item/);
 });
 
 test("box modules import only each other, node built-ins and (type-only) the SDK", () => {

@@ -1742,7 +1742,24 @@ export interface McpInstallPlan {
    * from the TypeScript sources), so the box keeps the direct config and the note says why.
    * Absent: off, or nothing to wrap.
    */
-  codeMode?: { on: true; wrapped: string[]; direct: string[] } | { unavailable: string };
+  codeMode?: { on: true; wrapped: string[]; direct: string[]; policy?: CodeModePolicy } | { unavailable: string };
+}
+
+/** The approval rules of the wrapped servers as full-name patterns (box/server.ts needsApproval). */
+export interface CodeModePolicy {
+  approve: string[];
+  allow: string[];
+}
+
+/** `approve: ["execute_operation"]` on server s becomes the rule mcp__s__execute_operation for the box. */
+export function codeModePolicyOf(store: McpStore, wrapped: readonly string[]): CodeModePolicy {
+  const policy: CodeModePolicy = { approve: [], allow: [] };
+  const byName = new Map(Object.values(store.servers).map((s) => [s.name, s] as const));
+  for (const name of wrapped) {
+    const own = byName.get(name);
+    for (const key of ["approve", "allow"] as const) for (const rule of own?.[key] ?? []) policy[key].push(`mcp__${name}__${rule}`);
+  }
+  return policy;
 }
 
 /** The mixed config (wrapper + direct servers) waits here, 600, until `--check` lets it replace the direct one. */
@@ -1774,7 +1791,7 @@ export function mcpInstallSh(plan: McpInstallPlan): string {
     // created 600 (umask in a subshell), never readable for a moment; with code mode off a stale
     // pair is removed, they hold the same secrets as the config.
     (cm
-      ? ` && (umask 077; printf '%s' ${shellQuote(JSON.stringify({ ...codeModeUpstreamConfig(plan.conf, cm.wrapped), codeMode: { deny: [] } }))} > ${up}` +
+      ? ` && (umask 077; printf '%s' ${shellQuote(JSON.stringify({ ...codeModeUpstreamConfig(plan.conf, cm.wrapped), codeMode: { deny: [], ...(cm.policy?.approve.length ? { approve: cm.policy.approve } : {}), ...(cm.policy?.allow.length ? { allow: cm.policy.allow } : {}) } }))} > ${up}` +
         ` && printf '%s' ${shellQuote(JSON.stringify(codeModeMixedConfig(plan.conf, cm.wrapped)))} > ${mixed}) && chmod 600 ${up} ${mixed}`
       : `; rm -f ${up} ${mixed}`);
   // First inside the braces: it reads the whole stdin, so nothing after it can eat the payload.
@@ -1840,7 +1857,7 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<string
       if (decision.wrapped.length) {
         try {
           input = codeModePayload(codeModeFiles({ prompt: codeModePromptFor(decision.wrapped, decision.direct), knowledge }));
-          codeMode = { on: true, wrapped: decision.wrapped, direct: decision.direct };
+          codeMode = { on: true, wrapped: decision.wrapped, direct: decision.direct, policy: codeModePolicyOf(store, decision.wrapped) };
         } catch (e) {
           codeMode = { unavailable: `the controller has no code-mode build: ${(e as Error).message}` };
         }

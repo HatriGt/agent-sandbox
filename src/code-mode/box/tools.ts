@@ -15,6 +15,9 @@ export interface ToolDef {
   full: string;
   description: string;
   inputSchema: unknown;
+  /** The server's own annotations, when it sets them (MCP readOnlyHint / destructiveHint). */
+  readOnly?: boolean;
+  destructive?: boolean;
 }
 
 export type Detail = "names" | "signatures" | "full";
@@ -35,6 +38,27 @@ export function deniedBy(full: string, deny: readonly string[]): string | undefi
     if (re.test(full)) return rule;
   }
   return undefined;
+}
+
+/**
+ * Words in a tool's name that say it changes something. A tool that only reads is the common case
+ * and is never paused; `execute`, `run` and `query` are left out on purpose (hana_execute_query is
+ * a SELECT nearly always), a server that wants those paused says so with codeMode.approve.
+ */
+export const WRITE_WORDS = new Set([
+  "create", "delete", "update", "remove", "put", "patch", "post", "transition", "action", "write", "insert", "drop",
+  "cancel", "send", "upload", "publish", "merge", "restart", "stop", "start", "scale", "deploy", "add", "set", "edit",
+  "modify", "move", "rename", "archive", "assign", "push", "truncate", "restage", "bind", "unbind", "map", "unmap",
+]);
+
+/**
+ * Whether a call to this tool changes something, so a script's call to it waits for the operator:
+ * the server's own annotation decides when it has one, else the words of the tool's name.
+ */
+export function isWriteTool(t: Pick<ToolDef, "name" | "readOnly" | "destructive">): boolean {
+  if (t.readOnly === true) return false;
+  if (t.destructive === true) return true;
+  return tokens(t.name).some((w) => WRITE_WORDS.has(w));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -178,19 +202,49 @@ const W_NAME = 10;
 const W_SERVER = 5;
 const W_DESC = 2;
 export const MAX_RESULTS = 30;
+/** Hits a search shows at the asked detail before it falls back to one line per tool. */
+export const SHOWN_RESULTS = 12;
+/** Chars one search answer may spend on rendered tools (the rest are one line each, then a count). */
+export const SEARCH_BUDGET = 4_000;
+/** A query that names a write ("delete the route") wants write tools ranked like any other. */
+const WRITE_QUERY = /\b(creat|delet|updat|remov|restart|stop|start|scal|deploy|writ|insert|drop|cancel|send|upload|publish|transition|action|patch|put|post|set|edit|modif|renam|archiv|assign|push|bind|map)\w*/i;
 
 /** "items" finds get_item and "issue" finds listIssues: a plural s is not a different word. */
 const stem = (w: string) => (w.length > 3 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w);
 
 /**
+ * Exact names asked for: `select:mcp__a__b,mcp__c__d` (Claude Code's ToolSearch syntax, which the
+ * model reaches for), or a query that is only full names. Each name may also be a bare tool name
+ * (`Apps_list`) when it is unique. Undefined when the query is words to rank.
+ */
+export function selectTools(tools: readonly ToolDef[], query: string): { hits: ToolDef[]; missing: string[] } | undefined {
+  const q = query.trim();
+  const m = q.match(/^select:\s*(.*)$/is);
+  const names = (m ? m[1] : q).split(/[\s,]+/).filter(Boolean);
+  if (!names.length || (!m && !names.every((n) => /^mcp__[A-Za-z0-9._-]+__\S+$/.test(n)))) return undefined;
+  const hits: ToolDef[] = [];
+  const missing: string[] = [];
+  for (const n of names) {
+    const found = tools.find((t) => t.full === n) ?? (tools.filter((t) => t.name === n).length === 1 ? tools.find((t) => t.name === n) : undefined);
+    if (found) {
+      if (!hits.includes(found)) hits.push(found);
+    } else missing.push(n);
+  }
+  return { hits, missing };
+}
+
+/**
  * Rank tools for a query. With one or two query words every word must hit (a short query is
- * precise); longer queries are sentences, so 60% of their words is enough.
+ * precise); longer queries are sentences, so 60% of their words is enough. Tools that change
+ * something rank under the readers unless the query asks for a change: a "list the apps" search
+ * must not open with Apps_create and Apps_delete.
  */
 export function searchTools(tools: readonly ToolDef[], query: string, limit = MAX_RESULTS): ToolDef[] {
   const q = tokens(query).map(stem);
   if (!q.length) return [...tools].sort((a, b) => a.full.localeCompare(b.full));
   const need = q.length <= 2 ? q.length : Math.ceil(q.length * 0.6);
   const exact = query.trim();
+  const readersFirst = !WRITE_QUERY.test(query);
   const scored: Array<{ tool: ToolDef; score: number }> = [];
   for (const tool of tools) {
     const name = tokens(tool.name).map(stem), server = tokens(tool.server).map(stem);
@@ -208,6 +262,7 @@ export function searchTools(tools: readonly ToolDef[], query: string, limit = MA
       score += s;
     }
     if (tool.full === exact || tool.name === exact) score += 100;
+    if (readersFirst && isWriteTool(tool)) score -= W_NAME / 2 + 1;
     if (hits >= need) scored.push({ tool, score });
   }
   return scored
@@ -254,6 +309,47 @@ export function renderCatalog(tools: readonly ToolDef[], notes: ReadonlyMap<stri
     shown++;
   }
   return [...head, ...out, `…and ${sorted.length - shown} more tools: find them with search`].join("\n");
+}
+
+/**
+ * The per-server name index the `run` description carries on every request (the catalog knob off):
+ * `mcp__btp-cf__: Apps_list, Apps_get, …`, readers first, within `max` chars. With the names in
+ * front of it the model writes its first script without a search, and `search` is for argument
+ * types and result shapes. Sorted, so the text is stable and the prompt cache keeps it.
+ */
+export function renderIndex(tools: readonly ToolDef[], max: number): string {
+  const byServer = new Map<string, ToolDef[]>();
+  for (const t of [...tools].sort((a, b) => a.full.localeCompare(b.full))) byServer.set(t.server, [...(byServer.get(t.server) ?? []), t]);
+  const servers = [...byServer.keys()].sort();
+  const lines: string[] = [];
+  // Every server gets an even share; one with few tools hands its spare chars to the others.
+  let left = max - servers.length;
+  const order = servers.map((s) => byServer.get(s)!).sort((a, b) => a.length - b.length);
+  const budget = new Map<string, number>();
+  order.forEach((list, i) => {
+    const share = Math.floor(left / (order.length - i));
+    const want = `mcp__${list[0].server}__: `.length + list.reduce((n, t) => n + t.name.length + 2, 0);
+    const give = Math.min(share, want);
+    budget.set(list[0].server, give);
+    left -= give;
+  });
+  for (const s of servers) {
+    const list = [...byServer.get(s)!].sort((a, b) => Number(isWriteTool(a)) - Number(isWriteTool(b)) || a.name.localeCompare(b.name));
+    const head = `mcp__${s}__: `;
+    let line = head;
+    let shown = 0;
+    for (const t of list) {
+      const piece = (shown ? ", " : "") + t.name;
+      const tail = list.length - shown - 1 ? `, +${list.length - shown - 1} more` : "";
+      if (line.length + piece.length + tail.length > budget.get(s)!) break;
+      line += piece;
+      shown++;
+    }
+    if (!shown) line += `${list.length} tools`;
+    else if (shown < list.length) line += `, +${list.length - shown} more`;
+    lines.push(line);
+  }
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------------------------
