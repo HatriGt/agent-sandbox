@@ -31,21 +31,24 @@ export interface AgentPrefs {
   /** When Claude Code compacts the conversation on its own; absent = "standard" (its default). */
   autoCompact?: AutoCompactMode;
   /**
-   * Code mode for MCP (docs/plan-code-mode.md): Claude Code reaches this owner's MCP servers through
-   * the in-box code-mode server (two tools, one script per job) instead of each server directly.
-   * Absent = off; only "on" is stored. Claude Code threads only (installMcpConfig).
+   * Code mode for MCP (docs/plan-code-mode.md §13): how Claude Code reaches this owner's MCP
+   * servers. "auto": the controller decides per server (src/code-mode/decide.ts) — big servers go
+   * behind the in-box code-mode server (two tools, one script per job), small or step-by-step ones
+   * stay direct. "on": every server behind it. "off": every server direct. Absent = the
+   * deployment's default (Config.codeModeDefault). Claude Code threads only (installMcpConfig).
    */
-  codeMode?: "on";
+  codeMode?: CodeModeSetting;
 }
 
-/**
- * Whether a run uses code mode: a per-run override ("on" / "off") wins over the owner's setting.
- * There is no per-run override wired today (autoCompact, the pattern, is prefs-only), so callers
- * pass undefined; the parameter is where one lands.
- */
-export function codeModeEnabled(prefs: Pick<AgentPrefs, "codeMode"> | undefined, override?: "on" | "off"): boolean {
-  if (override === "on" || override === "off") return override === "on";
-  return prefs?.codeMode === "on";
+export type CodeModeSetting = "auto" | "on" | "off";
+export const CODE_MODE_SETTINGS: readonly CodeModeSetting[] = ["auto", "on", "off"] as const;
+export function isCodeModeSetting(v: unknown): v is CodeModeSetting {
+  return v === "auto" || v === "on" || v === "off";
+}
+
+/** The owner's code mode setting, or the deployment default when they never chose one. */
+export function codeModeSetting(prefs: Pick<AgentPrefs, "codeMode"> | undefined, fallback: CodeModeSetting = "off"): CodeModeSetting {
+  return prefs?.codeMode ?? fallback;
 }
 
 /**
@@ -72,8 +75,8 @@ export const AGENT_PREFS_KIND = "agent-prefs";
 export function normalizeAgentPrefs(raw: unknown): AgentPrefs {
   const r = (raw ?? {}) as { defaultAgent?: unknown; defaultModel?: unknown; autoCompact?: unknown; codeMode?: unknown };
   const model = modelOf(r.defaultModel);
-  if (r.codeMode !== undefined && r.codeMode !== null && r.codeMode !== "" && r.codeMode !== "on" && r.codeMode !== "off") {
-    throw new Error("codeMode must be one of: on, off");
+  if (r.codeMode !== undefined && r.codeMode !== null && r.codeMode !== "" && !isCodeModeSetting(r.codeMode)) {
+    throw new Error(`codeMode must be one of: ${CODE_MODE_SETTINGS.join(", ")}`);
   }
   if (r.autoCompact !== undefined && r.autoCompact !== null && r.autoCompact !== "" && !isAutoCompactMode(r.autoCompact)) {
     throw new Error(`autoCompact must be one of: ${AUTO_COMPACT_MODES.join(", ")}`);
@@ -99,9 +102,12 @@ function compactOf(v: unknown): { autoCompact?: AutoCompactMode } {
   return isAutoCompactMode(v) && v !== "standard" ? { autoCompact: v } : {};
 }
 
-/** Off is the default and is not stored ("off" in a body clears it). */
-function codeModeOf(v: unknown): { codeMode?: "on" } {
-  return v === "on" ? { codeMode: "on" } : {};
+/**
+ * Every explicit choice is stored, "off" included: an owner who chose never keeps never when the
+ * deployment default moves to auto. Absent (never chosen) follows the default.
+ */
+function codeModeOf(v: unknown): { codeMode?: CodeModeSetting } {
+  return isCodeModeSetting(v) ? { codeMode: v } : {};
 }
 
 /** The stored prefs for an owner; a missing/corrupt blob degrades to the default, never throws. */

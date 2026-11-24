@@ -43,6 +43,8 @@ const SEARCH_WAIT_MS = 10_000;
 const RECALL_KEEP = 50;
 const RECALL_MAX_CHARS = 8_000_000;
 const SHAPES_MAX = 500;
+/** Where remembered shapes and tool counts live (src/code-mode/knowledge.ts ships and harvests it). */
+const KNOWLEDGE_FILE = "knowledge.json";
 const SAVE_MAX_CHARS = 50_000_000;
 /** CODE_MODE_CATALOG: how long tools/list waits for upstreams so the catalog can list their tools. */
 const CATALOG_WAIT_MS = 2_500;
@@ -298,6 +300,8 @@ export interface Paths {
 export class CodeMode {
   readonly upstreams: Map<string, Upstream>;
   private shapes = new Map<string, string>();
+  /** server → tools it listed, from this and earlier boxes; what the controller's auto decision reads. */
+  private toolCounts = new Map<string, number>();
   private kept = new Map<number, { value: unknown; chars: number }>();
   private keptChars = 0;
   /** Call numbers continue across server processes (`claude -c` starts a new one), so #n never means two results. */
@@ -314,11 +318,18 @@ export class CodeMode {
   ) {
     this.upstreams = new Map(Object.entries(config.servers).map(([name, spec]) => [name, new Upstream(name, spec, sdk)]));
     try {
-      for (const [k, v] of Object.entries(JSON.parse(readFileSync(join(paths.stateDir, "shapes.json"), "utf8")))) {
-        if (typeof v === "string") this.shapes.set(k, v);
-      }
+      const k = JSON.parse(readFileSync(join(paths.stateDir, KNOWLEDGE_FILE), "utf8")) as { shapes?: Record<string, unknown>; toolCounts?: Record<string, unknown> };
+      for (const [name, v] of Object.entries(k.shapes ?? {})) if (typeof v === "string") this.shapes.set(name, v);
+      for (const [name, v] of Object.entries(k.toolCounts ?? {})) if (typeof v === "number") this.toolCounts.set(name, v);
     } catch {
-      // No shapes yet: the first session in a box.
+      // Nothing learned yet: the owner's first run, or a box from before knowledge.json.
+      try {
+        for (const [k, v] of Object.entries(JSON.parse(readFileSync(join(paths.stateDir, "shapes.json"), "utf8")))) {
+          if (typeof v === "string") this.shapes.set(k, v);
+        }
+      } catch {
+        // No shapes either.
+      }
     }
     try {
       const n = Number(JSON.parse(readFileSync(join(paths.stateDir, "calls.json"), "utf8")).n);
@@ -326,6 +337,11 @@ export class CodeMode {
     } catch {
       // First session in this box: numbering starts at #1.
     }
+  }
+
+  /** The servers this session can reach from a script, for the model's benefit wherever a name helps. */
+  serverNames(): string[] {
+    return [...this.upstreams.keys()];
   }
 
   private visibleTools(): ToolDef[] {
@@ -351,7 +367,7 @@ export class CodeMode {
       out.push(`${u.name} says: ${u.notes}`, "");
     }
     if (hits.length) out.push(...hits.map((t) => renderTool(t, level, this.shapes.get(t.full))).join(level === "names" ? "\n" : "\n\n").split("\n"));
-    else out.push(`No tool matched ${JSON.stringify(q)}. Try fewer or other words, or an empty query to list every tool.`);
+    else out.push(`No tool matched ${JSON.stringify(q)} on ${this.serverNames().join(", ")}. Try fewer or other words, or an empty query to list every tool.`);
     if (all.length > hits.length) out.push("", `${hits.length} of ${all.length} matching tools shown; use more specific words for the rest.`);
     const down = [...this.upstreams.values()].filter((u) => u.state !== "ready");
     if (down.length) {
@@ -375,7 +391,7 @@ export class CodeMode {
     this.sandbox ??= probeSandbox();
     this.program ??= writeChildProgram();
     const r = await runInSandbox(norm.code, { sandbox: this.sandbox, program: this.program, hooks: this.hooks(), timeoutMs: RUN_TIMEOUT_MS });
-    this.saveShapes();
+    this.saveKnowledge();
     const text = formatRun({ ...r, error: r.error === undefined ? undefined : explainError(r.error) });
     return { text, isError: r.error !== undefined };
   }
@@ -499,15 +515,20 @@ export class CodeMode {
     if (this.program) rmSync(dirname(this.program), { recursive: true, force: true });
   }
 
-  private saveShapes(): void {
+  /**
+   * What this box has learned, for the next server process and for the controller to harvest when
+   * the run ends: every remembered shape and the tool count of every upstream that has connected.
+   */
+  private saveKnowledge(): void {
     try {
+      for (const u of this.upstreams.values()) if (u.state === "ready") this.toolCounts.set(u.name, u.tools.length);
       mkdirSync(this.paths.stateDir, { recursive: true });
-      const tmp = join(this.paths.stateDir, `shapes.json.${process.pid}`);
-      writeFileSync(tmp, JSON.stringify(Object.fromEntries(this.shapes)));
-      renameSync(tmp, join(this.paths.stateDir, "shapes.json"));
+      const tmp = join(this.paths.stateDir, `${KNOWLEDGE_FILE}.${process.pid}`);
+      writeFileSync(tmp, JSON.stringify({ shapes: Object.fromEntries(this.shapes), toolCounts: Object.fromEntries(this.toolCounts) }));
+      renameSync(tmp, join(this.paths.stateDir, KNOWLEDGE_FILE));
       writeFileSync(join(this.paths.stateDir, "calls.json"), JSON.stringify({ n: this.n }));
     } catch {
-      // Shapes are a convenience; a read-only disk must not fail the run.
+      // Knowledge is a convenience; a read-only disk must not fail the run.
     }
   }
 }
@@ -554,14 +575,21 @@ async function serve(configPath: string): Promise<void> {
     { name: "code-mode", version: "1" },
     {
       capabilities: { tools: {} },
-      instructions: process.env.CODE_MODE_CATALOG
-        ? "MCP tools are reached through this server: mcp__code-mode__run's description lists them; call them from one mcp__code-mode__run script that sees each result whole, filters it and returns only what is needed. mcp__code-mode__search gives parameter docs and result shapes."
-        : "MCP tools are reached through this server: find them with mcp__code-mode__search, then call them from one mcp__code-mode__run script that sees each result whole, filters it and returns only what is needed.",
+      instructions:
+        (process.env.CODE_MODE_CATALOG
+          ? "MCP tools are reached through this server: mcp__code-mode__run's description lists them; call them from one mcp__code-mode__run script that sees each result whole, filters it and returns only what is needed. mcp__code-mode__search gives parameter docs and result shapes."
+          : "MCP tools are reached through this server: find them with mcp__code-mode__search, then call them from one mcp__code-mode__run script that sees each result whole, filters it and returns only what is needed.") +
+        ` Servers behind it: ${mode.serverNames().join(", ")}.`,
     }
   );
   server.setRequestHandler(sdk.types.ListToolsRequestSchema, async () => {
     const catalog = await mode.catalog();
-    if (!catalog) return { tools: TOOLS };
+    // Without the catalog the model still learns which servers exist, so it searches for their
+    // tools instead of guessing a name (what two of the first hundred runs did).
+    if (!catalog) {
+      const run = TOOLS.find((t) => t.name === "run")!;
+      return { tools: TOOLS.map((t) => (t === run ? { ...t, description: `${t.description} Servers: ${mode.serverNames().join(", ")}.` } : t)) };
+    }
     const run = TOOLS.find((t) => t.name === "run")!;
     // The list below replaces "look them up with search first": search is for what it leaves out.
     const head = run.description.replace(/ look them up with search first\.$/, " the list below has them; search gives parameter docs and result shapes.");

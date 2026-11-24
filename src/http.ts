@@ -44,6 +44,7 @@ import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, 
 import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-disk.js";
 import { configureHostPool, makeHostPool, placeRun } from "./host-pool.js";
 import { createBox, claudeRootSource, teardown as msbTeardown } from "./msb.js";
+import { harvestCodeModeKnowledge, mcpModeFromNotes, type McpModeNote } from "./msb.js";
 import { markClaimed } from "./claims.js";
 import { RESCUE_MAX_MB, capturedTurn, listRescues, moveSeam, pullRescue, pushRescue, readRescue, rescueBoxes, stampRescueKept, summarize, sweepRescues } from "./rescue.js";
 import { KeptBoxError } from "./msb.js";
@@ -69,6 +70,7 @@ import { autoRetryOf, makeVerifyRetrier, verifyPlanOf, type VerifyPlan, type Ver
 import { parseTrace, resizeContinueMessage } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
 import { AGENT_KINDS, AGENT_LABELS, isAgentKind, loadAgentPrefs, normalizeAgentPrefs, saveAgentPrefs } from "./agent-kind.js";
+import { absorbKnowledge } from "./code-mode/knowledge.js";
 import { assertSelectable, driverFor, listDrivers } from "./drivers/index.js";
 import { isCompactCommand } from "./drivers/sentinels.js";
 import {
@@ -868,13 +870,14 @@ const sendPushFor = async (owner: string, ev: NotifyEvent, label: string | undef
 /** Receipt provenance for a box: the agent mark from the snapshot, and the model only when known —
  *  the dashboard's explicit per-box pick. Not the controller default: an MCP delegate can pass its
  *  own model that this map never sees, so falling back would be a guess. */
-const runProvenance = (box: string, agent: string | undefined): {
+const runProvenance = (box: string, agent: string | undefined, mcpNotes?: string[]): {
   agent?: string;
   model?: string;
   provider?: string;
   startedBy?: ReturnType<typeof startedByOf>;
   skills?: SkillPick[];
   memory?: MemoryReceipt;
+  mcpMode?: McpModeNote;
 } => {
   const model = boxModels.get(box);
   const provider = boxProviders.get(box);
@@ -884,11 +887,15 @@ const runProvenance = (box: string, agent: string | undefined): {
   } catch {
     startedBy = undefined;
   }
+  // Code mode: what the install wrote (the box keeps the notes; the probe reports them). Only a
+  // box whose notes say "on" or "fallback" records a mode; an older box says nothing.
+  const mcpMode = mcpNotes?.some((l) => l.startsWith("code-mode: ")) ? mcpModeFromNotes(mcpNotes) : undefined;
   return {
     ...(agent ? { agent } : {}),
     ...(model ? { model } : {}),
     ...(provider ? { provider } : {}),
     ...(startedBy ? { startedBy } : {}),
+    ...(mcpMode ? { mcpMode } : {}),
     ...skillPicksView(box),
     ...memoryReceiptView(box),
   };
@@ -1162,9 +1169,23 @@ const archiveFinishedRunInner = async (box: string, opts: { withFiles: boolean; 
     files,
     verified: boxVerified.get(box),
     retries: retriesOf(box),
-    ...runProvenance(box, snap.agent),
+    ...runProvenance(box, snap.agent, snap.mcpNotes),
   });
   const runOwner = ownerOf(db, box) ?? OPERATOR_OWNER;
+  // Code mode: what the box learned about the owner's MCP servers (result shapes, tool counts)
+  // goes into the owner's knowledge blob, so the next box starts from it and the auto decision has
+  // the counts it needs. Only a box that is still up can answer, and only a run that had the
+  // script server (the digest says) has anything to harvest.
+  if (up && digest.provenance?.mcp && digest.provenance.mcp.mode !== "direct") {
+    try {
+      const learned = await harvestCodeModeKnowledge(hcfg(box), box);
+      if (Object.keys(learned.shapes).length || Object.keys(learned.toolCounts).length) {
+        await withOwner(ownerOf(db, box) ?? null, async () => absorbKnowledge(learned));
+      }
+    } catch (e) {
+      console.error(`[code-mode] ${box}: knowledge not harvested: ${(e as Error).message.slice(0, 200)}`);
+    }
+  }
   // Repo setup first: it also yields the repos' slugs, which file this run's memory notes. A box
   // that is already down keeps its notes too (as global ones — the repo can no longer be asked).
   const repos = up ? await collectRepoSetup(box, runOwner).catch((e) => (console.error(`[setup] ${box}: ${(e as Error).message.slice(0, 200)}`), [])) : [];
@@ -3817,7 +3838,7 @@ app.get("/digest.json", async (req: Request, res: Response) => {
       files,
       verified: boxVerified.get(session),
       retries: retriesOf(session),
-      ...runProvenance(session, snap.agent),
+      ...runProvenance(session, snap.agent, snap.mcpNotes),
     });
     // The snapshot's log/task/question are already redacted by the hub's reader; the trace-derived
     // strings inherit that. Task from the sentinel file is redacted there too.
@@ -5420,7 +5441,7 @@ registerHarnessRoutes(app, {
       files,
       verified: boxVerified.get(box),
       retries: retriesOf(box),
-      ...runProvenance(box, snap.agent),
+      ...runProvenance(box, snap.agent, snap.mcpNotes),
     }) as unknown as Record<string, unknown>;
   },
 });

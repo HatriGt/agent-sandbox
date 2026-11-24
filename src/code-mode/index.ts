@@ -9,6 +9,23 @@
  */
 import { readFileSync } from "node:fs";
 
+/** What an owner's runs learned about their servers (src/code-mode/knowledge.ts keeps and merges it). */
+export interface McpKnowledge {
+  /** mcp__server__tool → the shape of its last result (never values; box/result.ts shapeOf). */
+  shapes: Record<string, string>;
+  /** server → tools it listed when last connected. */
+  toolCounts: Record<string, number>;
+  updatedAt?: number;
+}
+
+/** The file the box reads and writes under CODE_MODE_DIR. */
+export const CODE_MODE_KNOWLEDGE_FILE = "knowledge.json";
+
+/** The file contents the install ships into the box (no timestamp: the box never needs it). */
+export function knowledgeFile(k: McpKnowledge): string {
+  return JSON.stringify({ shapes: k.shapes, toolCounts: k.toolCounts }) + "\n";
+}
+
 /** The compiled box modules; server.js imports the other three. */
 export const CODE_MODE_MODULES = ["server.js", "runner.js", "tools.js", "result.js"] as const;
 
@@ -37,22 +54,63 @@ export const CODE_MODE_PROMPT =
   "re-reads an earlier result without calling the tool again.";
 
 /**
+ * The paragraph for one install: the bench text, then which servers are behind the script and which
+ * stay direct, so the model knows the names to search for and never guesses a server it cannot see
+ * (two of the first hundred runs guessed `mcp__github__…` without a search; §13.1).
+ */
+export function codeModePromptFor(wrapped: readonly string[], direct: readonly string[] = []): string {
+  const parts = [CODE_MODE_PROMPT];
+  if (wrapped.length) parts.push(`Servers behind code mode: ${wrapped.join(", ")}.`);
+  if (direct.length) {
+    const one = direct.length === 1;
+    parts.push(
+      `The ${one ? "server" : "servers"} ${direct.join(", ")} ${one ? "is" : "are"} direct instead: ` +
+        `${one ? "its" : "their"} mcp__<server>__<tool> tools are in this session as usual and are not reachable from a script.`
+    );
+  }
+  return parts.join(" ");
+}
+
+/** The wrapper's own entry in a --mcp-config. */
+export function codeModeWrapperEntry(): Record<string, unknown> {
+  return {
+    type: "stdio",
+    command: "node",
+    args: [CODE_MODE_SERVER, CODE_MODE_UPSTREAM_PATH],
+    env: { R: "/usr/local/lib/node_modules" },
+    alwaysLoad: true,
+  };
+}
+
+/**
  * The --mcp-config Claude Code gets with code mode on: one stdio server, ours. `alwaysLoad` keeps its
  * two tools out of Claude Code's ToolSearch deferral (verified on 2.1.322 in the §7.1 bench: without
  * it the model spent a round trip searching for them). R is where the image bakes the SDK.
  */
 export function codeModeWrapperConfig(): { mcpServers: Record<string, unknown> } {
-  return {
-    mcpServers: {
-      "code-mode": {
-        type: "stdio",
-        command: "node",
-        args: [CODE_MODE_SERVER, CODE_MODE_UPSTREAM_PATH],
-        env: { R: "/usr/local/lib/node_modules" },
-        alwaysLoad: true,
-      },
-    },
-  };
+  return { mcpServers: { "code-mode": codeModeWrapperEntry() } };
+}
+
+/**
+ * The --mcp-config for an install where some servers go behind the script and the rest stay direct
+ * (§13.2): the wrapper entry first, then every direct server exactly as the direct config had it.
+ * The wrapped servers are not in it — they live in the upstream file, which only server.js reads.
+ */
+export function codeModeMixedConfig(conf: { mcpServers: Record<string, unknown> }, wrapped: readonly string[]): { mcpServers: Record<string, unknown> } {
+  const wrap = new Set(wrapped);
+  const mcpServers: Record<string, unknown> = { "code-mode": codeModeWrapperEntry() };
+  for (const [name, spec] of Object.entries(conf.mcpServers)) if (!wrap.has(name) && name !== "code-mode") mcpServers[name] = spec;
+  return { mcpServers };
+}
+
+/** The upstream file for server.js: only the wrapped servers, plus the deny list when there is one. */
+export function codeModeUpstreamConfig(
+  conf: { mcpServers: Record<string, unknown>; codeMode?: unknown },
+  wrapped: readonly string[]
+): { mcpServers: Record<string, unknown>; codeMode?: unknown } {
+  const mcpServers: Record<string, unknown> = {};
+  for (const name of wrapped) if (conf.mcpServers[name] !== undefined) mcpServers[name] = conf.mcpServers[name];
+  return conf.codeMode ? { mcpServers, codeMode: conf.codeMode } : { mcpServers };
 }
 
 /**
@@ -61,10 +119,15 @@ export function codeModeWrapperConfig(): { mcpServers: Record<string, unknown> }
  * so it works from the built controller (dist), not from the TypeScript sources under tsx (it
  * throws there, and the install falls back to the direct config with a note saying so).
  */
-export function codeModeFiles(): Array<{ name: string; contents: string }> {
-  return [
+export function codeModeFiles(opts: { prompt?: string; knowledge?: McpKnowledge } = {}): Array<{ name: string; contents: string }> {
+  const files = [
     { name: "package.json", contents: JSON.stringify({ type: "module" }) + "\n" },
     ...CODE_MODE_MODULES.map((name) => ({ name, contents: readFileSync(new URL(`./box/${name}`, import.meta.url), "utf8") })),
-    { name: CODE_MODE_PROMPT_FILE, contents: CODE_MODE_PROMPT + "\n" },
+    { name: CODE_MODE_PROMPT_FILE, contents: (opts.prompt ?? CODE_MODE_PROMPT) + "\n" },
   ];
+  // What earlier runs learned (shapes, tool counts): the box starts from it and adds to it.
+  if (opts.knowledge) files.push({ name: CODE_MODE_KNOWLEDGE_FILE, contents: knowledgeFile(opts.knowledge) });
+  return files;
 }
+
+export const CODE_MODE_KNOWLEDGE_PATH = `${CODE_MODE_DIR}/${CODE_MODE_KNOWLEDGE_FILE}`;

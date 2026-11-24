@@ -34,7 +34,9 @@ export function snapshotCases(): Record<string, unknown> {
   // The one-exec MCP install (installMcpConfig): direct, with code mode, and code mode with no build.
   const conf = { mcpServers: { tracker: { type: "stdio", command: "npx", args: ["-y", "tracker-mcp@1.0.0"], env: { TOKEN: "t" } } } };
   out["mcpInstall:direct"] = mcpInstallSh({ conf, specs: ["tracker-mcp@1.0.0"] });
-  out["mcpInstall:code-mode"] = mcpInstallSh({ conf, specs: ["tracker-mcp@1.0.0"], codeMode: { on: true } });
+  out["mcpInstall:code-mode"] = mcpInstallSh({ conf, specs: ["tracker-mcp@1.0.0"], codeMode: { on: true, wrapped: ["tracker"], direct: [] } });
+  const two = { mcpServers: { ...conf.mcpServers, chrome: { type: "stdio", command: "npx", args: ["-y", "chrome-devtools-mcp"] } } };
+  out["mcpInstall:code-mode-mixed"] = mcpInstallSh({ conf: two, specs: ["tracker-mcp@1.0.0", "chrome-devtools-mcp"], codeMode: { on: true, wrapped: ["tracker"], direct: ["chrome"] } });
   out["mcpInstall:code-mode-unavailable"] = mcpInstallSh({ conf, specs: [], codeMode: { unavailable: "no build" } });
   return out;
 }

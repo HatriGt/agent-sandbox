@@ -464,14 +464,14 @@ export function precheck(code: string, ctx: CheckContext): string | undefined {
     const split = splitName(c.name, ctx.servers);
     if (!split) {
       const near = nearest(c.name, all);
-      return `refused before running: no tool ${JSON.stringify(c.name)} — names are mcp__<server>__<tool> for the servers ${ctx.servers.join(", ")}.${near ? ` Nearest: ${near}.` : ""} ${where}`;
+      return `refused before running: no tool ${JSON.stringify(c.name)} — names are mcp__<server>__<tool> for the servers ${ctx.servers.join(", ")}.${near ? ` Nearest: ${near}.` : ""} Find the name with mcp__code-mode__search. ${where}`;
     }
     const known = ctx.tools.get(split.server);
     if (!known) continue;
     const tool = known.find((t) => t.name === split.tool);
     if (!tool) {
       const near = nearest(c.name, all);
-      return `refused before running: ${c.name} does not exist.${near ? ` Nearest: ${near}.` : ""} ${where}`;
+      return `refused before running: ${c.name} does not exist.${near ? ` Nearest: ${near}.` : ""} Find the name with mcp__code-mode__search. ${where}`;
     }
     const argProblem = checkArgs(src, c.at, tool);
     if (argProblem) return `refused before running: ${argProblem} ${where}`;

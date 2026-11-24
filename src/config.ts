@@ -173,6 +173,8 @@ export interface Config {
   /** BOX_SELF_MCP=1: let an MCP server that carries the controller's OWN operator token into boxes.
    * Off by default — a box holding that token holds the whole fleet. Give agents a per-user API key instead. */
   boxOperatorMcp: boolean;
+  /** CODE_MODE_DEFAULT=auto|on|off: code mode for MCP for owners who never chose (docs/plan-code-mode.md §13). Off by default. */
+  codeModeDefault: "auto" | "on" | "off";
   /** Client secret of the same GitHub OAuth App (web flow for sign-in). Required in saas mode. */
   githubOauthClientSecret?: string;
   /** Default concurrent-box quota per user (saas). */
@@ -319,6 +321,7 @@ export function loadConfig(): Config {
     dataDir,
     publicUrl: (process.env.PUBLIC_URL || (process.env.ASB_DOMAIN ? `https://${process.env.ASB_DOMAIN}` : "")).replace(/\/+$/, "") || undefined,
     boxOperatorMcp: process.env.BOX_SELF_MCP === "1",
+    codeModeDefault: process.env.CODE_MODE_DEFAULT === "auto" || process.env.CODE_MODE_DEFAULT === "on" ? process.env.CODE_MODE_DEFAULT : "off",
     githubOauthClientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET || undefined,
     userMaxBoxes: Math.max(1, Number(process.env.USER_MAX_BOXES ?? "2") || 2),
     adminLogins: (process.env.ADMIN_GITHUB_LOGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),

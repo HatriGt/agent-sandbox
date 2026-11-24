@@ -44,6 +44,8 @@ export interface LastProvision {
   dropped: string[];
   /** Why code mode fell back to the direct servers on the last install (`code-mode: fallback (…)`). */
   codeModeFallback?: string;
+  /** The split the last install made (`code-mode: on (wrapped: …; direct: …)`); absent = every server direct. */
+  codeMode?: { wrapped: string[]; direct: string[] };
 }
 
 /**

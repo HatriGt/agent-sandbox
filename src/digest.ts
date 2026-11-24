@@ -48,6 +48,8 @@ export interface DigestInput {
   skills?: SkillPick[];
   /** What the run was handed from memory (src/memory-store.ts). */
   memory?: import("./memory-store.js").MemoryReceipt;
+  /** How the run's MCP servers reached the model (src/msb.ts mcpModeFromNotes), when the install said. */
+  mcpMode?: { mode: "script" | "mixed" | "direct"; wrapped: string[]; direct: string[]; fallback?: string };
 }
 
 /** Receipt provenance: who ran this. Only known facts; absent fields were not recorded. */
@@ -62,6 +64,32 @@ export interface DigestProvenance {
   skills?: SkillPick[];
   /** Memory the run was handed: how many notes, which areas, how many earlier runs. */
   memory?: { core: number; picked: number; areas: string[]; episodes: number };
+  /**
+   * Code mode for MCP (docs/plan-code-mode.md §13): which servers were behind the script server,
+   * which were direct, how many scripts the run wrote and how many upstream calls they made. Only
+   * when the install said (`code-mode: on`) or the log shows a script; a direct run with no scripts
+   * records nothing, as before.
+   */
+  mcp?: { mode: "script" | "mixed" | "direct"; wrapped?: string[]; direct?: string[]; fallback?: string; scripts?: number; calls?: number };
+}
+
+/** The tool the code-mode server exposes for a script; the trace names it as Claude Code does. */
+const CODE_MODE_RUN_TOOL = "mcp__code-mode__run";
+
+/** The receipt's code-mode facts: the install's split, then what the log shows the model did with it. */
+function mcpProvenance(note: DigestInput["mcpMode"], scripts: number, calls: number): { mcp?: DigestProvenance["mcp"] } {
+  // The install said nothing (an older box, or a probe without notes) and no script ran: nothing to record.
+  if (!note && !scripts) return {};
+  const mode = note?.mode ?? "script";
+  const mcp: NonNullable<DigestProvenance["mcp"]> = { mode };
+  if (note?.wrapped.length) mcp.wrapped = note.wrapped;
+  if (note?.direct.length) mcp.direct = note.direct;
+  if (note?.fallback) mcp.fallback = note.fallback;
+  if (mode !== "direct" || scripts) {
+    mcp.scripts = scripts;
+    mcp.calls = calls;
+  }
+  return { mcp };
 }
 
 export interface DigestPlanStep extends PlanItem {
@@ -172,8 +200,16 @@ export function buildDigest(input: DigestInput): RunDigest {
   const questions: Array<{ question: string; answer?: string }> = [];
   let pendingAsk: string | undefined;
   let usage: RunDigest["usage"];
+  let scripts = 0;
+  let calls = 0;
 
   for (const ev of input.events) {
+    if (ev.kind === "tool" && ev.name === CODE_MODE_RUN_TOOL) {
+      scripts++;
+      // formatRun's summary line: "--- N MCP calls: …" (src/code-mode/box/result.ts).
+      const m = (ev.result ?? "").match(/^--- (\d+) MCP calls?\b/m);
+      if (m) calls += Number(m[1]);
+    }
     if (ev.kind === "plan") {
       lastPlan = ev.items;
       activeStep = ev.items.findIndex((i) => i.state === "active");
@@ -229,6 +265,7 @@ export function buildDigest(input: DigestInput): RunDigest {
     ...(input.startedBy ? { startedBy: input.startedBy } : {}),
     ...(input.skills?.length ? { skills: input.skills } : {}),
     ...(input.memory ? { memory: { core: input.memory.core, picked: input.memory.picked, areas: input.memory.areas, episodes: input.memory.episodes } } : {}),
+    ...mcpProvenance(input.mcpMode, scripts, calls),
   };
 
   return {

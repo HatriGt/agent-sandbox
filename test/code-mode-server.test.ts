@@ -133,7 +133,7 @@ test("server: wrong names, wrong arguments and denied tools are refused before r
   const c = clients[0];
   const typo = await tool(c, "run", { code: 'await saveFile("x.txt", "written?")\nawait call("mcp__tracker__get_itme", { id: "IT-1000" })' });
   assert.equal(typo.isError, true);
-  assert.match(typo.text, /refused before running: mcp__tracker__get_itme does not exist\. Nearest: mcp__tracker__get_item\. line 2:/);
+  assert.match(typo.text, /refused before running: mcp__tracker__get_itme does not exist\. Nearest: mcp__tracker__get_item\. Find the name with mcp__code-mode__search\. line 2:/);
   assert.throws(() => readdirSync(outDir), "nothing ran, so nothing was saved");
   assert.match((await tool(c, "run", { code: 'return call("mcp__tracker__get_item", { key: "x" })' })).text, /no argument "key"/);
   assert.match((await tool(c, "run", { code: 'return call("mcp__tracker__fail_tool", {})' })).text, /denied by the rule "mcp__tracker__fail_\*"/);
@@ -169,9 +169,11 @@ test("server: saveFile writes under the out dir only, by base name", async () =>
   assert.equal(readFileSync(path, "utf8"), 'id,t\n1,"a,b"\n');
 });
 
-test("server: remembered shapes persist for the next server process (claude -c)", async () => {
-  const shapes = JSON.parse(readFileSync(join(stateDir, "shapes.json"), "utf8"));
-  assert.match(shapes["mcp__tracker__list_items"], /^\{items: \[134 × /);
+test("server: remembered shapes and tool counts persist for the next server process (claude -c)", async () => {
+  const knowledge = JSON.parse(readFileSync(join(stateDir, "knowledge.json"), "utf8"));
+  assert.match(knowledge.shapes["mcp__tracker__list_items"], /^\{items: \[134 × /);
+  assert.equal(typeof knowledge.toolCounts.tracker, "number");
+  assert.ok(knowledge.toolCounts.tracker >= 3, "the upstream's tool count is kept for the controller's auto decision");
   const c2 = await connect();
   clients.push(c2);
   const r = await tool(c2, "search", { query: "list items" });

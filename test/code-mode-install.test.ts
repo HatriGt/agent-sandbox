@@ -7,26 +7,37 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { codeModeEnabled, normalizeAgentPrefs } from "../src/agent-kind.ts";
-import { CODE_MODE_PROMPT, CODE_MODE_SERVER, CODE_MODE_UPSTREAM_PATH, codeModeWrapperConfig } from "../src/code-mode/index.ts";
+import { codeModeSetting, normalizeAgentPrefs } from "../src/agent-kind.ts";
+import { CODE_MODE_PROMPT, CODE_MODE_SERVER, CODE_MODE_UPSTREAM_PATH, codeModeMixedConfig, codeModeWrapperConfig } from "../src/code-mode/index.ts";
 import { claudeLaunchSh } from "../src/drivers/claude.ts";
 import { MCP_CONFIG_PATH } from "../src/drivers/sentinels.ts";
-import { codeModePayload, mcpInstallNotes, mcpInstallSh, mcpProvisionState, MCP_NOTES_PATH, OMP_MCP_CONFIG_PATH, rememberProvision } from "../src/msb.ts";
+import {
+  CODE_MODE_MIXED_PATH,
+  codeModePayload,
+  mcpInstallNotes,
+  mcpInstallSh,
+  mcpProvisionState,
+  MCP_NOTES_PATH,
+  OMP_MCP_CONFIG_PATH,
+  rememberProvision,
+} from "../src/msb.ts";
 
 const conf = { mcpServers: { tracker: { type: "stdio", command: "node", args: ["/opt/tracker.mjs"], env: { TRACKER_TOKEN: "s3cret" } } } };
+const wrapAll = { on: true as const, wrapped: ["tracker"], direct: [] };
 const noSh = spawnSync("sh", ["-c", "true"]).status !== 0;
 
-test("flag: codeMode is 'on' or absent, an override wins, a typo is an error", () => {
+test("setting: codeMode is auto, on, off or absent; every explicit choice is kept; a typo is an error", () => {
   assert.equal(normalizeAgentPrefs({ defaultAgent: "claude", codeMode: "on" }).codeMode, "on");
-  assert.equal(normalizeAgentPrefs({ defaultAgent: "claude", codeMode: "off" }).codeMode, undefined, "off is the default, not stored");
+  assert.equal(normalizeAgentPrefs({ defaultAgent: "claude", codeMode: "auto" }).codeMode, "auto");
+  assert.equal(normalizeAgentPrefs({ defaultAgent: "claude", codeMode: "off" }).codeMode, "off", "an explicit off survives a default that moves to auto");
   assert.equal(normalizeAgentPrefs({ defaultAgent: "claude" }).codeMode, undefined);
   assert.equal(normalizeAgentPrefs({ codeMode: "" }).codeMode, undefined);
-  assert.throws(() => normalizeAgentPrefs({ codeMode: "yes" }), /codeMode must be one of: on, off/);
-  assert.equal(codeModeEnabled(undefined), false);
-  assert.equal(codeModeEnabled({}), false);
-  assert.equal(codeModeEnabled({ codeMode: "on" }), true);
-  assert.equal(codeModeEnabled({ codeMode: "on" }, "off"), false);
-  assert.equal(codeModeEnabled({}, "on"), true);
+  assert.throws(() => normalizeAgentPrefs({ codeMode: "yes" }), /codeMode must be one of: auto, on, off/);
+  assert.equal(codeModeSetting(undefined), "off");
+  assert.equal(codeModeSetting({}), "off");
+  assert.equal(codeModeSetting({}, "auto"), "auto", "never chosen follows the deployment default");
+  assert.equal(codeModeSetting({ codeMode: "off" }, "auto"), "off", "chosen wins over the default");
+  assert.equal(codeModeSetting({ codeMode: "on" }), "on");
 });
 
 test("the prompt paragraph is the bench's (bench/code-mode/code-mode-prompt.txt), without the 24k cut", () => {
@@ -52,21 +63,33 @@ test("wrapper config: one stdio server named code-mode, never deferred", () => {
 test("install plan, code mode off: the direct config as before, and a stale upstream file is removed", () => {
   const sh = mcpInstallSh({ conf, specs: [] });
   assert.ok(sh.startsWith(`printf '%s' '${JSON.stringify(conf)}' > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH}`));
-  assert.ok(sh.includes(`; rm -f ${CODE_MODE_UPSTREAM_PATH}`));
+  assert.ok(sh.includes(`; rm -f ${CODE_MODE_UPSTREAM_PATH} ${CODE_MODE_MIXED_PATH}`));
   assert.doesNotMatch(sh, /code-mode|--check/);
 });
 
-test("install plan, code mode on: upstream (600, deny list) + rewrite + check, omp keeps the direct servers", () => {
-  const sh = mcpInstallSh({ conf, specs: ["some-mcp@1.0.0"], codeMode: { on: true } });
+test("install plan, code mode on: upstream + mixed (600, deny list) + rewrite + check, omp keeps the direct servers", () => {
+  const sh = mcpInstallSh({ conf, specs: ["some-mcp@1.0.0"], codeMode: wrapAll });
   const direct = `printf '%s' '${JSON.stringify(conf)}'`;
   assert.ok(sh.includes(`${direct} > ${OMP_MCP_CONFIG_PATH}`), "omp gets the direct config");
-  assert.ok(sh.includes(`(umask 077; printf '%s' '${JSON.stringify({ ...conf, codeMode: { deny: [] } })}' > ${CODE_MODE_UPSTREAM_PATH}) && chmod 600 ${CODE_MODE_UPSTREAM_PATH}`));
-  assert.ok(sh.includes(`${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} ${CODE_MODE_UPSTREAM_PATH} || true`), "the npx→bin rewrite reaches the upstream file");
+  assert.ok(sh.includes(`(umask 077; printf '%s' '${JSON.stringify({ ...conf, codeMode: { deny: [] } })}' > ${CODE_MODE_UPSTREAM_PATH} && printf '%s' '${JSON.stringify(codeModeMixedConfig(conf, ["tracker"]))}' > ${CODE_MODE_MIXED_PATH}) && chmod 600 ${CODE_MODE_UPSTREAM_PATH} ${CODE_MODE_MIXED_PATH}`));
+  assert.ok(sh.includes(`${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} ${CODE_MODE_UPSTREAM_PATH} ${CODE_MODE_MIXED_PATH} || true`), "the npx→bin rewrite reaches the upstream and mixed files");
   assert.ok(sh.includes(`node ${CODE_MODE_SERVER} --check ${CODE_MODE_UPSTREAM_PATH}`));
+  assert.ok(sh.includes(`then mv -f ${CODE_MODE_MIXED_PATH} ${MCP_CONFIG_PATH} && echo 'code-mode: on (wrapped: tracker)'`));
   // The file writer is the first thing in the braces: it reads stdin to the end, before npm runs.
   assert.match(sh, /; \{ node -e '[^']*fs\.readFileSync\(0/);
   assert.ok(sh.indexOf("fs.readFileSync(0") < sh.indexOf("npm i -g"));
-  assert.ok(sh.indexOf("--check") > sh.indexOf(`${CODE_MODE_UPSTREAM_PATH} || true`), "the check runs after the rewrite");
+  assert.ok(sh.indexOf("--check") > sh.indexOf(`${CODE_MODE_MIXED_PATH} || true`), "the check runs after the rewrite");
+  if (!noSh) assert.equal(spawnSync("sh", ["-n", "-c", sh]).status, 0, "valid sh");
+});
+
+test("install plan, a split: the upstream file holds only the wrapped servers, the mixed config the wrapper plus the rest", () => {
+  const two = { mcpServers: { ...conf.mcpServers, chrome: { type: "stdio", command: "npx", args: ["-y", "chrome-devtools-mcp"] } } };
+  const sh = mcpInstallSh({ conf: two, specs: [], codeMode: { on: true, wrapped: ["tracker"], direct: ["chrome"] } });
+  assert.ok(sh.includes(`printf '%s' '${JSON.stringify({ mcpServers: { tracker: conf.mcpServers.tracker }, codeMode: { deny: [] } })}' > ${CODE_MODE_UPSTREAM_PATH}`));
+  const mixed = codeModeMixedConfig(two, ["tracker"]);
+  assert.deepEqual(Object.keys(mixed.mcpServers), ["code-mode", "chrome"]);
+  assert.ok(sh.includes(`printf '%s' '${JSON.stringify(mixed)}' > ${CODE_MODE_MIXED_PATH}`));
+  assert.ok(sh.includes(`echo 'code-mode: on (wrapped: tracker; direct: chrome)'`));
   if (!noSh) assert.equal(spawnSync("sh", ["-n", "-c", sh]).status, 0, "valid sh");
 });
 
@@ -80,7 +103,7 @@ test("install plan, flag on but no build to ship: the direct config and a note",
 function runInstall(stub: string) {
   const root = mkdtempSync(join(tmpdir(), "cm-install-")).replace(/\\/g, "/");
   mkdirSync(`${root}/.omp/agent`, { recursive: true });
-  const sh = mcpInstallSh({ conf, specs: [], codeMode: { on: true } }).replaceAll("/root/", `${root}/`);
+  const sh = mcpInstallSh({ conf, specs: [], codeMode: wrapAll }).replaceAll("/root/", `${root}/`);
   const files = [
     { name: "package.json", contents: '{"type":"module"}\n' },
     { name: "server.js", contents: stub },
@@ -99,8 +122,12 @@ test("install, for real: --check passes → the wrapper; the upstream file has t
   assert.deepEqual(JSON.parse(r.read(CODE_MODE_UPSTREAM_PATH)), { ...conf, codeMode: { deny: [] } });
   assert.deepEqual(JSON.parse(r.read(OMP_MCP_CONFIG_PATH)), conf);
   assert.ok(existsSync(r.at("/root/.claude/code-mode/prompt.txt")));
-  assert.deepEqual(mcpInstallNotes(r.out), []);
+  assert.ok(!existsSync(r.at(CODE_MODE_MIXED_PATH)), "the mixed file became the config");
+  assert.deepEqual(mcpInstallNotes(r.out), ["code-mode: on (wrapped: tracker)"]);
   assert.match(r.out, /^mcp-baked:/m);
+  rememberProvision("box-cm-on", mcpInstallNotes(r.out));
+  assert.deepEqual(mcpProvisionState().last!.codeMode, { wrapped: ["tracker"], direct: [] });
+  assert.equal(mcpProvisionState().last!.codeModeFallback, undefined);
 });
 
 test("install, for real: --check fails → the direct config stays, the note names why", { skip: noSh }, () => {
@@ -108,6 +135,7 @@ test("install, for real: --check fails → the direct config stays, the note nam
     'console.log("sdk: missing — @modelcontextprotocol/sdk is not installed (looked next to the server and under /usr/local/lib/node_modules/): Cannot find module");\nconsole.log("server tracker: stdio");\nprocess.exit(1);\n'
   );
   assert.deepEqual(JSON.parse(r.read(MCP_CONFIG_PATH)), conf);
+  assert.ok(!existsSync(r.at(CODE_MODE_MIXED_PATH)), "a failed check removes the mixed file");
   const notes = mcpInstallNotes(r.out);
   assert.equal(notes.length, 1);
   assert.match(notes[0], /^code-mode: fallback \(sdk: missing — @modelcontextprotocol\/sdk is not installed looked next to the server/);
@@ -116,6 +144,7 @@ test("install, for real: --check fails → the direct config stays, the note nam
   rememberProvision("box-cm", [...notes, "mcp-drop:x"]);
   const last = mcpProvisionState().last!;
   assert.match(last.codeModeFallback!, /^sdk: missing/);
+  assert.equal(last.codeMode, undefined);
   assert.deepEqual(last.dropped, ["x"]);
   // node itself failing (a syntax error in the shipped file) is a fallback too, with the error line.
   const broken = runInstall("this is not javascript(\n");

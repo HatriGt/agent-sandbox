@@ -12,7 +12,7 @@ import { sshMuxOpts } from "./ssh.js";
 import { listClaims, listKept, listKeptStrict, listParked, markClaimed, removalVerdict, stoppedBoxVerdict, unmarkClaimed, unmarkKept, unmarkParked } from "./claims.js";
 import { askParkTtlSec } from "./snapshot.js";
 import { guardNodeProgram } from "./guard.js";
-import { loadEffectiveMcpStore, toClaudeMcpConfig, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
+import { loadEffectiveMcpStore, toClaudeMcpConfig, boxSecretPolicy, boxExclusion, type McpStore } from "./mcp-store.js";
 import { boxSkillSelection, buildSkillsTarBase64, loadEffectiveSkillStore, skillsForBox, type SkillDef } from "./skill-store.js";
 import { mergeMemoryStores } from "./orgs.js";
 import { SKILLS_DIR, SKILLS_INDEX, recordSkillPicks, skillTurnHint, skillsIndex } from "./skill-match.js";
@@ -21,8 +21,20 @@ import { MEMORY_ALL_MD, MEMORY_MD, memorySetup } from "./drivers/memory-tool.js"
 import { repoSlugFromUrl } from "./setup-store.js";
 import { harnessPromptHint, reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
-import { codeModeEnabled, loadAgentPrefs, type AgentKind } from "./agent-kind.js";
-import { CODE_MODE_DIR, CODE_MODE_SERVER, CODE_MODE_UPSTREAM_PATH, codeModeFiles, codeModeWrapperConfig } from "./code-mode/index.js";
+import { codeModeSetting, loadAgentPrefs, type AgentKind } from "./agent-kind.js";
+import {
+  CODE_MODE_DIR,
+  CODE_MODE_KNOWLEDGE_PATH,
+  CODE_MODE_SERVER,
+  CODE_MODE_UPSTREAM_PATH,
+  codeModeFiles,
+  codeModeMixedConfig,
+  codeModePromptFor,
+  codeModeUpstreamConfig,
+} from "./code-mode/index.js";
+import { decideCodeMode, type DecideServer } from "./code-mode/decide.js";
+import { emptyKnowledge, loadKnowledge, parseKnowledge } from "./code-mode/knowledge.js";
+import type { McpKnowledge } from "./code-mode/index.js";
 import {
   ASK_ALLOWED_TOOLS,
   ASK_DIR,
@@ -1723,13 +1735,18 @@ export interface McpInstallPlan {
   /** npx packages to pre-install (npxPackagesOf). */
   specs: string[];
   /**
-   * Code mode (Claude Code only). `on`: the server files ride stdin (codeModePayload) and the
-   * wrapper replaces the direct config when `--check` passes. `unavailable`: the flag is on but the
-   * controller has no build to ship (a dev run from the TypeScript sources), so the box keeps the
-   * direct config and the note says why. Absent: off.
+   * Code mode (Claude Code only). `on`: the server files ride stdin (codeModePayload); the servers
+   * in `wrapped` go behind the code-mode server and those in `direct` stay as they are, and that
+   * mixed config replaces the direct one when `--check` passes (src/code-mode/decide.ts chose the
+   * split). `unavailable`: the setting is on but the controller has no build to ship (a dev run
+   * from the TypeScript sources), so the box keeps the direct config and the note says why.
+   * Absent: off, or nothing to wrap.
    */
-  codeMode?: { on: true } | { unavailable: string };
+  codeMode?: { on: true; wrapped: string[]; direct: string[] } | { unavailable: string };
 }
+
+/** The mixed config (wrapper + direct servers) waits here, 600, until `--check` lets it replace the direct one. */
+export const CODE_MODE_MIXED_PATH = "/root/.agent-mcp.mixed.json";
 
 /**
  * The shell for one MCP install, in ONE exec (each exec is an SSH→msb→guest round trip on the
@@ -1746,28 +1763,35 @@ export interface McpInstallPlan {
  */
 export function mcpInstallSh(plan: McpInstallPlan): string {
   const json = JSON.stringify(plan.conf);
-  const on = !!plan.codeMode && "on" in plan.codeMode;
+  const cm = plan.codeMode && "on" in plan.codeMode ? plan.codeMode : undefined;
+  const on = !!cm;
   const up = CODE_MODE_UPSTREAM_PATH;
+  const mixed = CODE_MODE_MIXED_PATH;
   const writes =
     `printf '%s' ${shellQuote(json)} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH} && ` +
     `mkdir -p /root/.omp/agent && printf '%s' ${shellQuote(json)} > ${OMP_MCP_CONFIG_PATH} && chmod 600 ${OMP_MCP_CONFIG_PATH}` +
-    // The upstream file is created 600 (umask in a subshell), never readable for a moment; with
-    // code mode off a stale one is removed, it holds the same secrets as the config.
-    (on
-      ? ` && (umask 077; printf '%s' ${shellQuote(JSON.stringify({ ...plan.conf, codeMode: { deny: [] } }))} > ${up}) && chmod 600 ${up}`
-      : `; rm -f ${up}`);
+    // The upstream file (the wrapped servers) and the mixed config (wrapper + direct servers) are
+    // created 600 (umask in a subshell), never readable for a moment; with code mode off a stale
+    // pair is removed, they hold the same secrets as the config.
+    (cm
+      ? ` && (umask 077; printf '%s' ${shellQuote(JSON.stringify({ ...codeModeUpstreamConfig(plan.conf, cm.wrapped), codeMode: { deny: [] } }))} > ${up}` +
+        ` && printf '%s' ${shellQuote(JSON.stringify(codeModeMixedConfig(plan.conf, cm.wrapped)))} > ${mixed}) && chmod 600 ${up} ${mixed}`
+      : `; rm -f ${up} ${mixed}`);
   // First inside the braces: it reads the whole stdin, so nothing after it can eat the payload.
   const files = on ? `node -e ${shellQuote(CODE_MODE_WRITE_JS)} ${CODE_MODE_DIR}; ` : "";
   const direct = plan.specs.length
-    ? `; R="$R" D="$D" node -e ${shellQuote(MCP_DIRECT_BIN_JS)} ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH}${on ? ` ${up}` : ""} || true`
+    ? `; R="$R" D="$D" node -e ${shellQuote(MCP_DIRECT_BIN_JS)} ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH}${on ? ` ${up} ${mixed}` : ""} || true`
     : "";
   // Why a check failed: its own verdict line (sdk missing / config problem), else the first error,
   // else its first line; one line, cut short, without parentheses that would end the note early.
   let check = "";
-  if (on) {
+  if (cm) {
+    // The mixed file moves over the config (mv keeps its 600), and the note records the split the
+    // run actually got (rememberProvision reads it back; the digest keeps it).
+    const note = `code-mode: on (wrapped: ${cm.wrapped.join(", ")}${cm.direct.length ? `; direct: ${cm.direct.join(", ")}` : ""})`;
     check =
-      `; if CK=$(node ${CODE_MODE_SERVER} --check ${up} 2>&1); then printf '%s' ${shellQuote(JSON.stringify(codeModeWrapperConfig()))} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH}; ` +
-      `else W=$(printf '%s\\n' "$CK" | grep -m1 -E '^(sdk: missing|config:)|Error' || printf '%s\\n' "$CK" | grep -m1 .); ` +
+      `; if CK=$(node ${CODE_MODE_SERVER} --check ${up} 2>&1); then mv -f ${mixed} ${MCP_CONFIG_PATH} && echo ${shellQuote(note)}; ` +
+      `else rm -f ${mixed}; W=$(printf '%s\\n' "$CK" | grep -m1 -E '^(sdk: missing|config:)|Error' || printf '%s\\n' "$CK" | grep -m1 .); ` +
       `echo "code-mode: fallback ($(printf '%s' "\${W:-the check failed}" | tr -d '()' | cut -c1-200))"; fi`;
   } else if (plan.codeMode && "unavailable" in plan.codeMode) {
     check = `; echo ${shellQuote(`code-mode: fallback (${plan.codeMode.unavailable.replace(/[()\r\n]/g, " ").slice(0, 200)})`)}`;
@@ -1798,21 +1822,28 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<string
     if (withheld.length) console.error(`[mcp] ${box}: kept out of the box (carries the controller's operator token): ${withheld.join(", ")}`);
     const conf = toClaudeMcpConfig(store, policy);
     if (!conf) {
-      await exec(cfg, box, `rm -f ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} ${CODE_MODE_UPSTREAM_PATH} ${MCP_NOTES_PATH}`);
+      await exec(cfg, box, `rm -f ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} ${CODE_MODE_UPSTREAM_PATH} ${CODE_MODE_MIXED_PATH} ${MCP_NOTES_PATH}`);
       return [];
     }
     const specs = npxPackagesOf(conf);
     wantStoredPackages(cfg, specs);
-    // Code mode: the box OWNER's setting (the ambient owner, as for autoCompact). Claude Code only:
-    // omp's config path always gets the direct servers (mcpInstallSh).
+    // Code mode: the box OWNER's setting (the ambient owner, as for autoCompact), the deployment's
+    // default when they never chose; then one decision per server (src/code-mode/decide.ts) from
+    // the owner's overrides and what earlier runs learned. Claude Code only: omp's config path
+    // always gets the direct servers (mcpInstallSh).
     let codeMode: McpInstallPlan["codeMode"];
     let input: string | undefined;
-    if (codeModeEnabled(loadAgentPrefs())) {
-      try {
-        input = codeModePayload(codeModeFiles());
-        codeMode = { on: true };
-      } catch (e) {
-        codeMode = { unavailable: `the controller has no code-mode build: ${(e as Error).message}` };
+    const setting = codeModeSetting(loadAgentPrefs(), cfg.codeModeDefault);
+    if (setting !== "off") {
+      const knowledge = loadKnowledge();
+      const decision = decideCodeMode({ setting, servers: decideServersOf(store, conf), toolCounts: knowledge.toolCounts });
+      if (decision.wrapped.length) {
+        try {
+          input = codeModePayload(codeModeFiles({ prompt: codeModePromptFor(decision.wrapped, decision.direct), knowledge }));
+          codeMode = { on: true, wrapped: decision.wrapped, direct: decision.direct };
+        } catch (e) {
+          codeMode = { unavailable: `the controller has no code-mode build: ${(e as Error).message}` };
+        }
       }
     }
     // ONE exec for everything (mcpInstallSh); with code mode the server files ride its stdin.
@@ -1832,6 +1863,38 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<string
   }
 }
 
+/** The servers of one install as the decision sees them: the owner's override plus what identifies the server. */
+function decideServersOf(store: McpStore, conf: { mcpServers: Record<string, unknown> }): Record<string, DecideServer> {
+  const byName = new Map(Object.values(store.servers).map((s) => [s.name, s] as const));
+  const out: Record<string, DecideServer> = {};
+  for (const [name, raw] of Object.entries(conf.mcpServers)) {
+    const spec = (raw ?? {}) as { type?: string; command?: string; args?: string[]; url?: string };
+    const own = byName.get(name);
+    out[name] = {
+      ...(own?.codeMode ? { codeMode: own.codeMode } : {}),
+      ...(spec.type ? { type: spec.type } : {}),
+      ...(spec.command ? { command: spec.command } : {}),
+      ...(spec.args ? { args: spec.args } : {}),
+      ...(spec.url ? { url: spec.url } : {}),
+    };
+  }
+  return out;
+}
+
+/**
+ * What the box's code-mode server learned during the run (result shapes, tool counts), for the
+ * owner's knowledge blob (src/code-mode/knowledge.ts absorbKnowledge). Empty when the box never
+ * ran a script, has no file, or cannot answer; never throws.
+ */
+export async function harvestCodeModeKnowledge(cfg: Config, box: string): Promise<McpKnowledge> {
+  try {
+    const r = await exec(cfg, box, `cat ${CODE_MODE_KNOWLEDGE_PATH} 2>/dev/null || true`, { timeoutMs: 20_000 });
+    return parseKnowledge(r.stdout ?? "");
+  } catch {
+    return emptyKnowledge();
+  }
+}
+
 /** Where the in-box install leaves its mcp-skip/fail/drop lines for the watch probe. */
 export const MCP_NOTES_PATH = "/root/.agent-mcp.notes";
 
@@ -1846,14 +1909,50 @@ function rememberBaked(json: string): void {
   if (Object.keys(m).length) bakedPackages = m;
 }
 
-/** mcp-skip:'spec' free=…k / mcp-fail:'spec' / mcp-drop:name,name / code-mode: fallback (why) → the last provision record. */
+/** mcp-skip:'spec' free=…k / mcp-fail:'spec' / mcp-drop:name,name / code-mode: on (…) / code-mode: fallback (why) → the last provision record. */
 export function rememberProvision(box: string, notes: readonly string[]): void {
   const specOf = (l: string) => (l.match(/^mcp-(?:skip|fail):'([^']+)'/)?.[1] ?? l.replace(/^mcp-(?:skip|fail):/, "").split(" ")[0].replace(/^'|'$/g, "")).trim();
   const skipped = notes.filter((l) => l.startsWith("mcp-skip:")).map(specOf);
   const failed = notes.filter((l) => l.startsWith("mcp-fail:")).map(specOf);
   const dropped = notes.filter((l) => l.startsWith("mcp-drop:")).flatMap((l) => l.slice("mcp-drop:".length).split(",").map((s) => s.trim()).filter(Boolean));
-  const fallback = notes.map((l) => l.match(/^code-mode: fallback \((.*)\)$/)?.[1]).find((w) => w !== undefined);
-  lastProvision = { at: Date.now(), box, skipped, failed, dropped, ...(fallback !== undefined ? { codeModeFallback: fallback } : {}) };
+  const mode = mcpModeFromNotes(notes);
+  lastProvision = {
+    at: Date.now(),
+    box,
+    skipped,
+    failed,
+    dropped,
+    ...(mode.fallback !== undefined ? { codeModeFallback: mode.fallback } : {}),
+    ...(mode.mode !== "direct" ? { codeMode: { wrapped: mode.wrapped, direct: mode.direct } } : {}),
+  };
+}
+
+/** How one install's servers reach the model, read back from its notes (the box keeps them; the probe reports them). */
+export interface McpModeNote {
+  /** script: every server behind code mode; mixed: some; direct: none (off, nothing wrapped, or a fallback). */
+  mode: "script" | "mixed" | "direct";
+  wrapped: string[];
+  direct: string[];
+  /** Why code mode fell back to the direct servers, when it did. */
+  fallback?: string;
+}
+
+const names = (s: string | undefined) => (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+
+export function mcpModeFromNotes(notes: readonly string[] | undefined): McpModeNote {
+  let out: McpModeNote = { mode: "direct", wrapped: [], direct: [] };
+  for (const l of notes ?? []) {
+    const on = l.match(/^code-mode: on \(wrapped: ([^;)]*)(?:; direct: ([^)]*))?\)$/);
+    if (on) {
+      const wrapped = names(on[1]);
+      const direct = names(on[2]);
+      out = { mode: direct.length ? "mixed" : "script", wrapped, direct };
+      continue;
+    }
+    const fb = l.match(/^code-mode: fallback \((.*)\)$/);
+    if (fb) out = { mode: "direct", wrapped: [], direct: [], fallback: fb[1] };
+  }
+  return out;
 }
 
 export function mcpProvisionState(): { baked: Record<string, string>; last: LastProvision | undefined } {
@@ -1868,9 +1967,9 @@ export function mcpProvisionState(): { baked: Record<string, string>; last: Last
  */
 export const MCP_MIN_FREE_KB = 307_200;
 
-/** The `mcp-skip:` / `mcp-fail:` / `mcp-drop:` / `code-mode: fallback (…)` lines the in-box install prints, for the run log. */
+/** The `mcp-skip:` / `mcp-fail:` / `mcp-drop:` / `code-mode: on (…)` / `code-mode: fallback (…)` lines the in-box install prints, for the run log. */
 export function mcpInstallNotes(stdout: string): string[] {
-  return stdout.split("\n").map((l) => l.trim()).filter((l) => /^mcp-(skip|fail|drop):|^code-mode: fallback \(/.test(l));
+  return stdout.split("\n").map((l) => l.trim()).filter((l) => /^mcp-(skip|fail|drop):|^code-mode: (on|fallback) \(/.test(l));
 }
 
 /**

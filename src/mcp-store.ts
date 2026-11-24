@@ -38,6 +38,12 @@ export interface McpServer {
   addedAt: number;
   /** On an organisation's copy of a member's own server: whose, so later saves of theirs reach it (src/orgs.ts). */
   from?: CopiedFrom;
+  /**
+   * Code mode for this server, overriding the owner's auto decision (src/code-mode/decide.ts):
+   * "wrap" = behind the in-box script server, "direct" = its own tools. Absent = decided per run.
+   * Edited through the JSON config (`"codeMode": "direct"` on the server).
+   */
+  codeMode?: "wrap" | "direct";
 }
 
 export interface McpStore {
@@ -79,6 +85,7 @@ export function normalizeServer(input: Partial<McpServer> & { name: string }, no
     if (input.headers && Object.keys(input.headers).length) server.headers = cleanMap(input.headers);
   }
   if (input.env && Object.keys(input.env).length) server.env = cleanMap(input.env);
+  if (input.codeMode === "wrap" || input.codeMode === "direct") server.codeMode = input.codeMode;
   return server;
 }
 
@@ -121,6 +128,7 @@ export function parseMcpImport(json: string, now = Date.now()): McpServer[] {
           env: (def.env as Record<string, string>) ?? undefined,
           headers: (def.headers as Record<string, string>) ?? undefined,
           enabled: def.disabled === true ? false : true,
+          codeMode: def.codeMode === "wrap" || def.codeMode === "direct" ? def.codeMode : undefined,
         },
         now
       )
@@ -269,6 +277,7 @@ export function toEditableConfig(store: McpStore): { mcpServers: Record<string, 
       ...(s.env ? { env: maskMap(s.env) } : {}),
       ...(s.headers ? { headers: maskMap(s.headers) } : {}),
       ...(s.enabled ? {} : { disabled: true }),
+      ...(s.codeMode ? { codeMode: s.codeMode } : {}),
     };
   }
   return { mcpServers };
