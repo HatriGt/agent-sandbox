@@ -5,7 +5,7 @@ import { Swap } from "@/components/ui/swap";
 import { StatusDot } from "@/components/ui/data-table";
 import type { StableBox } from "@/hooks/useStableBoxes";
 import { prefetchWatch } from "@/hooks/useWatchStream";
-import { friendlyName, roleLabel, threadSort, threadTitle } from "@/lib/format";
+import { friendlyName, isFailedExit, isOperatorStop, roleLabel, threadSort, threadTitle } from "@/lib/format";
 import { displayState, fmtDuration, type DisplayState } from "@/lib/lifecycle";
 import { questionHeadline } from "@/lib/question";
 import { Bar } from "@/components/thread/Skeletons";
@@ -28,7 +28,9 @@ export function stateWord(state: DisplayState, exitCode?: number, stalled?: bool
       // Away: the machine is gone, the thread is kept; opening it brings a machine back.
       return absent ? { word: "Away", tone: "sleep" } : { word: "Asleep", tone: "sleep" };
     case "done":
-      return exitCode != null && exitCode !== 0 ? { word: "Failed", tone: "destructive" } : { word: "Done", tone: "ok" };
+      // A turn the operator stopped is ink, not red: nothing failed, the next message resumes it.
+      if (isOperatorStop(exitCode)) return { word: "Stopped", tone: "muted" };
+      return isFailedExit(exitCode) ? { word: "Failed", tone: "destructive" } : { word: "Done", tone: "ok" };
     default:
       return { word: "Idle", tone: "muted" };
   }

@@ -2634,7 +2634,8 @@ app.post("/interrupt.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const stopped = await withOwner(ownerOf(db, session) ?? null, () => interruptAgentRun(hcfg(session), session, "to stop the watch"));
+    // No reason in the seam: "Stopped by you" is the whole story (a watch, a loop, a wrong turn).
+    const stopped = await withOwner(ownerOf(db, session) ?? null, () => interruptAgentRun(hcfg(session), session, ""));
     res.json({ ok: true, stopped });
   } catch (e) {
     failWith(res, e);

@@ -68,8 +68,10 @@ export function SendBar({
   repos?: { name: string; branch?: string }[];
   /** Open the side chat (a read-only helper answering about the run). Hidden while asleep. */
   onOpenSideChat?: () => void;
-  onReplied: (text: string) => void;
-  onQueued?: () => void;
+  /** Echo the message in the thread at once; returns the echo's id so a queued send can label it. */
+  onReplied: (text: string) => string | void;
+  /** The agent was mid-turn, so the controller holds the message: the echo stays and says "queued". */
+  onQueued?: (replyId: string | void, queueId: string, text: string) => void;
   onFocusRequest?: (focus: () => void) => void;
   /** A quote pill was clicked: scroll the conversation to the passage it came from. */
   onJumpToQuote?: (quote: QuoteRef) => void;
@@ -315,23 +317,22 @@ export function SendBar({
       // message, byte for byte: a prettier paraphrase (files as `@path`, no path list) never
       // matched its own log line, so every send with a file chip left a second bubble behind for
       // good. The bubble turns the machinery back into chips for the echo and the log line alike.
+      // Mid-turn too: the echo is the one bubble the message ever has. A queued send keeps it and
+      // labels it (the thread says "queued", then "delivering"); it used to vanish and come back
+      // seconds later as the log line, which read as the message being lost.
       const echo = message;
-      if (!busy) onReplied(echo);
+      const replyId = onReplied(echo);
       try {
         // The picked model rides the send once; the server makes it sticky for the box.
         const res = await api.resume(boxName, message, model.picked ? { model: model.picked } : {});
         if ("queued" in res && res.queued) {
-          if (!busy) onReplyFailed?.(echo);
-          onQueued?.();
-          toast(compact ? "Compaction queued" : "Sent to the agent", {
-            description: compact
-              ? "It runs as its own turn once the agent finishes this one."
-              : "It is mid-turn. It reads your message at its next step and replies in the thread.",
-            icon: <Clock className="size-4" />,
-          });
+          onQueued?.(replyId, res.id, echo);
+          // The bubble's own label says what happens to a message; only a compaction, which runs
+          // as a turn of its own after this one, still needs the sentence.
+          if (compact) toast("Compaction queued", { description: "It runs as its own turn once the agent finishes this one.", icon: <Clock className="size-4" /> });
         }
       } catch (e) {
-        if (!busy) onReplyFailed?.(echo);
+        onReplyFailed?.(echo);
         throw e;
       }
     } catch (e) {

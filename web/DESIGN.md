@@ -1913,3 +1913,31 @@ differs, and what the card is now:
   glyph on full-bleed ink inside the 80% safe zone for `maskable` and the Apple touch icon.
 - Proof: `node .shots/pwa-probe.mjs` against a controller serving the built bundle
   (`.shots/pwa/account-install-*.png`, `offline-*.png`). See `docs/pwa.md`.
+
+## Round: stopping a turn, one bubble (2026-11-25)
+
+The old flow had three cuts in five seconds: a message sent mid-turn was not echoed (it appeared only
+when the queue poll answered, as its own dashed component), "send now" removed it from the server's
+queue so it vanished until the resume wrote its log line, and the stop published the agent's TERM exit
+(143) which the thread drew as a red "Exited with an error" run-end pill with stats and an Again
+button. Two toasts narrated it on top.
+
+- **One message, one bubble, one spot.** The echo is made the instant Enter is pressed, mid-turn too,
+  and it is the only bubble the message ever has (`YouItem pending`): the same `you-bubble` with a
+  dashed edge (`.you-bubble-pending`) and, where the "You" label sits, the live dot plus a status
+  that morphs in place: `Queued · the agent reads it at its next step · send now · cancel` →
+  `Stopping the turn to deliver this…` → `Delivering…` → the edge fills in when the log line takes
+  over (the existing `swappedIn` no-enter path). Nothing moves, nothing leaves, no toast. The server
+  queue is only drawn for messages this tab did not send (another tab, a reload).
+- **A stop is a seam, not a failure.** The controller writes `● stopped by you (to deliver your
+  message)` (or plain `● stopped by you`) so the trace parses a lifecycle row, and always settles
+  exit 253 (`OPERATOR_STOP_EXIT`). 253 is "stopped" in ink everywhere (`isOperatorStop`,
+  `isFailedExit` excludes 252/253): header pill, sidebar row, capacity cell, run-end pill (not
+  drawn; a stopped WATCH keeps its "Stopped watching …" pill), no failed toast.
+- **Stop with a message waiting is "Stop & send".** The header button says so and calls send-now
+  on the first queued message; the queued text was always going to be delivered the moment the turn
+  ended, so one press does both. The bubble's own "send now" still arms before it fires.
+- Proof: `node .shots/interrupt-flow.mjs [--dark]` over `test/ui-mock-server.mjs` (the mock now
+  mirrors the stop gap, exit 253, the seam and the delivery loop): nine states, light and dark,
+  `.shots/interrupt-<n>-<state>-<scheme>.png`, with a per-step readout of bubble label, state pill
+  and seams.

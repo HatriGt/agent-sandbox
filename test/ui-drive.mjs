@@ -182,7 +182,7 @@ async function main() {
     check("second click calls /send-now.json", after.interrupted !== null, after.interrupted ? `interrupted id=${after.interrupted.id}` : "no interrupt recorded");
     check("the message leaves the queue exactly once", after.queue.length === 0, `queue=${JSON.stringify(after.queue)}`);
     check("the interrupted turn resumed with that text", (after.interrupted?.text ?? "") === MSG);
-    check("the transcript records the interruption", after.log.includes("run interrupted by the operator"), "log line present");
+    check("the transcript records the interruption", after.log.includes("● stopped by you"), "log line present");
 
     await waitFor(cdp, `${TEXT}.includes('Turn interrupted') || ${TEXT}.toLowerCase().includes('skipping the wait')`, { timeout: 20000, label: "delivery visible in the thread" });
     check("the delivered message and reply appear in the thread", true);

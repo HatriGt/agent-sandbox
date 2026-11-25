@@ -13,7 +13,7 @@ import type { BoxView } from "@/lib/api";
 import type { TraceEvent } from "@/lib/trace";
 import type { TranscriptFormat } from "@/lib/transcript";
 import { liveActivity } from "./live-activity";
-import { fmtAgo, friendlyName, isFailedExit, roleLabel } from "@/lib/format";
+import { fmtAgo, friendlyName, isFailedExit, isOperatorStop, roleLabel } from "@/lib/format";
 import { deadlineLabel, deadlineShort, fmtDuration, fmtUsage, type Deadline, type DisplayState } from "@/lib/lifecycle";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -51,6 +51,7 @@ export function ThreadHeader({
   endedAt,
   onStop,
   stopping,
+  stopSends,
   showWorkspace,
   showBrowser,
   onToggleBrowser,
@@ -102,6 +103,8 @@ export function ThreadHeader({
   /** Stop the running turn (session kept). Present only while a turn runs. */
   onStop?: () => void;
   stopping?: boolean;
+  /** A message is queued behind this turn: stopping delivers it, and the button says so. */
+  stopSends?: boolean;
   showWorkspace: boolean;
   showBrowser: boolean;
   onToggleBrowser: () => void;
@@ -519,12 +522,13 @@ export function ThreadHeader({
         {onStop && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" onClick={onStop} disabled={stopping} aria-label={stopping ? "Stopping…" : "Stop"} className="text-muted-foreground">
+              <Button variant="ghost" size="sm" onClick={onStop} disabled={stopping} aria-label={stopping ? "Stopping…" : stopSends ? "Stop & send" : "Stop"} className="text-muted-foreground">
                 {stopping ? <Loader2 className="animate-spin" /> : <Square className="fill-current" />}
-                <span className="hidden sm:inline">{stopping ? "Stopping…" : "Stop"}</span>
+                {/* One word that says what the press does: with a message waiting, stopping delivers it. */}
+                <span className="hidden sm:inline">{stopping ? "Stopping…" : stopSends ? "Stop & send" : "Stop"}</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent side="bottom">Stop this turn — the session is kept; a message resumes it</TooltipContent>
+            <TooltipContent side="bottom">{stopSends ? "Stop this turn and deliver your queued message now" : "Stop this turn — the session is kept; a message resumes it"}</TooltipContent>
           </Tooltip>
         )}
         <Tooltip>
@@ -808,6 +812,8 @@ function useElapsed(start: number | undefined, end: number | undefined, live: bo
  */
 function LiveStatePill({ state, exitCode, stalled, activity, absent }: { state: DisplayState; exitCode?: number; stalled?: boolean; activity?: string | null; absent?: boolean }) {
   const failed = state === "done" && isFailedExit(exitCode);
+  // A turn the operator stopped is ink, not a hue: nothing is wrong, the next message resumes it.
+  const stopped = state === "done" && isOperatorStop(exitCode);
   const working = state === "running" && !stalled;
   const [word, tone] =
     state === "running"
@@ -821,7 +827,9 @@ function LiveStatePill({ state, exitCode, stalled, activity, absent }: { state: 
           : state === "done"
             ? failed
               ? ["Failed", "text-destructive bg-destructive/10"]
-              : ["Done", "text-ok bg-ok/10"]
+              : stopped
+                ? ["Stopped", "text-muted-foreground bg-muted"]
+                : ["Done", "text-ok bg-ok/10"]
             : ["Idle", "text-muted-foreground bg-muted"];
   const doing = working ? activity : null;
   const pill = (

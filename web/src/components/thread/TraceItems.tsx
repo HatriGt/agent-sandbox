@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Clock, Copy, FileSearch, FileText, KeyRound, Loader2, Pencil, Play, Shrink, Terminal, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Copy, FileSearch, FileText, KeyRound, Loader2, Pencil, Play, Shrink, Terminal, Undo2 } from "lucide-react";
 import { fmtK } from "@/lib/context-health";
 import { parseYouMessage, splitQuotes } from "@/lib/you-message";
 import { quoteLabel } from "@/lib/quote-jump";
@@ -1375,7 +1375,23 @@ const YOU_FOLD_CHARS = 1400;
  * `noEnter` drops the CSS entrance for callers that animate the row in themselves (Thread's `Rise`
  * around pending replies) or that replace an echo already on screen — otherwise the bubble would
  * rise twice.
+ *
+ * `pending` is the same bubble before the agent has it: the edge is dashed and the label row says
+ * what is happening to it (queued, stopping the turn, delivering) with the live dot, plus the two
+ * things you can still do — deliver it now or take it back. One bubble, one spot, from Enter to
+ * the durable log line that replaces it: nothing moves, nothing leaves, only the label changes.
  */
+export interface YouPending {
+  /** What is happening to the message, as the label row reads it. */
+  status: string;
+  /** Deliver it now: stops the running turn, so it arms on the first click and fires on the second. */
+  onSendNow?: () => void;
+  /** Take it back out of the queue. */
+  onCancel?: () => void;
+  /** The stop or the delivery is under way: the actions step aside. */
+  busy?: boolean;
+}
+
 export function YouItem({
   text,
   label = "You",
@@ -1383,6 +1399,7 @@ export function YouItem({
   onEdit,
   at,
   noEnter = false,
+  pending,
 }: {
   text: string;
   label?: string;
@@ -1391,7 +1408,13 @@ export function YouItem({
   onEdit?: (text: string) => void;
   at?: number;
   noEnter?: boolean;
+  pending?: YouPending | null;
 }) {
+  const still = useReducedMotion();
+  const [armed, setArmed] = React.useState(false);
+  React.useEffect(() => {
+    if (!pending?.onSendNow) setArmed(false);
+  }, [pending?.onSendNow]);
   // Attachments ride in the message as in-box paths: pictures as thumbnails, the rest (a PDF, a
   // document, a pasted passage) as file cards — never as text.
   const attachments = React.useMemo(() => [...new Set(text.match(ATTACHMENT_RE) ?? [])], [text]);
@@ -1423,14 +1446,46 @@ export function YouItem({
     }
   };
   const action = "text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-full";
+  const swap = still
+    ? { initial: false as const, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0 } }
+    : { initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -4 }, transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const } };
+  const link = "hover:text-foreground cursor-pointer underline-offset-2 hover:underline";
   return (
-    <div className={cn(!noEnter && "enter", "group/you flex flex-col items-end gap-1.5")}>
+    <div className={cn(!noEnter && "enter", "group/you flex flex-col items-end gap-1.5")} data-pending={pending ? "true" : undefined}>
       <span className="label text-muted-foreground flex items-center gap-1.5 pr-1">
         {/* The time sits BEFORE the label so the label keeps its right edge; hover-revealed like the actions. */}
-        {at !== undefined && (
+        {at !== undefined && !pending && (
           <TimeStamp at={at} className="normal-case tracking-normal opacity-0 transition-opacity duration-150 group-hover/you:opacity-100 [@media(hover:none)]:opacity-100" />
         )}
-        {label}
+        {pending ? (
+          <>
+            <span className="bg-live breathe size-1.5 shrink-0 rounded-full motion-reduce:animate-none" aria-hidden />
+            {/* The status morphs in place (queued → stopping → delivering); the row never re-enters. */}
+            <AnimatePresence mode="popLayout" initial={false}>
+              <motion.span key={pending.status} {...swap} role="status">
+                {pending.status}
+              </motion.span>
+            </AnimatePresence>
+            {!pending.busy && pending.onSendNow && (
+              <button
+                type="button"
+                onClick={() => (armed ? pending.onSendNow?.() : setArmed(true))}
+                onBlur={() => setArmed(false)}
+                title="Stop the current turn and deliver this message now"
+                className={cn(link, armed && "text-destructive font-medium underline")}
+              >
+                {armed ? "stop the turn & send?" : "send now"}
+              </button>
+            )}
+            {!pending.busy && pending.onCancel && (
+              <button type="button" onClick={pending.onCancel} className={link}>
+                cancel
+              </button>
+            )}
+          </>
+        ) : (
+          label
+        )}
       </span>
       {attachments.length > 0 && (
         <div className="flex max-w-[min(72%,60ch)] flex-wrap justify-end gap-1.5">
@@ -1511,7 +1566,8 @@ export function YouItem({
               </Tooltip>
             )}
           </div>
-          <div className="you-bubble text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-body leading-relaxed">
+          {/* Pending: the same bubble with a dashed edge — it fills in the moment the agent has it. */}
+          <div className={cn("you-bubble text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-body leading-relaxed", pending && "you-bubble-pending")}>
             <div className={cn("break-words whitespace-pre-wrap [overflow-wrap:anywhere]", long && !open && "line-clamp-[10]")}>
               {skillName && (
                 <span className={cn(YOU_TAG, "bg-live/12 text-live mr-1.5")}>
@@ -1671,62 +1727,6 @@ function AttachmentDoc({ path }: { path: string }) {
     <span title={path} className="bg-muted text-foreground inline-flex h-7 max-w-full items-center gap-1.5 rounded-md px-2 text-micro">
       {chip}
     </span>
-  );
-}
-
-/**
- * A follow-up the operator sent while the agent was mid-turn. The controller holds it and delivers it
- * the moment the current turn finishes; until then it sits in the thread, visibly pending, with a way
- * to take it back.
- */
-export function QueuedItem({
-  text,
-  onCancel,
-  onSendNow,
-  sending,
-}: {
-  text: string;
-  onCancel?: () => void;
-  onSendNow?: () => void;
-  sending?: boolean;
-}) {
-  // Send-now interrupts the running turn, so it arms on the first click and fires on the second.
-  const [armed, setArmed] = React.useState(false);
-  return (
-    <div className="enter flex flex-col items-end gap-1.5">
-      <span className="label text-muted-foreground flex items-center gap-1.5 pr-1">
-        <Clock className="size-3" aria-hidden />
-        {sending ? "Interrupting the turn to deliver this…" : (
-          <>
-            <span className="bg-live breathe size-1.5 rounded-full motion-reduce:animate-none" aria-hidden />
-            Delivering · the agent reads it at its next step
-          </>
-        )}
-        {!sending && onSendNow && (
-          <button
-            type="button"
-            onClick={() => (armed ? onSendNow() : setArmed(true))}
-            onBlur={() => setArmed(false)}
-            title="Stop the current turn and deliver this message immediately"
-            className={
-              armed
-                ? "text-destructive cursor-pointer font-medium underline underline-offset-2"
-                : "hover:text-foreground cursor-pointer underline-offset-2 hover:underline"
-            }
-          >
-            {armed ? "stop the turn & send?" : "send now"}
-          </button>
-        )}
-        {!sending && onCancel && (
-          <button type="button" onClick={onCancel} className="hover:text-foreground cursor-pointer underline-offset-2 hover:underline">
-            cancel
-          </button>
-        )}
-      </span>
-      <div className="text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-xl rounded-br-md border border-dashed px-4 py-2.5 text-body leading-relaxed break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
-        {text}
-      </div>
-    </div>
   );
 }
 

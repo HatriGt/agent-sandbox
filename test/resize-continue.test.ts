@@ -33,8 +33,13 @@ test("the continuation is a real `you` turn in the log (the agent reads it; numb
 test("exit 252 is a pause, not a failure, and offers no next step", () => {
   assert.equal(RESIZE_PAUSE_EXIT, 252);
   assert.equal(doneLabel(252), "paused");
-  // isFailedExit stays strict (non-zero): the thread's pill decides the label, next-steps the remedy.
-  assert.equal(isFailedExit(252), true);
+  // A deliberate pause (252) or an operator stop (253) is not a failure: the state pill reads
+  // "paused" / "stopped" in ink, never red; every other non-zero code still is one.
+  assert.equal(isFailedExit(252), false);
+  assert.equal(isFailedExit(253), false);
+  assert.equal(doneLabel(253), "stopped");
+  assert.equal(isFailedExit(143), true);
+  assert.equal(isFailedExit(1), true);
   const outcome = { state: "failed", trust: {}, result: { prs: [], diff: { files: 2, additions: 1, deletions: 1 } }, cost: { durationMs: 1 } } as unknown as Parameters<typeof nextSteps>[0];
   assert.deepEqual(nextSteps(outcome, 252), []);
 });

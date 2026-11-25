@@ -1,7 +1,7 @@
 import { CircleDot, Pause, Check, X, Circle, MoonStar, Hourglass, type LucideProps } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
-import { doneLabel, isFailedExit } from "@/lib/format";
+import { doneLabel, isFailedExit, isOperatorStop } from "@/lib/format";
 import type { DisplayState } from "@/lib/lifecycle";
 
 /**
@@ -17,7 +17,9 @@ import type { DisplayState } from "@/lib/lifecycle";
  */
 type Tone = { icon: React.ComponentType<LucideProps>; word: (exit?: number) => string; text: string; pill: string };
 
-const TONE: Record<DisplayState | "failed" | "stalled", Tone> = {
+const TONE: Record<DisplayState | "failed" | "stalled" | "stopped", Tone> = {
+  // A turn the operator stopped: ink, not a hue — nothing is wrong and the next message resumes it.
+  stopped: { icon: Circle, word: () => "stopped", text: "text-muted-foreground", pill: "bg-muted text-muted-foreground ring-border" },
   // Running, but no action for the stall window: the failed hue with its own glyph (src/stall.ts).
   stalled: { icon: Hourglass, word: () => "stalled", text: "text-destructive", pill: "bg-destructive/10 text-destructive ring-destructive/20" },
   running: { icon: CircleDot, word: () => "working", text: "text-live", pill: "bg-live/10 text-live ring-live/20" },
@@ -45,6 +47,7 @@ const TONE: Record<DisplayState | "failed" | "stalled", Tone> = {
 
 function toneOf(state: DisplayState, exitCode?: number, stalled?: boolean): Tone {
   if (stalled && state === "running") return TONE.stalled;
+  if (state === "done" && isOperatorStop(exitCode)) return TONE.stopped;
   return state === "done" && isFailedExit(exitCode) ? TONE.failed : TONE[state];
 }
 

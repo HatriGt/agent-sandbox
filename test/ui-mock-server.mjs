@@ -143,6 +143,30 @@ const server = createServer(async (req, res) => {
     return json(res, 200, { ok: true });
   }
 
+  // The real controller's timing, so the UI is exercised through the gap it used to stumble on:
+  // the interrupt takes a beat (TERM, the wrapper settles exit 253 and the seam lands in the log),
+  // the box reads `done` for a moment, then the resume writes the ⟦you⟧ line and the turn is running.
+  const STOP_MS = Number(process.env.MOCK_STOP_MS ?? 1200);
+  const RESUME_MS = Number(process.env.MOCK_RESUME_MS ?? 1800);
+  const stopTurn = (why) =>
+    new Promise((r) =>
+      setTimeout(() => {
+        state.log += line(why ? `● stopped by you (${why})` : "● stopped by you");
+        state.runState = "done";
+        state.exitCode = 253;
+        r();
+      }, STOP_MS)
+    );
+  const resumeWith = (text, reply) =>
+    new Promise((r) =>
+      setTimeout(() => {
+        state.log += line("⟦you⟧") + line(text) + line("⟦/you⟧") + line(reply);
+        state.runState = "running";
+        state.exitCode = undefined;
+        r();
+      }, RESUME_MS)
+    );
+
   if (p === "/send-now.json" && req.method === "POST") {
     const { id } = await readBody(req);
     const msg = state.queue.find((m) => m.id === id);
@@ -150,11 +174,17 @@ const server = createServer(async (req, res) => {
     state.queue = state.queue.filter((m) => m.id !== id);
     // Mirror the real controller: interrupt the turn, then resume with the message.
     state.interrupted = { id, text: msg.text, at: Date.now() };
-    state.log += line("run interrupted by the operator to deliver a message immediately.");
-    state.log += line("⟦you⟧") + line(msg.text) + line("⟦/you⟧") + line("Right — the runner never picks that check up. Skipping the wait and commenting now.");
-    state.runState = "running";
-    state.exitCode = undefined;
+    await stopTurn("to deliver your message");
+    await resumeWith(msg.text, "Right — the runner never picks that check up. Skipping the wait and commenting now.");
     return json(res, 200, { ok: true, queued: state.queue });
+  }
+
+  // Stop with nothing to deliver: the turn ends at the seam; the inbox loop below delivers anything
+  // queued once the box reads `done`, as src/inbox.ts does.
+  if (p === "/interrupt.json" && req.method === "POST") {
+    const was = state.runState === "running";
+    if (was) await stopTurn("");
+    return json(res, 200, { ok: true, stopped: was });
   }
 
   // --- test-only introspection, so the driver can assert server-side effects ---
@@ -180,5 +210,20 @@ const server = createServer(async (req, res) => {
     res.writeHead(404).end("not found");
   }
 });
+
+// The delivery loop: a queued message goes out the moment the run is not running (src/inbox.ts).
+let delivering = false;
+setInterval(() => {
+  if (delivering || state.runState === "running" || !state.queue.length) return;
+  delivering = true;
+  const [next] = state.queue;
+  state.queue = state.queue.slice(1);
+  setTimeout(() => {
+    state.log += line("⟦you⟧") + line(next.text) + line("⟦/you⟧") + line("Picking up where I left off, with your note in mind.");
+    state.runState = "running";
+    state.exitCode = undefined;
+    delivering = false;
+  }, Number(process.env.MOCK_RESUME_MS ?? 1800));
+}, 1000);
 
 server.listen(PORT, () => console.log(`mock controller on http://localhost:${PORT} (box ${BOX})`));

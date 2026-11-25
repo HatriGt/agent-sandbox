@@ -229,7 +229,7 @@ async function main() {
       }
       check(
         "the transcript records the interruption",
-        String(w.log ?? "").includes("run interrupted by the operator"),
+        String(w.log ?? "").includes("● stopped by you"),
         `runState now=${w.runState}`
       );
       check(
@@ -240,7 +240,7 @@ async function main() {
       check(
         "the interrupted session kept its context (resumed, not restarted)",
         String(w.log ?? "")
-          .slice(String(w.log).indexOf("run interrupted by the operator"))
+          .slice(String(w.log).indexOf("● stopped by you"))
           .match(/1558|mocha|merge/i) !== null,
         "the resumed turn still refers to the PR it was working on"
       );

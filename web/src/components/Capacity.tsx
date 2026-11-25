@@ -1,6 +1,7 @@
 import type { BoxView } from "@/lib/api";
 import { motion } from "motion/react";
 import { displayState } from "@/lib/lifecycle";
+import { isFailedExit, isOperatorStop } from "@/lib/format";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { NumberTicker } from "@/components/ui/number-ticker";
@@ -58,7 +59,8 @@ export function Capacity({
                     !b && "bg-border",
                     s === "running" && "bg-live sheen",
                     s === "waiting" && "bg-attention",
-                    s === "done" && (b?.exitCode ? "bg-destructive" : "bg-ok"),
+                    // A stopped or paused turn is ink (the idle tone), never the failure red.
+                    s === "done" && (isFailedExit(b?.exitCode) ? "bg-destructive" : isOperatorStop(b?.exitCode) || b?.exitCode === 252 ? "bg-foreground/30" : "bg-ok"),
                     s === "idle" && "bg-live/45",
                     s === "sleeping" && "bg-sleep"
                   )}

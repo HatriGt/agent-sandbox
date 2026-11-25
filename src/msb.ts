@@ -2681,19 +2681,22 @@ export async function takeDeliveredInbox(cfg: Config, box: string): Promise<stri
 export async function interruptAgentRun(
   cfg: Config,
   box: string,
-  why = "to deliver a message immediately",
+  why = "to deliver your message",
   opts: {
-    /** The log line that records the stop, in place of "run interrupted by the operator …". */
+    /** The log line that records the stop, in place of "● stopped by you (…)". */
     line?: string;
     /** Exit code to publish once the wrapper has ended, in place of whatever the signal gave it. */
     exit?: number;
   } = {}
 ): Promise<boolean> {
-  const reason = why.replace(/[^\w .,-]/g, "");
-  const line = opts.line ?? `run interrupted by the operator ${reason}.`;
-  // The wrapper writes DONE_MARK before it removes RUN_MARK, so once the marker is gone the code
-  // it published can be replaced with the one the caller means ("paused", not "killed by TERM").
-  const settle = opts.exit !== undefined ? `echo ${opts.exit} > ${DONE_MARK}; ` : ``;
+  const reason = why.replace(/[^\w .,-]/g, "").trim();
+  // A lifecycle marker, not prose: the thread draws `● …` as a quiet seam across the column ("Stopped
+  // by you · to deliver your message"), where a plain sentence read as the agent saying it.
+  const line = opts.line ?? (reason ? `● stopped by you (${reason})` : `● stopped by you`);
+  // The wrapper writes DONE_MARK before it removes RUN_MARK, so once the marker is gone the code it
+  // published (143, "killed by TERM") is replaced with the one the caller means: 253 is an operator
+  // stop, which the thread shows as "stopped", never as a failure; a resize pause passes 252.
+  const settle = `echo ${opts.exit ?? OPERATOR_STOP_EXIT} > ${DONE_MARK}; `;
   const sh =
     `p=$(cat ${PID_MARK} 2>/dev/null); ` +
     `if [ -z "$p" ] || [ ! -d "/proc/$p" ]; then echo no-run; exit 0; fi; ` +
@@ -2702,10 +2705,17 @@ export async function interruptAgentRun(
     `for i in 1 2 3 4 5 6 7 8 9 10; do [ ! -f ${RUN_MARK} ] && { ${settle}echo interrupted; exit 0; }; sleep 1; done; ` +
     `pkill -KILL -P "$p" 2>/dev/null; ` +
     `for i in 1 2 3 4 5; do [ ! -f ${RUN_MARK} ] && { ${settle}echo interrupted; exit 0; }; sleep 1; done; ` +
-    `kill -KILL "$p" 2>/dev/null; echo ${opts.exit ?? 253} > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK} ${START_MARK} ${BOOT_MARK}; echo forced`;
+    `kill -KILL "$p" 2>/dev/null; echo ${opts.exit ?? OPERATOR_STOP_EXIT} > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK} ${START_MARK} ${BOOT_MARK}; echo forced`;
   const r = await msb(cfg, ["exec", box, "--", "bash", "-lc", sh], false);
   return !/(^|\n)no-run/.test(r.stdout);
 }
+
+/**
+ * Exit code of a turn the operator stopped (Stop, or "send now" on a queued message). Not a failure:
+ * the session is intact and the next message resumes it, so the thread draws the stop as a seam
+ * ("Stopped by you") rather than a red run-end pill.
+ */
+export const OPERATOR_STOP_EXIT = 253;
 
 /**
  * Exit code of a turn the controller stopped ON PURPOSE to reboot the machine for a memory or disk

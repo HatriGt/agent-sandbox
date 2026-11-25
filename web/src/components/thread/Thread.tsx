@@ -55,7 +55,9 @@ import type { TraceEvent } from "@/lib/trace";
 import { LiveRegistryContext, SayKeyContext } from "@/components/viz/live-blocks";
 import { VizFullscreenGate } from "@/components/viz/viz-fullscreen";
 import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
-import { type CompactView, AnsweredQuestionItem, CompactItem, Density, ExpandAll, LifecycleItem, MemoryItem, QueuedItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
+import { type CompactView, type YouPending, AnsweredQuestionItem, CompactItem, Density, ExpandAll, LifecycleItem, MemoryItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
+import { deriveWatch } from "@/lib/watch";
+import { isOperatorStop } from "@/lib/format";
 import { ReasoningTrail, type TrailItem } from "./ReasoningTrail";
 import { liveActivity } from "./live-activity";
 import { PlanBoard, type PlanVariant } from "./PlanBoard";
@@ -477,9 +479,11 @@ export function Thread({
   // otherwise send into a thread that shows no sign of it (the bubble landed screens below).
   const jumpToLatest = React.useRef<() => void>(() => {});
   const echo = React.useCallback((text: string) => {
-    onRepliedRef.current(stampReply(text, echoBasis.current.sentLines, echoBasis.current.logClock));
+    const reply = stampReply(text, echoBasis.current.sentLines, echoBasis.current.logClock);
+    onRepliedRef.current(reply);
     jumpToLatest.current();
     setBrowserSent((n) => n + 1);
+    return reply.id;
   }, []);
   const replyMatch = React.useMemo(() => matchReplies(replies, sentLines), [replies, sentLines]);
   const pendingReplies = replyMatch.pending;
@@ -744,6 +748,8 @@ export function Thread({
   }, [groups, sent]);
   const optimisticAsk = sent && !showQuestion && landedAsk < 0 ? sent : null;
 
+  // A watch this turn ran (RunPill reads a stopped one as "Stopped watching …").
+  const watchOf = React.useMemo(() => deriveWatch(events), [events]);
   // Pull requests the agent opened, from its prose and tool output.
   const pulls = React.useMemo(() => findPullRequests(events.map((e) => (e.kind === "say" ? e.text : e.kind === "tool" ? e.result ?? "" : "")).join("\n")), [events]);
 
@@ -781,11 +787,42 @@ export function Thread({
       if (currentBoxRef.current === name) setQueued(r.queued);
     }).catch(() => {});
   }, [box.name]);
+  React.useEffect(() => setQueued(null), [box.name]);
   React.useEffect(() => {
-    setQueued(null);
+    // The fleet is authoritative when it says nothing is queued; otherwise fetch the ids. The list
+    // already held stays up while the fetch is out — falling back to the fleet's id-less rows in
+    // that gap drew this tab's own echo a second time.
     if ((box.queued?.length ?? 0) > 0) refreshQueue();
+    else setQueued([]);
   }, [box.name, box.queued?.length, refreshQueue]);
   const queuedItems = queued ?? (box.queued ?? []).map((text, i) => ({ id: `fleet-${i}`, text }));
+  // What is happening to each message THIS tab queued, by its echo id. The echo stays on screen
+  // from Enter to the durable log line that replaces it (one bubble, one spot); only its label
+  // changes: queued → stopping the turn → delivering. A queued echo the server no longer holds
+  // (the in-turn gate or the delivery loop took it) is on its way, so it reads "delivering" until
+  // its line lands — before this, the bubble vanished for the seconds between the two.
+  type QueueMeta = { queueId: string; status: "queued" | "stopping" | "delivering" };
+  const [queueMeta, setQueueMeta] = React.useState<Record<string, QueueMeta>>({});
+  React.useEffect(() => setQueueMeta({}), [box.name]);
+  const setQueueStatus = React.useCallback((replyId: string, status: QueueMeta["status"]) => {
+    setQueueMeta((prev) => (prev[replyId] ? { ...prev, [replyId]: { ...prev[replyId], status } } : prev));
+  }, []);
+  const markQueued = React.useCallback((replyId: string, queueId: string, text: string) => {
+    setQueueMeta((prev) => ({ ...prev, [replyId]: { queueId, status: "queued" } }));
+    // Known at once, so the bubble never reads "delivering" in the gap before the inbox answers.
+    setQueued((prev) => (prev?.some((q) => q.id === queueId) ? prev : [...(prev ?? []), { id: queueId, text }]));
+  }, []);
+  const serverQueueIds = React.useMemo(() => new Set(queuedItems.map((q) => q.id)), [queuedItems]);
+  const claimedQueueIds = React.useMemo(() => new Set(Object.values(queueMeta).map((m) => m.queueId)), [queueMeta]);
+  const statusOf = (replyId: string): QueueMeta["status"] | null => {
+    const m = queueMeta[replyId];
+    if (!m) return null;
+    // The stop has landed (the box no longer reads running): from here it is being delivered, even
+    // though send-now's own answer only comes once the resume has gone out too.
+    if (m.status === "stopping") return runState === "running" ? "stopping" : "delivering";
+    if (m.status === "delivering") return "delivering";
+    return queued !== null && !serverQueueIds.has(m.queueId) ? "delivering" : "queued";
+  };
   // A compaction already on its way (sent, queued, or underway): the "compact" advice steps aside.
   const compactPending = React.useMemo(() => {
     const last = groups[groups.length - 1];
@@ -821,30 +858,43 @@ export function Thread({
   const cancelQueued = (id: string) => {
     api
       .dequeue(box.name, id.startsWith("fleet-") ? undefined : id)
-      .then((r) => setQueued(r.queued))
+      .then((r) => {
+        setQueued(r.queued);
+        // The echo goes with it: the message is back in nobody's hands.
+        const echoId = Object.keys(queueMeta).find((k) => queueMeta[k].queueId === id);
+        const reply = echoId && replies.find((x) => x.id === echoId);
+        if (reply) onReplyFailed?.(reply.text);
+        if (echoId) setQueueMeta((prev) => { const { [echoId]: _gone, ...rest } = prev; return rest; });
+      })
       .catch((e: unknown) => toast.error("Could not cancel", { description: e instanceof Error ? e.message : String(e) }));
   };
-  // Deliver a queued message NOW: the controller interrupts the running turn and resumes with it.
-  // For turns stuck on something that will never finish (e.g. polling a CI check with no runner).
-  const [sendingNow, setSendingNow] = React.useState<string | null>(null);
+  // Deliver a queued message NOW: the controller stops the running turn and resumes with it. The
+  // bubble stays where it is and says what is happening (stopping → delivering → its log line
+  // takes over); the stop itself lands in the thread as a seam ("Stopped by you"), never a toast.
+  const [stopping, setStopping] = React.useState(false);
+  React.useEffect(() => setStopping(false), [box.name, runState]);
   const sendQueuedNow = (id: string) => {
     if (id.startsWith("fleet-")) {
       // Fleet fallback rows have no server id yet; fetch the real queue first.
       refreshQueue();
       return;
     }
-    setSendingNow(id);
+    const echoId = Object.keys(queueMeta).find((k) => queueMeta[k].queueId === id);
+    if (echoId) setQueueStatus(echoId, "stopping");
+    setStopping(true);
     api
       .sendNow(box.name, id)
       .then((r) => {
         setQueued(r.queued);
-        toast.success("Turn interrupted", { description: "Your message was delivered; the agent is resuming with it." });
+        if (echoId) setQueueStatus(echoId, "delivering");
       })
       .catch((e: unknown) => {
+        // The server put it back in the queue; the bubble goes back to "queued" with it.
         refreshQueue();
+        if (echoId) setQueueStatus(echoId, "queued");
         toast.error("Could not send now", { description: e instanceof Error ? e.message : String(e) });
       })
-      .finally(() => setSendingNow(null));
+      .finally(() => setStopping(false));
   };
 
   // A just-delegated box reports `idle` until the run sentinel is written (a few seconds after
@@ -878,9 +928,15 @@ export function Thread({
     }
     return { first: digest?.startedAt ?? first, last: digest?.endedAt ?? last };
   }, [events, digest?.startedAt, digest?.endedAt]);
-  const [stopping, setStopping] = React.useState(false);
-  React.useEffect(() => setStopping(false), [box.name, runState]);
+  // Stop with a message waiting is "stop and deliver it": the queued text was always going to be
+  // delivered the moment the turn ended, so the one press does both and the button says so.
+  const stopSends = queuedItems.length > 0;
   const stopTurn = async () => {
+    const first = queuedItems.find((q) => !q.id.startsWith("fleet-")) ?? queuedItems[0];
+    if (first) {
+      sendQueuedNow(first.id);
+      return;
+    }
     setStopping(true);
     try {
       await api.interrupt(box.name);
@@ -1112,7 +1168,8 @@ export function Thread({
         // Before the trace starts speaking, and in the quiet between its steps.
         : runState === "running" && !loadingTrace && !traceSpeaks && (events.length === 0 || gapSettled)
           ? { label: events.length ? "Working" : "Starting up" }
-          : pendingReplies.length > 0 && runState !== "running"
+          // A queued echo carries its own status in its label row; this line is for a plain send.
+          : pendingReplies.some((r) => !queueMeta[r.id]) && runState !== "running"
             ? { label: "Message sent", detail: "the agent is picking it up" }
             : null;
   const agentKinds = ["say", "tools", "think", "work", "plan"];
@@ -1152,6 +1209,7 @@ export function Thread({
         endedAt={stamps.last}
         onStop={runState === "running" && !sleeping ? stopTurn : undefined}
         stopping={stopping}
+        stopSends={stopSends}
         showWorkspace={showWorkspace}
         showInspector={inspectorOpen && !showWorkspace}
         showBrowser={browserOpen && !sleeping}
@@ -1285,13 +1343,49 @@ export function Thread({
             {/* An echo whose log line just landed leaves at once (`custom`): the line is already drawn
                 in its place. One that is withdrawn (delivery failed) folds away as before. */}
             <AnimatePresence initial={false} custom={{ still, instant: echoesLanded }}>
-              {pendingReplies.filter((r) => !(optimisticAsk && r.text === sentAnswer)).map((r) => (
-                <Rise key={r.id} still={still} className={isCompactCommand(r.text) ? "mt-3" : "mt-5"}>
-                  {isCompactCommand(r.text) ? (
-                    <CompactItem c={{ state: "pending", trigger: "manual", instructions: compactInstructions(r.text) || undefined }} live />
-                  ) : (
-                    <YouItem text={r.text} noEnter />
-                  )}
+              {pendingReplies.filter((r) => !(optimisticAsk && r.text === sentAnswer)).map((r) => {
+                const status = statusOf(r.id);
+                const queueId = queueMeta[r.id]?.queueId;
+                const pending: YouPending | null =
+                  status === "queued"
+                    ? {
+                        status: "Queued · the agent reads it at its next step",
+                        onSendNow: runState === "running" && !sleeping && queueId ? () => sendQueuedNow(queueId) : undefined,
+                        onCancel: queueId ? () => cancelQueued(queueId) : undefined,
+                      }
+                    : status === "stopping"
+                      ? { status: "Stopping the turn to deliver this…", busy: true }
+                      : status === "delivering"
+                        ? { status: "Delivering…", busy: true }
+                        : null;
+                return (
+                  <Rise key={r.id} still={still} className={isCompactCommand(r.text) ? "mt-3" : "mt-5"}>
+                    {isCompactCommand(r.text) ? (
+                      <CompactItem c={{ state: "pending", trigger: "manual", instructions: compactInstructions(r.text) || undefined }} live />
+                    ) : (
+                      <YouItem text={r.text} noEnter pending={pending} />
+                    )}
+                  </Rise>
+                );
+              })}
+              {/* Queued by another tab (or before a reload): the same bubble, from the server's list. */}
+              {queuedItems.filter((q) => !claimedQueueIds.has(q.id) && !isCompactCommand(q.text)).map((q) => (
+                <Rise key={`q-${q.id}`} still={still} className="mt-5">
+                  <YouItem
+                    text={q.text}
+                    noEnter
+                    pending={{
+                      status: stopping ? "Stopping the turn to deliver this…" : "Queued · the agent reads it at its next step",
+                      busy: stopping,
+                      onSendNow: runState === "running" && !sleeping ? () => sendQueuedNow(q.id) : undefined,
+                      onCancel: () => cancelQueued(q.id),
+                    }}
+                  />
+                </Rise>
+              ))}
+              {queuedItems.filter((q) => !claimedQueueIds.has(q.id) && isCompactCommand(q.text)).map((q) => (
+                <Rise key={`q-${q.id}`} still={still} className="mt-3">
+                  <CompactItem c={{ state: "pending", trigger: "manual", instructions: compactInstructions(q.text) || undefined }} live />
                 </Rise>
               ))}
             </AnimatePresence>
@@ -1304,19 +1398,6 @@ export function Thread({
               {working && !(loadingTrace && starting) && <WorkingIndicator label={working.label} detail={working.detail} />}
               {/* detail here is a sentence about the phase, never a tool name — the trace says what runs. */}
             </div>
-
-            <AnimatePresence initial={false}>
-              {queuedItems.map((q) => (
-                <Rise key={q.id} still={still}>
-                  <QueuedItem
-                    text={q.text}
-                    onCancel={() => cancelQueued(q.id)}
-                    onSendNow={runState === "running" && !sleeping ? () => sendQueuedNow(q.id) : undefined}
-                    sending={sendingNow === q.id}
-                  />
-                </Rise>
-              ))}
-            </AnimatePresence>
 
             {!sleeping && !loadingTrace && turnFiles.length > 0 && runState !== "running" && pendingReplies.length === 0 && (
               <Rise still={still}>
@@ -1331,7 +1412,10 @@ export function Thread({
               </p>
             )}
 
-            {((!sleeping && !loadingTrace && runState === "done") || (finished && (outcome || digest))) && pendingReplies.length === 0 && (
+            {/* A turn you stopped ends in the seam the log already carries ("Stopped by you"), not a
+                run-end pill: nothing finished and nothing failed. A stopped WATCH keeps the pill —
+                it reads "Stopped watching <target> · 12m", which is the record worth having. */}
+            {((!sleeping && !loadingTrace && runState === "done") || (finished && (outcome || digest))) && pendingReplies.length === 0 && !(isOperatorStop(exitCode) && !watchOf) && (
               <RunPill
                 events={events}
                 outcome={outcome}
@@ -1448,7 +1532,8 @@ export function Thread({
         repos={repos}
         onOpenSideChat={openSideChat}
         onReplied={echo}
-        onQueued={() => {
+        onQueued={(replyId, queueId, text) => {
+          if (replyId) markQueued(replyId, queueId, text);
           refreshQueue();
           jumpToLatest.current();
         }}

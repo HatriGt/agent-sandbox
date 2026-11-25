@@ -98,17 +98,25 @@ export function stateNoun(s: RunState): string {
  * 137 is 128+SIGKILL: the guest kernel OOM-killed the agent, which is a different problem with a
  * different remedy (raise the machine's memory), so it gets its own word rather than "interrupted".
  * 252 is a turn the controller paused on purpose to resize the machine and then resumed: not a
- * failure at all.
+ * failure at all. 253 is a turn the operator stopped (Stop, or "send now" on a queued message): the
+ * session is intact and the next message resumes it, so it is "stopped", never "failed".
  */
 export function doneLabel(exitCode?: number): string {
   if (exitCode === 137) return "out of memory";
   if (exitCode === 254) return "interrupted";
   if (exitCode === 252) return "paused";
+  if (exitCode === 253) return "stopped";
   return exitCode === 0 ? "done" : `exit ${exitCode ?? "?"}`;
 }
 
+/** A non-zero exit the operator did not ask for. A deliberate pause (252) or stop (253) is not one. */
 export function isFailedExit(exitCode?: number): boolean {
-  return exitCode != null && exitCode !== 0;
+  return exitCode != null && exitCode !== 0 && exitCode !== 252 && exitCode !== 253;
+}
+
+/** The turn ended because the operator stopped it (Stop, or "send now" on a queued message). */
+export function isOperatorStop(exitCode?: number): boolean {
+  return exitCode === 253;
 }
 
 /** "just now", "4m ago", "3h ago", "2d ago" — for last-activity stamps. */
