@@ -41,7 +41,7 @@ await sleep(1200);
 const read = () =>
   page.evaluate(() => {
     const t = (el) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-    const pending = [...document.querySelectorAll('[data-pending="true"]')].map((el) => t(el.querySelector("span.label")));
+    const pending = [...document.querySelectorAll('[data-pending="true"]')].map((el) => t(el.querySelector("span.label")) + " | " + [...el.querySelectorAll("button")].map(t).filter((x) => /send|cancel/i.test(x)).join(", "));
     const bubbles = [...document.querySelectorAll(".you-bubble")].map((b) => (b.classList.contains("you-bubble-pending") ? "dashed" : "solid") + ": " + t(b).slice(0, 40));
     const stop = t([...document.querySelectorAll("button")].find((b) => /^(Stop|Stopping…|Stop & send)$/.test(t(b))));
     const pill = t(document.querySelector("[data-run-pill]"));
@@ -73,10 +73,10 @@ await shot("0-running");
 await send("Skip that check — the runner is gone. Comment on the PR and merge.");
 await sleep(500);
 await shot("1-queued");
-await clickLabel("send now");
+await clickLabel("Send now");
 await sleep(150);
 await shot("2-armed");
-await clickLabel("stop the turn & send?");
+await clickLabel("Stop the turn & send");
 await sleep(400);
 await shot("3-stopping");
 await sleep(1400); // STOP_MS passed: the seam is in the log, the box reads done

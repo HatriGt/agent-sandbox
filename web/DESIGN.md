@@ -1925,10 +1925,15 @@ button. Two toasts narrated it on top.
 - **One message, one bubble, one spot.** The echo is made the instant Enter is pressed, mid-turn too,
   and it is the only bubble the message ever has (`YouItem pending`): the same `you-bubble` with a
   dashed edge (`.you-bubble-pending`) and, where the "You" label sits, the live dot plus a status
-  that morphs in place: `Queued · the agent reads it at its next step · send now · cancel` →
-  `Stopping the turn to deliver this…` → `Delivering…` → the edge fills in when the log line takes
-  over (the existing `swappedIn` no-enter path). Nothing moves, nothing leaves, no toast. The server
-  queue is only drawn for messages this tab did not send (another tab, a reload).
+  that morphs in place: `Queued` → `Stopping the turn…` → `Delivering…` → the edge fills in when
+  the log line takes over (the existing `swappedIn` no-enter path). Nothing moves, nothing leaves,
+  no toast. The server queue is only drawn for messages this tab did not send (another tab, a reload).
+- **The caption is a state, the controls are buttons.** While the message is merely queued, two pill
+  buttons sit under the bubble, right-aligned: `Send now` (an `ArmButton`, outline, that flips to the
+  filled `Stop the turn & send` on the first click) and a ghost `Cancel` with an ×. The first cut
+  wrote them as lower-case links inside the caption after "the agent reads it at its next step";
+  nobody read them as actions, and the sentence repeated what the composer already says under the
+  input. The row folds away (height to 0) the moment the stop or the delivery begins.
 - **A stop is a seam, not a failure.** The controller writes `● stopped by you (to deliver your
   message)` (or plain `● stopped by you`) so the trace parses a lifecycle row, and always settles
   exit 253 (`OPERATOR_STOP_EXIT`). 253 is "stopped" in ink everywhere (`isOperatorStop`,

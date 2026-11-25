@@ -1349,12 +1349,12 @@ export function Thread({
                 const pending: YouPending | null =
                   status === "queued"
                     ? {
-                        status: "Queued · the agent reads it at its next step",
+                        status: "Queued",
                         onSendNow: runState === "running" && !sleeping && queueId ? () => sendQueuedNow(queueId) : undefined,
                         onCancel: queueId ? () => cancelQueued(queueId) : undefined,
                       }
                     : status === "stopping"
-                      ? { status: "Stopping the turn to deliver this…", busy: true }
+                      ? { status: "Stopping the turn…", busy: true }
                       : status === "delivering"
                         ? { status: "Delivering…", busy: true }
                         : null;
@@ -1375,7 +1375,7 @@ export function Thread({
                     text={q.text}
                     noEnter
                     pending={{
-                      status: stopping ? "Stopping the turn to deliver this…" : "Queued · the agent reads it at its next step",
+                      status: stopping ? "Stopping the turn…" : "Queued",
                       busy: stopping,
                       onSendNow: runState === "running" && !sleeping ? () => sendQueuedNow(q.id) : undefined,
                       onCancel: () => cancelQueued(q.id),
