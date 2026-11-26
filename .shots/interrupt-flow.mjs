@@ -115,20 +115,36 @@ await page.fill("[data-queue-tray] textarea", "Tag it infra, assign it to me, an
 await page.keyboard.press("Enter");
 await sleep(600);
 await shot("11-queue-edited");
+// A long message (a pasted checklist, many lines) waits clipped to two lines and edits in a field
+// that stops at a third of the viewport and scrolls inside, opened at its end.
+const long = ["Before you open the issue, go through this checklist and paste the answers into it:", ""]
+  .concat(Array.from({ length: 60 }, (_, i) => `${i + 1}. Check that job ${i + 1} of the runner matrix is green on main and note the run id.`))
+  .concat(["", "Then link every red run under a single heading."])
+  .join("\n");
+await page.fill("#send-input", long);
+await page.keyboard.press("Enter");
+await sleep(700);
+await page.evaluate(() => [...document.querySelectorAll("[data-queue-tray] button[aria-label='Edit']")][3].click());
+await sleep(300);
+await shot("12-queue-editing-long");
+await page.keyboard.press("Escape");
+await sleep(300);
+await page.evaluate(() => [...document.querySelectorAll("[data-queue-tray] button[aria-label='Remove from the queue']")][3].click());
+await sleep(500);
 await page.evaluate(() => [...document.querySelectorAll("[data-queue-tray] button[aria-label='Remove from the queue']")][1].click());
 await sleep(600);
-await shot("12-queue-list-one-removed");
+await shot("13-queue-list-one-removed");
 for (let i = 0; i < 2; i++) {
   await page.evaluate(() => document.querySelector("[data-queue-tray] button[aria-label='Remove from the queue']").click());
   await sleep(400);
 }
 await sleep(500);
-await shot("13-queue-empty");
+await shot("14-queue-empty");
 
 // C — plain Stop with nothing queued: the seam and the composer, no red pill.
 await clickLabel("Stop");
 await sleep(2200);
-await shot("14-plain-stop");
+await shot("15-plain-stop");
 
 const st = await fetch(`http://localhost:${port}/__state`).then((r) => r.json());
 console.log("server queue after:", st.queue.length, "| log tail:", JSON.stringify(st.log.split("\n").slice(-6).join(" ⏎ ")));

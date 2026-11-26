@@ -88,6 +88,7 @@ function Row({ item: it, index }: { item: QueueTrayItem; index: number }) {
       if (!el) return;
       el.focus();
       el.setSelectionRange(el.value.length, el.value.length);
+      el.scrollTop = el.scrollHeight; // a long message opens at its end, where the caret is
     });
   };
   const changed = draft.trim() !== "" && draft.trim() !== it.text.trim();
@@ -127,7 +128,9 @@ function Row({ item: it, index }: { item: QueueTrayItem; index: number }) {
             disabled={saving}
             rows={1}
             aria-label={`Edit queued message ${index + 1}`}
-            className="field-sizing-content text-foreground focus-visible:border-ring w-full resize-none rounded-md border bg-transparent px-2 py-1 text-meta leading-snug outline-none disabled:opacity-60"
+            // Sized to its words up to a third of the viewport, then it scrolls inside (the main composer's
+            // rule): a message of hundreds of lines edits in the same slot without burying the transcript.
+            className="field-sizing-content text-foreground focus-visible:border-ring max-h-[min(34vh,18rem)] w-full resize-none overflow-y-auto rounded-md border bg-transparent px-2 py-1 text-meta leading-snug outline-none disabled:opacity-60"
           />
           <div className="mt-1.5 flex items-center justify-end gap-1">
             <span className="text-faint mr-auto text-micro">Enter to save · Esc to keep the original</span>

@@ -1948,12 +1948,15 @@ button. Two toasts narrated it on top.
   delivers the old ones; if the gate already read it the edit is refused (409) and the row leaves
   with the next poll. Cancelling a row takes its mirror back too (it did not, before: a cancelled
   message could still land mid-turn). The echo keeps its id and gets the new words and a fresh stamp,
-  so the edited log line is the one that retires it.
+  so the edited log line is the one that retires it. The editor follows the main composer's
+  height rule: sized to its words up to a third of the viewport, then it scrolls inside and opens
+  at its end, so a pasted checklist of hundreds of lines edits in the same slot without burying
+  the transcript (a resting row stays clipped to two lines).
 - **Stop with a message waiting is "Stop & send".** The header button says so and calls send-now
   on the first queued message; the queued text was always going to be delivered the moment the turn
   ended, so one press does both. The tray row's own "Send now" still arms before it fires.
 - Proof: `node .shots/interrupt-flow.mjs [--dark]` over `test/ui-mock-server.mjs` (the mock now
-  mirrors the stop gap, exit 253, the seam, the delivery loop and the edit route): fifteen states,
+  mirrors the stop gap, exit 253, the seam, the delivery loop and the edit route): sixteen states,
   including a three-message queue, one row edited in place, and its removal, light and dark,
   `.shots/interrupt-<n>-<state>-<scheme>.png`, with a per-step readout of bubble label, state pill
   and seams.
