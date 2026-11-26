@@ -1574,6 +1574,9 @@ export function Thread({
         context={contextStatus}
         seed={seed}
         phase={starting ? "starting" : showQuestion ? "asked" : idle ? "fresh" : undefined}
+        onStop={runState === "running" && !sleeping ? stopTurn : undefined}
+        stopping={stopping}
+        stopSends={stopSends}
       />
       </div>
       {/* Sibling of the whole column (conversation + dock + composer), so opening it narrows all

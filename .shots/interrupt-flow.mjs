@@ -53,7 +53,9 @@ const read = () =>
     const pill = t(document.querySelector("[data-run-pill]"));
     const seams = [...document.querySelectorAll("span.label")].map(t).filter((s) => /^stopped by you/i.test(s));
     const state = t(document.querySelector(".pop-in.rounded-full"));
-    return { tray: trayHead, pending, bubbles: bubbles.slice(-3), stop, pill, seams, state };
+    const sendBtn = document.querySelector("[data-composer-send]");
+    const composer = sendBtn ? sendBtn.getAttribute("aria-label") + (sendBtn.disabled ? " (off)" : "") : "";
+    return { tray: trayHead, pending, bubbles: bubbles.slice(-3), stop, composer, pill, seams, state };
   });
 
 async function shot(name) {
@@ -141,10 +143,19 @@ for (let i = 0; i < 2; i++) {
 await sleep(500);
 await shot("14-queue-empty");
 
-// C — plain Stop with nothing queued: the seam and the composer, no red pill.
-await clickLabel("Stop");
+// E — the composer's own stop: with the agent working and nothing typed, the send button is a
+// filled square; the first character typed turns it back into the queue arrow.
+await shot("15-composer-stop");
+await page.fill("#send-input", "Also");
+await sleep(300);
+await shot("16-composer-typing");
+await page.fill("#send-input", "");
+await sleep(300);
+
+// C — plain Stop with nothing queued, from the composer's square: the seam, no red pill.
+await page.click("[data-composer-send][aria-label='Stop the agent']");
 await sleep(2200);
-await shot("15-plain-stop");
+await shot("17-plain-stop");
 
 const st = await fetch(`http://localhost:${port}/__state`).then((r) => r.json());
 console.log("server queue after:", st.queue.length, "| log tail:", JSON.stringify(st.log.split("\n").slice(-6).join(" ⏎ ")));

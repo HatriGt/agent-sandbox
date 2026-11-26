@@ -1952,11 +1952,17 @@ button. Two toasts narrated it on top.
   height rule: sized to its words up to a third of the viewport, then it scrolls inside and opens
   at its end, so a pasted checklist of hundreds of lines edits in the same slot without burying
   the transcript (a resting row stays clipped to two lines).
+- **The composer's send button is the stop while the agent works and nothing is typed.** The
+  same ink-filled circle shows a filled square (the header's stop glyph) and calls the header's
+  handler, so a waiting message is delivered by it ("Stop & send"). The first typed character
+  turns it back into the queue arrow; clearing the draft brings the square back. Before, the slot
+  held a disabled clock and the only stop was in the header, a long way from where the eye is
+  while a reply streams. The caption under the composer says which it is.
 - **Stop with a message waiting is "Stop & send".** The header button says so and calls send-now
   on the first queued message; the queued text was always going to be delivered the moment the turn
   ended, so one press does both. The tray row's own "Send now" still arms before it fires.
 - Proof: `node .shots/interrupt-flow.mjs [--dark]` over `test/ui-mock-server.mjs` (the mock now
-  mirrors the stop gap, exit 253, the seam, the delivery loop and the edit route): sixteen states,
+  mirrors the stop gap, exit 253, the seam, the delivery loop and the edit route): eighteen states,
   including a three-message queue, one row edited in place, and its removal, light and dark,
   `.shots/interrupt-<n>-<state>-<scheme>.png`, with a per-step readout of bubble label, state pill
   and seams.

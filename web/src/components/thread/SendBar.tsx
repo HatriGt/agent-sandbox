@@ -1,7 +1,7 @@
 import * as React from "react";
 import { pushSent, readDraft, readSent, writeDraft } from "@/lib/draft";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { ArrowUp, AtSign, Check as CheckIcon, Clock, Loader2, MessageCircleQuestion, Paperclip } from "lucide-react";
+import { ArrowUp, AtSign, Check as CheckIcon, Clock, Loader2, MessageCircleQuestion, Paperclip, Square } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { ATTACHMENTS_DIR } from "@/lib/session-context";
@@ -56,10 +56,20 @@ export function SendBar({
   context,
   phase,
   top,
+  onStop,
+  stopping = false,
+  stopSends = false,
 }: {
   /** What the thread is in the middle of, for the composer's copy: a run being set up, a question
    *  waiting on the card above, or a box that has never run anything. */
   phase?: "starting" | "asked" | "fresh";
+  /** Stop the running turn. While the agent works and nothing is typed, the send button is this
+   *  stop (a filled square, like the header's); the first typed character turns it back into the
+   *  queue arrow. Same handler as the header, so a waiting message is delivered by the stop. */
+  onStop?: () => void;
+  stopping?: boolean;
+  /** A message is queued: the stop delivers it ("Stop & send"). */
+  stopSends?: boolean;
   /** The first row inside the composer's surface (the changed-files dock), above the text. */
   top?: React.ReactNode;
   boxName: string;
@@ -221,8 +231,12 @@ export function SendBar({
     setValue(sentBefore[next] ?? "");
     return true;
   };
-  // One slot, four faces: the icon morphs between them rather than swapping.
-  const sendIcon = sending ? "sending" : sent ? "sent" : busy ? "queue" : "send";
+  // With the agent working and nothing typed, the one button in the slot is the stop: there was no
+  // way to stop from the composer, and a disabled clock said nothing. The first character typed
+  // makes it the queue arrow again (the header keeps its own Stop for that case).
+  const stopFace = !!onStop && busy && !sending && !sent && !value.trim() && !att.items.length;
+  // One slot, six faces: the icon morphs between them rather than swapping.
+  const sendIcon = sending ? "sending" : sent ? "sent" : stopFace ? (stopping ? "stopping" : "stop") : busy ? "queue" : "send";
 
   // Escape on a menu means "not this one": the `@`/`/` token it belonged to stays plain text. The
   // menus are re-derived from the caret on every key-up, so without this the key-up of that very
@@ -362,7 +376,9 @@ export function SendBar({
     : sleeping
       ? "Waking the sandbox — type ahead, it sends when the machine is back."
       : busy
-        ? "Agent is mid-turn — it reads your message at its next step."
+        ? stopFace
+          ? "Agent is mid-turn — the square stops it; type instead and it reads your message at its next step."
+          : "Agent is mid-turn — it reads your message at its next step."
         : phase === "starting"
           ? "Starting up — type ahead, it is delivered once the agent is listening."
           : phase === "asked"
@@ -564,9 +580,11 @@ export function SendBar({
             <Button
               variant="primary"
               size="icon"
-              onClick={send}
-              disabled={sending || (!value.trim() && !att.items.length)}
-              aria-label={busy ? "Queue for the agent" : "Send to the agent"}
+              onClick={stopFace ? onStop : send}
+              disabled={stopFace ? stopping : sending || (!value.trim() && !att.items.length)}
+              aria-label={stopFace ? (stopping ? "Stopping…" : stopSends ? "Stop & send" : "Stop the agent") : busy ? "Queue for the agent" : "Send to the agent"}
+              title={stopFace ? (stopSends ? "Stop this turn and deliver your queued message now" : "Stop this turn — the session is kept; a message resumes it") : undefined}
+              data-composer-send
               className="no-press shrink-0 rounded-full transition-[opacity,scale,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out-quint)] disabled:opacity-35 enabled:hover:scale-105 enabled:active:scale-90 motion-reduce:enabled:hover:scale-100 motion-reduce:enabled:active:scale-100"
             >
               <AnimatePresence initial={false} mode="popLayout">
@@ -578,7 +596,7 @@ export function SendBar({
                   transition={still ? { duration: 0.12 } : { type: "spring", stiffness: 520, damping: 28, mass: 0.6 }}
                   className="grid place-items-center"
                 >
-                  {sendIcon === "sending" ? <Loader2 className="animate-spin" /> : sendIcon === "sent" ? <CheckIcon /> : sendIcon === "queue" ? <Clock /> : <ArrowUp />}
+                  {sendIcon === "sending" || sendIcon === "stopping" ? <Loader2 className="animate-spin" /> : sendIcon === "sent" ? <CheckIcon /> : sendIcon === "stop" ? <Square className="size-3.5 fill-current" /> : sendIcon === "queue" ? <Clock /> : <ArrowUp />}
                 </motion.span>
               </AnimatePresence>
             </Button>
