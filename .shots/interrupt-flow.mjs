@@ -5,8 +5,10 @@
 //   node .shots/interrupt-flow.mjs [--dark] [--port=8799]
 //
 // Two flows, shot at every state:
-//   A  message queued mid-turn → "send now" on the bubble → stopping → seam + delivering → settled
+//   A  message queued mid-turn → "Send now" in the composer's queue tray → stopping → seam + delivering → settled
 //   B  a second message queued → header "Stop & send" → same states, from the other button
+//   D  three messages queued → the tray as a list → one removed → the rest removed
+//   C  plain Stop with nothing queued
 // Every shot is a clip of the conversation column's lower half (the part that changes) and the
 // header strip, so the state pill and the Stop button are in the frame too. Prints a per-step
 // timeline of what the thread shows (bubble label, state pill, any run-end pill).
@@ -41,13 +43,17 @@ await sleep(1200);
 const read = () =>
   page.evaluate(() => {
     const t = (el) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
-    const pending = [...document.querySelectorAll('[data-pending="true"]')].map((el) => t(el.querySelector("span.label")) + " | " + [...el.querySelectorAll("button")].map(t).filter((x) => /send|cancel/i.test(x)).join(", "));
-    const bubbles = [...document.querySelectorAll(".you-bubble")].map((b) => (b.classList.contains("you-bubble-pending") ? "dashed" : "solid") + ": " + t(b).slice(0, 40));
+    const tray = document.querySelector("[data-queue-tray]");
+    const pending = tray
+      ? [...tray.querySelectorAll("li")].map((li) => t(li.querySelector("p")).slice(0, 24) + " | " + [...li.querySelectorAll("button,[role=status]")].map((b) => t(b) || b.getAttribute("aria-label")).join(", "))
+      : [];
+    const trayHead = t(tray?.firstElementChild);
+    const bubbles = [...document.querySelectorAll(".you-bubble")].map((b) => t(b).slice(0, 40));
     const stop = t([...document.querySelectorAll("button")].find((b) => /^(Stop|Stopping…|Stop & send)$/.test(t(b))));
     const pill = t(document.querySelector("[data-run-pill]"));
     const seams = [...document.querySelectorAll("span.label")].map(t).filter((s) => /^stopped by you/i.test(s));
     const state = t(document.querySelector(".pop-in.rounded-full"));
-    return { pending, bubbles: bubbles.slice(-3), stop, pill, seams, state };
+    return { tray: trayHead, pending, bubbles: bubbles.slice(-3), stop, pill, seams, state };
   });
 
 async function shot(name) {
@@ -59,6 +65,7 @@ async function shot(name) {
 const send = async (text) => {
   await page.fill("#send-input", text);
   await page.keyboard.press("Enter");
+  await sleep(250); // the composer clears and the queue answers before the next one is typed
 };
 const clickLabel = async (label) => {
   await page.evaluate((l) => {
@@ -94,10 +101,26 @@ await shot("7-header-stopping");
 await sleep(3800);
 await shot("8-header-settled");
 
+// D — a list: three messages queued, one taken back, then the rest.
+await send("Then open a follow-up issue for the flaky runner.");
+await send("Tag it infra and assign it to me.");
+await send("And post the issue link in the PR thread when you are done.");
+await sleep(700);
+await shot("9-queue-list");
+await page.evaluate(() => [...document.querySelectorAll("[data-queue-tray] button[aria-label='Remove from the queue']")][1].click());
+await sleep(600);
+await shot("10-queue-list-one-removed");
+for (let i = 0; i < 2; i++) {
+  await page.evaluate(() => document.querySelector("[data-queue-tray] button[aria-label='Remove from the queue']").click());
+  await sleep(400);
+}
+await sleep(500);
+await shot("11-queue-empty");
+
 // C — plain Stop with nothing queued: the seam and the composer, no red pill.
 await clickLabel("Stop");
 await sleep(2200);
-await shot("9-plain-stop");
+await shot("12-plain-stop");
 
 const st = await fetch(`http://localhost:${port}/__state`).then((r) => r.json());
 console.log("server queue after:", st.queue.length, "| log tail:", JSON.stringify(st.log.split("\n").slice(-6).join(" ⏎ ")));

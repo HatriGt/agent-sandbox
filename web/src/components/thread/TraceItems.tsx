@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Copy, FileSearch, FileText, KeyRound, Loader2, Pencil, Play, Send, Shrink, Terminal, Undo2, X } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Copy, FileSearch, FileText, KeyRound, Loader2, Pencil, Play, Shrink, Terminal, Undo2 } from "lucide-react";
 import { fmtK } from "@/lib/context-health";
 import { parseYouMessage, splitQuotes } from "@/lib/you-message";
 import { quoteLabel } from "@/lib/quote-jump";
@@ -34,7 +34,6 @@ import { Swap } from "@/components/ui/swap";
 import { Input } from "@/components/ui/field";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { ArmButton } from "@/components/ui/arm-button";
 import { toast } from "sonner";
 import { Odometer } from "@/components/viz/motion";
 import { LiveLogView, useLiveLog } from "@/components/viz/LiveLog";
@@ -1375,25 +1374,9 @@ const YOU_FOLD_CHARS = 1400;
  *
  * `noEnter` drops the CSS entrance for callers that animate the row in themselves (Thread's `Rise`
  * around pending replies) or that replace an echo already on screen — otherwise the bubble would
- * rise twice.
- *
- * `pending` is the same bubble before the agent has it: the edge is dashed and the label row says
- * only what is happening to it (Queued, Stopping the turn…, Delivering…) with the live dot. While
- * it is merely queued, the two things you can still do sit UNDER the bubble as real pill buttons —
- * "Send now" (arms to "Stop the turn & send") and "Cancel" — so they read as controls, not as
- * words in a caption. One bubble, one spot, from Enter to the durable log line that replaces it:
- * nothing moves, nothing leaves, only the label changes and the buttons step aside.
+ * rise twice. A message queued behind a running turn is not drawn here at all: it waits in the
+ * composer's QueueTray until its log line lands, then enters as this bubble.
  */
-export interface YouPending {
-  /** What is happening to the message, as the label row reads it. */
-  status: string;
-  /** Deliver it now: stops the running turn, so it arms on the first click and fires on the second. */
-  onSendNow?: () => void;
-  /** Take it back out of the queue. */
-  onCancel?: () => void;
-  /** The stop or the delivery is under way: the actions step aside. */
-  busy?: boolean;
-}
 
 export function YouItem({
   text,
@@ -1402,7 +1385,6 @@ export function YouItem({
   onEdit,
   at,
   noEnter = false,
-  pending,
 }: {
   text: string;
   label?: string;
@@ -1411,9 +1393,7 @@ export function YouItem({
   onEdit?: (text: string) => void;
   at?: number;
   noEnter?: boolean;
-  pending?: YouPending | null;
 }) {
-  const still = useReducedMotion();
   // Attachments ride in the message as in-box paths: pictures as thumbnails, the rest (a PDF, a
   // document, a pasted passage) as file cards — never as text.
   const attachments = React.useMemo(() => [...new Set(text.match(ATTACHMENT_RE) ?? [])], [text]);
@@ -1445,30 +1425,14 @@ export function YouItem({
     }
   };
   const action = "text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-full";
-  const swap = still
-    ? { initial: false as const, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0 } }
-    : { initial: { opacity: 0, y: 4 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -4 }, transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const } };
-  const actionsOpen = !!pending && !pending.busy && !!(pending.onSendNow || pending.onCancel);
   return (
-    <div className={cn(!noEnter && "enter", "group/you flex flex-col items-end gap-1.5")} data-pending={pending ? "true" : undefined}>
+    <div className={cn(!noEnter && "enter", "group/you flex flex-col items-end gap-1.5")}>
       <span className="label text-muted-foreground flex items-center gap-1.5 pr-1">
         {/* The time sits BEFORE the label so the label keeps its right edge; hover-revealed like the actions. */}
-        {at !== undefined && !pending && (
+        {at !== undefined && (
           <TimeStamp at={at} className="normal-case tracking-normal opacity-0 transition-opacity duration-150 group-hover/you:opacity-100 [@media(hover:none)]:opacity-100" />
         )}
-        {pending ? (
-          <>
-            <span className="bg-live breathe size-1.5 shrink-0 rounded-full motion-reduce:animate-none" aria-hidden />
-            {/* The status morphs in place (queued → stopping → delivering); the row never re-enters. */}
-            <AnimatePresence mode="popLayout" initial={false}>
-              <motion.span key={pending.status} {...swap} role="status">
-                {pending.status}
-              </motion.span>
-            </AnimatePresence>
-          </>
-        ) : (
-          label
-        )}
+        {label}
       </span>
       {attachments.length > 0 && (
         <div className="flex max-w-[min(72%,60ch)] flex-wrap justify-end gap-1.5">
@@ -1549,8 +1513,7 @@ export function YouItem({
               </Tooltip>
             )}
           </div>
-          {/* Pending: the same bubble with a dashed edge — it fills in the moment the agent has it. */}
-          <div className={cn("you-bubble text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-body leading-relaxed", pending && "you-bubble-pending")}>
+          <div className="you-bubble text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-body leading-relaxed">
             <div className={cn("break-words whitespace-pre-wrap [overflow-wrap:anywhere]", long && !open && "line-clamp-[10]")}>
               {skillName && (
                 <span className={cn(YOU_TAG, "bg-live/12 text-live mr-1.5")}>
@@ -1613,39 +1576,6 @@ export function YouItem({
           </div>
         </div>
       )}
-      {/* Queued: what you can still do, as controls under the bubble. "Send now" arms (it stops the
-          running turn), "Cancel" takes the message back. The row folds away the moment the stop or
-          the delivery begins; the label above carries on. */}
-      <AnimatePresence initial={false}>
-        {actionsOpen && pending && (
-          <motion.div
-            key="queued-actions"
-            className="flex items-center gap-1.5 overflow-hidden"
-            initial={still ? { opacity: 0 } : { opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={still ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, height: 0, transition: { duration: 0.18, ease: [0.4, 0, 1, 1] } }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-          >
-            {pending.onSendNow && (
-              <ArmButton
-                size="xs"
-                variant="outline"
-                icon={<Send className="size-3.5" aria-hidden />}
-                label="Send now"
-                armedLabel="Stop the turn & send"
-                onConfirm={pending.onSendNow}
-                className="rounded-full"
-              />
-            )}
-            {pending.onCancel && (
-              <Button type="button" size="xs" variant="ghost" onClick={pending.onCancel} className="rounded-full">
-                <X className="size-3.5" aria-hidden />
-                Cancel
-              </Button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

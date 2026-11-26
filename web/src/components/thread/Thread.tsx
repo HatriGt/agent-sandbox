@@ -55,7 +55,7 @@ import type { TraceEvent } from "@/lib/trace";
 import { LiveRegistryContext, SayKeyContext } from "@/components/viz/live-blocks";
 import { VizFullscreenGate } from "@/components/viz/viz-fullscreen";
 import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
-import { type CompactView, type YouPending, AnsweredQuestionItem, CompactItem, Density, ExpandAll, LifecycleItem, MemoryItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
+import { type CompactView, AnsweredQuestionItem, CompactItem, Density, ExpandAll, LifecycleItem, MemoryItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
 import { deriveWatch } from "@/lib/watch";
 import { isOperatorStop } from "@/lib/format";
 import { ReasoningTrail, type TrailItem } from "./ReasoningTrail";
@@ -74,6 +74,7 @@ import { AttachedFromTask } from "./BootingThread";
 import { LaunchBubble, LaunchReceipt } from "./LaunchSteps";
 import { endLaunch } from "@/hooks/useLaunch";
 import { SendBar } from "./SendBar";
+import { QueueTray, type QueueTrayItem } from "./QueueTray";
 import { cn } from "@/lib/utils";
 
 /**
@@ -489,10 +490,15 @@ export function Thread({
   const pendingReplies = replyMatch.pending;
   // The log line that replaces an echo takes over the echo's place on screen: same bubble, same
   // spot. It must not rise in as if new while the echo folds away — that was a blink on every send.
+  type QueueMeta = { queueId: string; status: "queued" | "stopping" | "delivering" };
+  const [queueMeta, setQueueMeta] = React.useState<Record<string, QueueMeta>>({});
+  React.useEffect(() => setQueueMeta({}), [box.name]);
+  // A message that waited in the composer's queue tray had no bubble in the transcript, so its
+  // line enters as new — the swap is only for echoes that were already drawn in that spot.
   const swappedIn = React.useRef(new Set<number>());
   for (const s of replyMatch.settled) {
     const at = sentLines[s.line]?.at;
-    if (at !== undefined) swappedIn.current.add(at);
+    if (at !== undefined && !queueMeta[s.id]) swappedIn.current.add(at);
   }
   const echoesLanded = replyMatch.settled.length > 0;
   const settledIds = replyMatch.settled.map((s) => s.id).join(" ");
@@ -801,9 +807,6 @@ export function Thread({
   // changes: queued → stopping the turn → delivering. A queued echo the server no longer holds
   // (the in-turn gate or the delivery loop took it) is on its way, so it reads "delivering" until
   // its line lands — before this, the bubble vanished for the seconds between the two.
-  type QueueMeta = { queueId: string; status: "queued" | "stopping" | "delivering" };
-  const [queueMeta, setQueueMeta] = React.useState<Record<string, QueueMeta>>({});
-  React.useEffect(() => setQueueMeta({}), [box.name]);
   const setQueueStatus = React.useCallback((replyId: string, status: QueueMeta["status"]) => {
     setQueueMeta((prev) => (prev[replyId] ? { ...prev, [replyId]: { ...prev[replyId], status } } : prev));
   }, []);
@@ -931,6 +934,32 @@ export function Thread({
   // Stop with a message waiting is "stop and deliver it": the queued text was always going to be
   // delivered the moment the turn ended, so the one press does both and the button says so.
   const stopSends = queuedItems.length > 0;
+  // The queue tray at the top of the composer: this tab's queued echoes (with their live status) in
+  // send order, then anything the server holds that this tab did not send (another tab, a reload).
+  const trayItems: QueueTrayItem[] = [
+    ...pendingReplies
+      .filter((r) => queueMeta[r.id] && !isCompactCommand(r.text))
+      .map((r) => {
+        const status = statusOf(r.id) ?? "queued";
+        const queueId = queueMeta[r.id].queueId;
+        return {
+          id: r.id,
+          text: r.text,
+          status,
+          onSendNow: status === "queued" && runState === "running" && !sleeping ? () => sendQueuedNow(queueId) : undefined,
+          onCancel: status === "queued" ? () => cancelQueued(queueId) : undefined,
+        };
+      }),
+    ...queuedItems
+      .filter((q) => !claimedQueueIds.has(q.id) && !isCompactCommand(q.text))
+      .map((q) => ({
+        id: `q-${q.id}`,
+        text: q.text,
+        status: (stopping ? "stopping" : "queued") as QueueTrayItem["status"],
+        onSendNow: !stopping && runState === "running" && !sleeping ? () => sendQueuedNow(q.id) : undefined,
+        onCancel: !stopping ? () => cancelQueued(q.id) : undefined,
+      })),
+  ];
   const stopTurn = async () => {
     const first = queuedItems.find((q) => !q.id.startsWith("fleet-")) ?? queuedItems[0];
     if (first) {
@@ -1342,45 +1371,16 @@ export function Thread({
 
             {/* An echo whose log line just landed leaves at once (`custom`): the line is already drawn
                 in its place. One that is withdrawn (delivery failed) folds away as before. */}
+            {/* A message queued behind a running turn is not here: it waits in the composer's queue
+                tray and enters as a bubble when its log line lands. Only plain sends echo in place. */}
             <AnimatePresence initial={false} custom={{ still, instant: echoesLanded }}>
-              {pendingReplies.filter((r) => !(optimisticAsk && r.text === sentAnswer)).map((r) => {
-                const status = statusOf(r.id);
-                const queueId = queueMeta[r.id]?.queueId;
-                const pending: YouPending | null =
-                  status === "queued"
-                    ? {
-                        status: "Queued",
-                        onSendNow: runState === "running" && !sleeping && queueId ? () => sendQueuedNow(queueId) : undefined,
-                        onCancel: queueId ? () => cancelQueued(queueId) : undefined,
-                      }
-                    : status === "stopping"
-                      ? { status: "Stopping the turn…", busy: true }
-                      : status === "delivering"
-                        ? { status: "Delivering…", busy: true }
-                        : null;
-                return (
-                  <Rise key={r.id} still={still} className={isCompactCommand(r.text) ? "mt-3" : "mt-5"}>
-                    {isCompactCommand(r.text) ? (
-                      <CompactItem c={{ state: "pending", trigger: "manual", instructions: compactInstructions(r.text) || undefined }} live />
-                    ) : (
-                      <YouItem text={r.text} noEnter pending={pending} />
-                    )}
-                  </Rise>
-                );
-              })}
-              {/* Queued by another tab (or before a reload): the same bubble, from the server's list. */}
-              {queuedItems.filter((q) => !claimedQueueIds.has(q.id) && !isCompactCommand(q.text)).map((q) => (
-                <Rise key={`q-${q.id}`} still={still} className="mt-5">
-                  <YouItem
-                    text={q.text}
-                    noEnter
-                    pending={{
-                      status: stopping ? "Stopping the turn…" : "Queued",
-                      busy: stopping,
-                      onSendNow: runState === "running" && !sleeping ? () => sendQueuedNow(q.id) : undefined,
-                      onCancel: () => cancelQueued(q.id),
-                    }}
-                  />
+              {pendingReplies.filter((r) => !(optimisticAsk && r.text === sentAnswer) && (!queueMeta[r.id] || isCompactCommand(r.text))).map((r) => (
+                <Rise key={r.id} still={still} className={isCompactCommand(r.text) ? "mt-3" : "mt-5"}>
+                  {isCompactCommand(r.text) ? (
+                    <CompactItem c={{ state: "pending", trigger: "manual", instructions: compactInstructions(r.text) || undefined }} live />
+                  ) : (
+                    <YouItem text={r.text} noEnter />
+                  )}
                 </Rise>
               ))}
               {queuedItems.filter((q) => !claimedQueueIds.has(q.id) && isCompactCommand(q.text)).map((q) => (
@@ -1525,7 +1525,12 @@ export function Thread({
       </div>
 
       <SendBar
-        top={!sleeping ? <ChangesDock files={changes} loading={changesLoading} onOpen={openChange} onRefresh={refreshChanges} onReviewAll={openReview} activePath={openFile?.path} /> : undefined}
+        top={
+          <>
+            <QueueTray items={trayItems} />
+            {!sleeping && <ChangesDock files={changes} loading={changesLoading} onOpen={openChange} onRefresh={refreshChanges} onReviewAll={openReview} activePath={openFile?.path} />}
+          </>
+        }
         boxName={box.name}
         runState={runState}
         sleeping={sleeping}
@@ -1535,7 +1540,6 @@ export function Thread({
         onQueued={(replyId, queueId, text) => {
           if (replyId) markQueued(replyId, queueId, text);
           refreshQueue();
-          jumpToLatest.current();
         }}
         onFocusRequest={onFocusRequest}
         onJumpToQuote={jumpQuote}

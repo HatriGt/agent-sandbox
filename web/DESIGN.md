@@ -1922,18 +1922,19 @@ queue so it vanished until the resume wrote its log line, and the stop published
 (143) which the thread drew as a red "Exited with an error" run-end pill with stats and an Again
 button. Two toasts narrated it on top.
 
-- **One message, one bubble, one spot.** The echo is made the instant Enter is pressed, mid-turn too,
-  and it is the only bubble the message ever has (`YouItem pending`): the same `you-bubble` with a
-  dashed edge (`.you-bubble-pending`) and, where the "You" label sits, the live dot plus a status
-  that morphs in place: `Queued` → `Stopping the turn…` → `Delivering…` → the edge fills in when
-  the log line takes over (the existing `swappedIn` no-enter path). Nothing moves, nothing leaves,
-  no toast. The server queue is only drawn for messages this tab did not send (another tab, a reload).
-- **The caption is a state, the controls are buttons.** While the message is merely queued, two pill
-  buttons sit under the bubble, right-aligned: `Send now` (an `ArmButton`, outline, that flips to the
-  filled `Stop the turn & send` on the first click) and a ghost `Cancel` with an ×. The first cut
-  wrote them as lower-case links inside the caption after "the agent reads it at its next step";
-  nobody read them as actions, and the sentence repeated what the composer already says under the
-  input. The row folds away (height to 0) the moment the stop or the delivery begins.
+- **A queued message waits in the composer, not in the transcript.** The first cut echoed it as a
+  dashed bubble in the conversation; it sat above the agent's streaming reply and the "Working"
+  line and read as already delivered. Now `QueueTray` (top of the composer card, above the changes
+  dock, edge to edge like it) holds the queue: a `Queued · n` head with the live dot and one row per
+  message in the order the agent will read them — a mono number, the text (two lines, then
+  clipped), and `Send now` (an `ArmButton` that flips to the filled `Stop the turn & send`) with a
+  × that takes the message back. A row whose turn is being stopped or that is on its way shows
+  `Stopping the turn…` / `Delivering…` in place of its buttons. The tray folds away with the last
+  message; the message then enters the transcript as an ordinary You bubble when its log line
+  lands (not the `swappedIn` no-enter path: nothing stood in its place). The transcript keeps the
+  agent's stream and the "Working" line uninterrupted. No sentence about when the agent reads it:
+  the composer's own hint already says so. The server queue is drawn the same way for messages
+  this tab did not send (another tab, a reload). Plain sends on an idle box still echo in place.
 - **A stop is a seam, not a failure.** The controller writes `● stopped by you (to deliver your
   message)` (or plain `● stopped by you`) so the trace parses a lifecycle row, and always settles
   exit 253 (`OPERATOR_STOP_EXIT`). 253 is "stopped" in ink everywhere (`isOperatorStop`,
@@ -1941,8 +1942,9 @@ button. Two toasts narrated it on top.
   drawn; a stopped WATCH keeps its "Stopped watching …" pill), no failed toast.
 - **Stop with a message waiting is "Stop & send".** The header button says so and calls send-now
   on the first queued message; the queued text was always going to be delivered the moment the turn
-  ended, so one press does both. The bubble's own "send now" still arms before it fires.
+  ended, so one press does both. The tray row's own "Send now" still arms before it fires.
 - Proof: `node .shots/interrupt-flow.mjs [--dark]` over `test/ui-mock-server.mjs` (the mock now
-  mirrors the stop gap, exit 253, the seam and the delivery loop): nine states, light and dark,
+  mirrors the stop gap, exit 253, the seam and the delivery loop): thirteen states, including a
+  three-message queue and its removal, light and dark,
   `.shots/interrupt-<n>-<state>-<scheme>.png`, with a per-step readout of bubble label, state pill
   and seams.
