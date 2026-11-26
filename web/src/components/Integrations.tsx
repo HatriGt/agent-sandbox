@@ -3,13 +3,13 @@ import { SettingsPage, SettingsSection } from "@/components/ui/settings";
 import { Accounts } from "@/components/Accounts";
 import { McpServers } from "@/components/McpServers";
 import { Providers } from "@/components/Providers";
-import { RepoSetup } from "@/components/RepoSetup";
 import { InboxIntake } from "@/components/InboxIntake";
 import { SecretsSettings } from "@/components/SecretsSettings";
 
 /**
- * Integrations: what every sandbox is given — model providers, GitHub identities, MCP servers and
- * the secrets vault. One column, each section a plain list with its controls in its own header row. No tiles, no explanatory
+ * Integrations: what every sandbox is given from outside — model providers, GitHub identities, MCP
+ * servers, the secrets vault and the inbox. What a run learned about a repo (its setup) is memory,
+ * on the Memory page. One column, each section a plain list with its controls in its own header row. No tiles, no explanatory
  * paragraphs; the rows are the content and every row is editable where it stands. Data paints
  * from the cache immediately and refreshes behind.
  */
@@ -26,7 +26,6 @@ export function Integrations({ onBack }: { onBack: () => void }) {
       </SettingsSection>
       <McpServers />
       <SecretsSettings />
-      <RepoSetup />
       <InboxIntake />
     </SettingsPage>
   );

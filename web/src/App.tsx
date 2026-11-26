@@ -409,7 +409,7 @@ export default function App() {
       { id: "history", label: "History", hint: "g h", icon: <Clock />, group: "Go to", run: showHistory },
       { id: "activity", label: "Activity", hint: "g y", icon: <ActivityIcon />, group: "Go to", keywords: "timeline audit events what happened", run: showActivity },
       { id: "skills", label: "Skills", hint: "g s", icon: <Zap />, group: "Go to", run: showSkills },
-      { id: "memory", label: "Memory", icon: <Brain />, group: "Go to", keywords: "notes remembered learned across runs", run: showMemory },
+      { id: "memory", label: "Memory", icon: <Brain />, group: "Go to", keywords: "notes remembered learned across runs repo setup install test", run: showMemory },
       { id: "harnesses", label: "Harnesses", icon: <Layers />, group: "Go to", keywords: "drivers rules hooks egress budget compare bundle", run: showHarnesses },
       { id: "playbooks", label: "Playbooks", icon: <ListChecks />, group: "Go to", keywords: "workflows steps pipeline checks retry yaml autopilot", run: showPlaybooks },
       { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, group: "Go to", keywords: "accounts providers secrets github mcp", run: showIntegrations },

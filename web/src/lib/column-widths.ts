@@ -6,7 +6,8 @@ import * as React from "react";
  * flexible) is ever narrower than its own label + sort icon. Auto: once real rows paint, every
  * non-flex column is fitted to its widest content (clamped to 360px). Manual: dragging a header edge
  * sets that column in px and is remembered per table (localStorage `asb.cols.<key>`); double-click
- * the edge to hand it back to auto. The first drag on an unshaped table snapshots every column's
+ * the edge to hand it back to auto. The fit runs again once the page's webfonts are in: a mono
+ * column first painted in the fallback face measured a tenth short and truncated after the swap. The first drag on an unshaped table snapshots every column's
  * rendered width first, so a table that was laid out by the browser does not jump when it becomes
  * fixed-layout.
  */
@@ -74,9 +75,19 @@ export function useColumnWidths(storeKey: string | undefined, ready: boolean, si
   const [auto, setAuto] = React.useState<Record<string, number>>({});
   const fitted = React.useRef("");
   const [floor, setFloor] = React.useState<Record<string, number>>({});
+  // A webfont is fetched the first time text uses it, so `document.fonts.status` reads "loaded"
+  // before a mono column has ever asked for its face; count the loads that finish instead.
+  const [fonts, setFonts] = React.useState(0);
+  React.useEffect(() => {
+    const f = typeof document === "undefined" ? undefined : document.fonts;
+    if (!f) return;
+    const bump = () => setFonts((n) => n + 1);
+    f.addEventListener("loadingdone", bump);
+    return () => f.removeEventListener("loadingdone", bump);
+  }, []);
   React.useLayoutEffect(() => {
     const table = colgroup.current?.closest("table");
-    const key = `${ready}|${signature}`;
+    const key = `${ready}|${fonts}|${signature}`;
     if (!table || fitted.current === key) return;
     fitted.current = key;
     const fit: Record<string, number> = {};
@@ -110,7 +121,7 @@ export function useColumnWidths(storeKey: string | undefined, ready: boolean, si
     cols.forEach((c, i) => (c.style.width = savedCols[i]));
     setFloor(head);
     if (ready) setAuto(fit);
-  }, [ready, signature]);
+  }, [ready, fonts, signature]);
   const shaped = Object.keys(manual).length > 0;
   const persist = (m: Record<string, number>) => {
     setManual(m);

@@ -1,7 +1,7 @@
 import * as React from "react";
 import { resolvedReduced } from "@/lib/motion-pref";
 import { AnimatePresence, motion } from "motion/react";
-import { Brain, Check, ChevronRight, Download, FolderGit2, History, Link2, Pencil, Pin, PinOff, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, User, X } from "lucide-react";
+import { Brain, Check, ChevronRight, Download, FolderGit2, History, Link2, Pencil, Pin, PinOff, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, User, Wrench, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError, followedLine, type MemoryKind, type MemoryNote, type MemoryNotesResponse } from "@/lib/api";
 import { useCached } from "@/lib/cache";
@@ -24,10 +24,14 @@ import { areaId, sectionId } from "@/components/memory/MemoryGraph";
 import { Inline, NoteStatement, noteHeadline } from "@/components/memory/noteText";
 import { isOperatorKind, KIND_ICON, KIND_LABEL, KIND_PLURAL, KINDS, plural } from "@/components/memory/kinds";
 import { SharedBy } from "@/components/org/SharedBy";
+import { RepoSetupView, setupSearchText } from "@/components/memory/RepoSetupTable";
 
 /**
  * Memory: what earlier runs left for future ones (src/memory-store.ts), typed and scoped.
  *   · You — preferences and rules that follow the operator into every run.
+ *   · Repo setup — how each repo installs, builds and tests (src/setup-profile.ts): learned on the
+ *     first run, confirmed by the agent, one row per repo. Applied before the agent starts, so it
+ *     is not governed by the memory switch.
  *   · One knowledge base per repo — its notes filed by AREA (a part of the app: `billing/invoicing`),
  *     each area a page with the code it describes, the areas it links to, and its notes: domain
  *     knowledge first, then decisions, lessons, facts, playbooks. Notes without an area sit last.
@@ -61,6 +65,8 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
   const cached = useCached("memory-notes", (signal) => api.memoryNotes(signal));
   const data = cached.data ?? null;
   const notes = data?.notes ?? null;
+  const setups = useCached("repo-setups", (signal) => api.repoSetups(signal));
+  const setupData = setups.data ?? null;
   const [composing, setComposing] = React.useState(false);
   const [viewSel, setViewSel] = React.useState<string | null>(null);
   const revealRef = React.useRef<string | null>(null);
@@ -116,17 +122,21 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
     for (const n of liveAll) if (!isOperatorKind(n.kind) && n.status !== "pending") totals.set(n.repo ?? "", (totals.get(n.repo ?? "") ?? 0) + 1);
     const youTotal = liveAll.filter((n) => isOperatorKind(n.kind) && n.status !== "pending").length;
     const earlierTotal = all.filter((n) => n.until != null).length;
+    const setupAll = setupData?.profiles ?? [];
+    const setupRows = q ? setupAll.filter((r) => setupSearchText(r).includes(q)) : setupAll;
     const views = [
       { key: "you", label: "You", total: youTotal, count: you.length },
+      { key: "setup", label: "Repo setup", total: setupAll.length, count: setupRows.length },
       ...allRepos.map((repo) => ({ key: `repo:${repo}`, label: repo || "Any repo", repo, total: totals.get(repo) ?? 0, count: byRepo.get(repo)?.length ?? 0, groups: areaGroups(byRepo.get(repo) ?? []) })),
       ...(earlierTotal ? [{ key: "earlier", label: "Earlier", total: earlierTotal, count: earlier.length }] : []),
     ];
-    const defaultView = allRepos.find((r) => r !== "") != null ? `repo:${allRepos.find((r) => r !== "")}` : "you";
+    const defaultView = allRepos.find((r) => r !== "") != null ? `repo:${allRepos.find((r) => r !== "")}` : all.length ? "you" : "setup";
     return {
       liveAll,
       counts,
       pending,
       you,
+      setupRows,
       repos,
       earlier,
       replacedBy,
@@ -134,11 +144,12 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
       views,
       defaultView,
     };
-  }, [notes, kindFilter, query]);
+  }, [notes, setupData, kindFilter, query]);
   const view = viewSel && model.views.some((v) => v.key === viewSel) ? viewSel : model.defaultView;
   const viewOf = React.useCallback(
     (elId: string): string => {
       if (elId === "memory-you") return "you";
+      if (elId === "memory-setup") return "setup";
       for (const v of model.views) if ("repo" in v && (elId === sectionId(v.repo!) || elId.startsWith(`${sectionId(v.repo!)}-area-`))) return v.key;
       const id = elId.replace(/^mem-note-/, "");
       const n = notes?.find((x) => x.id === id);
@@ -291,7 +302,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
         />
       </Collapse>
 
-      <Swap state={cached.error && !notes ? "error" : !notes ? "loading" : total === 0 ? "empty" : "list"}>
+      <Swap state={cached.error && !notes ? "error" : !notes ? "loading" : total === 0 && !setupData?.profiles.length ? "empty" : "list"}>
       {cached.error && !notes ? (
         <EmptyState icon={Brain} tone="destructive" title="Could not load memory" line={cached.error} />
       ) : !notes ? (
@@ -300,7 +311,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
             <Bar key={i} className="h-10 rounded-lg" />
           ))}
         </ul>
-      ) : total === 0 ? (
+      ) : total === 0 && !setupData?.profiles.length ? (
         <div className="flex flex-col gap-4">
           <MemoryOverview notes={[]} pending={0} onReview={() => {}} onSelect={() => {}} onSection={() => {}} />
           {!!data?.episodes?.length && <MemoryUse notes={[]} episodes={data.episodes} receipts={data.receipts ?? []} onForgetEpisode={forgetEpisode} />}
@@ -354,7 +365,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
               <ul className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 md:mx-0 md:flex-col md:overflow-visible md:px-0 md:pb-0">
                 {model.views.map((v) => {
                   const active = v.key === view;
-                  const Icon = v.key === "you" ? User : v.key === "earlier" ? History : FolderGit2;
+                  const Icon = v.key === "you" ? User : v.key === "setup" ? Wrench : v.key === "earlier" ? History : FolderGit2;
                   const groups = "groups" in v ? v.groups.filter((g) => g.area) : [];
                   const stale = groups.reduce((a, g) => a + g.stale, 0);
                   return (
@@ -424,6 +435,10 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                     />
                   ))}
                 </SettingsSection>
+              )}
+
+              {view === "setup" && (
+                <RepoSetupView data={setupData} error={setups.error ?? null} filtering={!!query.trim()} rows={model.setupRows} onChange={(r) => setups.setData(r)} />
               )}
 
               {model.views.map((v) => {

@@ -110,7 +110,12 @@ export function SettingsSection({
         {status}
       </div>
       {actions && <div className={cn("ml-auto flex items-center gap-2", !stacked && "@5xl:col-start-2 @5xl:row-start-1 @5xl:ml-0 @5xl:justify-self-end")}>{actions}</div>}
-      {purpose && <p className={cn("text-muted-foreground -mt-1 max-w-[64ch] basis-full text-meta", !stacked && "@5xl:col-start-1 @5xl:row-start-2 @5xl:mt-0")}>{purpose}</p>}
+      {/* `basis-full` alone let a wide section pull the purpose up beside the title (a flex basis is clamped by max-width before the line breaks): the cap sits on an inner span. */}
+      {purpose && (
+        <p className={cn("text-muted-foreground -mt-1 w-full basis-full text-meta", !stacked && "@5xl:col-start-1 @5xl:row-start-2 @5xl:mt-0")}>
+          <span className="block max-w-[64ch]">{purpose}</span>
+        </p>
+      )}
       <div className={cn("mt-2 w-full min-w-0 basis-full", !stacked && "@5xl:col-start-2 @5xl:mt-0", !stacked && (actions ? "@5xl:row-span-2 @5xl:row-start-2" : "@5xl:row-span-3 @5xl:row-start-1"))}>{children}</div>
     </section>
   );

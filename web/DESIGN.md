@@ -2015,3 +2015,37 @@ for one table, single-line rows, many columns and filters. That is what shipped.
   the list mocked (waiting on you, coming up, done, failed-old-form; watch, cron, paused, chat-made
   rule): page, hovered row, the One-time chip, a search, the sheet and a phone, with the filter
   bar, header row and one line per row printed.
+
+## Round: Repo setup lives in Memory (2026-11-26)
+
+"Repo setup" (how each repo installs, builds and tests, learned on its first run, confirmed by the
+agent, editable, resettable to re-detect) sat at the bottom of Integrations as a stack of
+description-list cards. Integrations is what a sandbox is *given from outside* (providers, GitHub
+accounts, MCP servers, secrets, the inbox); a profile is what a run *learned*, which is the Memory
+page's whole subject, and that page already has one rail entry per repo. The user asked for the
+move and for a grid; the one real objection (the profile is applied by the controller before the
+agent starts, so the memory switch does not govern it) is answered by the section's purpose line.
+
+- **Rail entry "Repo setup"** between You and the repos, a bare wrench glyph, the count of repos
+  (`2/3` while the page search narrows it). Shown even with zero repos; the default view when
+  there are no notes at all.
+- **One grid, single-line rows:** Repo (mono, bright, fit ≤ 280) · Install · Build (the flexible
+  column, `minFlex` 128) · Test · Lint · Runtimes · Env (first name `+n`) · Source (`detected` /
+  `agent confirmed` / `edited by you`, its title carrying the long form, the detection notes and
+  the age) · actions (Edit, Reset as an ArmButton "Forget and re-detect?"). Every cell truncates
+  with the full text in its title. Install and Runtimes fold below `md`, Build, Lint and Env below
+  `lg`, Test and Source below `sm`. The grid fits beside the rail at 1760 px without a sideways
+  scroll.
+- **The editor is a sheet** (row click or the pencil): the repo as title, the origin and the
+  detection notes as its description, the same seven fields, the "names only" line now pointing at
+  Integrations › Secrets, where the values are granted by repo.
+- **Not dimmed by the memory switch:** the purpose line says the profile is applied "memory on or
+  off". The page's Export / Import stay notes-only.
+- **Two shared fixes surfaced here.** A stacked `SettingsSection` with a purpose pulled the
+  purpose up beside the title on a wide page (a flex basis is clamped by `max-width` before the
+  line breaks); the 64ch cap now sits on an inner span. And `useColumnWidths` fitted mono columns
+  a tenth short: the fit ran at first paint in the fallback face, before the mono webfont (fetched
+  on first use) arrived, and never again. It now re-fits on every `document.fonts` `loadingdone`.
+- Proof: `node .shots/memory-setup.mjs [--dark]` over `test/ui-mock-server.mjs` (three ATOM repos,
+  one per origin; page, hovered row, a search, the sheet with a save, a phone), printing the rail,
+  the header row, each row and the column widths.
