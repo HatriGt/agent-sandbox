@@ -568,6 +568,12 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS trigger_deferred_trigger ON trigger_deferred(trigger_id, id);
   `,
+  `
+  -- What a run does and what it gives, a line each, for the Autopilot table: filled by the agent's
+  -- schedule/automate marker (title: / does: / gives:, src/triggers.ts parseMarkerBody) or the editor.
+  ALTER TABLE triggers ADD COLUMN summary TEXT;
+  ALTER TABLE triggers ADD COLUMN outcome TEXT;
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

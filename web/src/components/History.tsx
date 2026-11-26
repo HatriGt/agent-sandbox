@@ -17,6 +17,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { DataTable, MetaLine, StatusDot, type Column } from "@/components/ui/data-table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FilterChip } from "@/components/ui/filter-chip";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { DigestCard } from "@/components/thread/DigestCard";
 import { OutcomeCard, fmtTokens, fmtUsd, outcomeFacts } from "@/components/thread/OutcomeCard";
 import { ReviewView } from "@/components/thread/review/ReviewView";
@@ -108,21 +109,6 @@ function LedgerTotalsStrip({ t }: { t: LedgerTotals | null }) {
         </div>
       ))}
     </div>
-  );
-}
-
-function FilterSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: Array<{ value: string; label: string }> }) {
-  return (
-    <label className={cn("flex h-8 items-center gap-1.5 rounded-full border px-3 text-meta", value ? "border-foreground/30 text-foreground" : "bg-card text-muted-foreground")}>
-      <span className="text-faint whitespace-nowrap">{label}</span>
-      <select aria-label={label} className="min-w-0 max-w-36 cursor-pointer truncate bg-transparent font-medium outline-none" value={value} onChange={(e) => onChange(e.target.value)}>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }
 

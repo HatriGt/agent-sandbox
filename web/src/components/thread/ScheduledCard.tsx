@@ -102,8 +102,10 @@ function Card({ it, now, still, busy, actions, onDiscuss }: { it: ThreadSchedule
         <p className="text-foreground text-body leading-[1.5] font-medium text-balance" title={it.task}>
           {it.name}
         </p>
+        {it.summary && <p className="text-muted-foreground mt-0.5 text-meta leading-relaxed">{it.summary}</p>}
         <p className={cn("mt-1 text-meta leading-relaxed tabular-nums", it.status === "failed" ? "text-destructive" : "text-muted-foreground")}>
           {when(it, now)} · {CATEGORY[it.category].label}
+          {it.outcome ? <span className="text-faint"> · gives {it.outcome}</span> : null}
         </p>
         {pending && <p className="text-muted-foreground mt-1 text-meta leading-relaxed">{it.why ?? "The agent asked you to confirm it first"}. It stays paused until you approve.</p>}
       </div>

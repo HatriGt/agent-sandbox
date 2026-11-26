@@ -13,6 +13,7 @@ import {
   nextFire,
   normalizeTrigger,
   parseCron,
+  parseAutomate,
   parseAutomateRejects,
   parseWhen,
   renderTemplate,
@@ -434,6 +435,25 @@ test("parseWhen reads the ways an agent phrases a delay", () => {
   assert.equal(at("tomorrow at 2:30pm"), Date.UTC(2026, 9, 4, 14, 30));
   assert.equal(parseWhen("someday", now), null);
   assert.equal(parseWhen("in 0d", now), null);
+});
+
+test("parseAutomate reads the labelled fields (title, does, repo, gives) in any order and keeps the task", () => {
+  const log = [
+    "<!-- schedule: in 2h | title: Force-merge 3 production PRs. | does: Merges #2910, #2911 and #2912 once checks are green | repo: acme/api.git | gives: Three merged PRs | Merge PRs #2910, #2911, #2912 in acme/api with `gh pr merge --admin` | then report back. -->",
+    "<!-- automate: 0 9 * * 1-5 | Summarize CI. | repo: not a repo | title: -->",
+  ].join("\n");
+  const r = parseAutomate(log, 1_700_000_000_000);
+  assert.equal(r.length, 2);
+  assert.equal(r[0].title, "Force-merge 3 production PRs");
+  assert.equal(r[0].summary, "Merges #2910, #2911 and #2912 once checks are green");
+  assert.equal(r[0].repo, "acme/api");
+  assert.equal(r[0].outcome, "Three merged PRs");
+  // Unlabelled segments are the task, and a pipe inside it survives.
+  assert.equal(r[0].task, "Merge PRs #2910, #2911, #2912 in acme/api with `gh pr merge --admin` | then report back.");
+  // The old form is unchanged; a bad repo and an empty title are dropped, not errors.
+  assert.equal(r[1].task, "Summarize CI.");
+  assert.equal(r[1].title, undefined);
+  assert.equal(r[1].repo, undefined);
 });
 
 test("parseAutomateRejects names the markers that could not be scheduled", () => {

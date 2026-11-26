@@ -26,6 +26,8 @@ export interface ScheduleTrigger {
   kind: TriggerKind;
   spec: TriggerSpec;
   taskTemplate: string;
+  summary?: string;
+  outcome?: string;
   enabled: boolean;
   proposed: boolean;
   nextFire: number | null;
@@ -55,6 +57,10 @@ export interface ScheduleItem {
   repos?: string[];
   enabled: boolean;
   task: string;
+  /** One line on what the run does, from the agent's `does:` field. */
+  summary?: string;
+  /** What the user gets ("Three merged PRs"), from the agent's `gives:` field. */
+  outcome?: string;
   /** Why a pending one waits for the owner. */
   why?: string;
 }
@@ -106,6 +112,8 @@ export function threadSchedule(box: string, startedBy: StartedBy | undefined, tr
       ...(t.repos?.length ? { repos: t.repos } : {}),
       enabled: t.enabled,
       task: t.taskTemplate.slice(0, 2000),
+      ...(t.summary ? { summary: t.summary } : {}),
+      ...(t.outcome ? { outcome: t.outcome } : {}),
       ...(relation === "proposed" ? { why: automateNeedsApproval(t.spec.cron ?? "", t.taskTemplate) ?? "The agent asked you to confirm it first" } : {}),
     });
   for (const t of triggers) {

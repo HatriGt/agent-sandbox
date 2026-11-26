@@ -454,10 +454,50 @@ export interface AutomateProposal {
   when: string;
   /** The agent wrote `schedule?:` / `automate?:` — it wants the owner's OK first. */
   asked?: boolean;
+  /** `title:` — a short imperative name with no time in it ("Force-merge 3 production PRs"). */
+  title?: string;
+  /** `does:` — one line on what the run will do, for the Autopilot table. */
+  summary?: string;
+  /** `repo:` — the owner/name the task works in. */
+  repo?: string;
+  /** `gives:` — what the user gets out of it ("Three merged PRs", "A reply in this chat"). */
+  outcome?: string;
 }
 
-// One marker per line; the task may not contain another marker's close, so an empty task can
-// never swallow the next proposal.
+/** The labelled fields a marker may carry after <when>; anything unlabelled is the task. */
+const FIELD_RE = /^(title|does|summary|repo|gives|outcome|task):\s*/i;
+const FIELD_MAX: Record<string, number> = { title: 80, summary: 200, repo: 120, outcome: 80 };
+const FIELD_KEY: Record<string, "title" | "summary" | "repo" | "outcome" | "task"> = { title: "title", does: "summary", summary: "summary", repo: "repo", gives: "outcome", outcome: "outcome", task: "task" };
+
+/**
+ * The marker body after <when>: `title: … | does: … | repo: … | gives: … | <task>` in any order.
+ * A segment with no known label (or `task:`) is the task; several of them re-join with " | " so a
+ * pipe inside the task survives. The old form — just the task — parses unchanged.
+ */
+export function parseMarkerBody(body: string): { task: string } & Pick<AutomateProposal, "title" | "summary" | "repo" | "outcome"> {
+  const out: { task: string } & Pick<AutomateProposal, "title" | "summary" | "repo" | "outcome"> = { task: "" };
+  const taskParts: string[] = [];
+  for (const seg of body.split("|")) {
+    const m = FIELD_RE.exec(seg.trim());
+    const key = m ? FIELD_KEY[m[1].toLowerCase()] : "task";
+    const text = (m ? seg.trim().slice(m[0].length) : seg).replace(/\s+/g, " ").trim();
+    if (key === "task") {
+      if (text) taskParts.push(text);
+      continue;
+    }
+    if (!text || out[key]) continue;
+    const v = text.slice(0, FIELD_MAX[key]);
+    if (key === "repo") {
+      const r = v.replace(/\.git$/i, "");
+      if (REPO_RE.test(r)) out.repo = r;
+    } else out[key] = key === "title" ? v.replace(/[.!]+$/, "") : v;
+  }
+  out.task = taskParts.join(" | ").slice(0, 500);
+  return out;
+}
+
+// One marker per line; the body may not contain another marker's close, so an empty task can
+// never swallow the next proposal. parseMarkerBody splits the body on "|".
 const AUTOMATE_RE = /<!--\s*(automate|schedule)(\?)?:\s*([^|\n]+?)\s*\|\s*((?:(?!-->)[^\n])*?)\s*-->/g;
 const MAX_PROPOSALS = 3;
 /** A one-time run is at most a year out; a time a few minutes past (the agent was slow) runs now. */
@@ -538,7 +578,7 @@ export function parseAutomate(log: string, now = Date.now()): AutomateProposal[]
   for (const m of log.matchAll(AUTOMATE_RE)) {
     const scope = m[1] === "schedule" ? "scheduled" : "automation";
     const asked = m[2] === "?";
-    const task = m[4].replace(/\s+/g, " ").trim().slice(0, 500);
+    const { task, ...fields } = parseMarkerBody(m[4]);
     if (!task) continue;
     const when = parseWhen(m[3], now);
     if (!when || (scope === "automation" && !("cron" in when))) continue;
@@ -546,7 +586,7 @@ export function parseAutomate(log: string, now = Date.now()): AutomateProposal[]
     const key = `${scope}\n${m[3].trim()}\n${task.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ scope, ...when, task, when: m[3].trim(), ...(asked ? { asked } : {}) });
+    out.push({ scope, ...when, task, when: m[3].trim(), ...(asked ? { asked } : {}), ...fields });
     if (out.length >= MAX_PROPOSALS) break;
   }
   return out;
@@ -564,7 +604,7 @@ export function parseAutomateRejects(log: string, now = Date.now()): AutomateRej
   const out: AutomateReject[] = [];
   for (const m of log.matchAll(AUTOMATE_RE)) {
     const scope = m[1] === "schedule" ? "scheduled" : "automation";
-    const task = m[4].replace(/\s+/g, " ").trim().slice(0, 500);
+    const { task } = parseMarkerBody(m[4]);
     const when = m[3].trim();
     if (!task) continue;
     const parsed = parseWhen(when, now);
@@ -676,6 +716,10 @@ export interface TriggerInput {
   /** owner/name repos: GitHub/watch automations listen to each; runs without an event subject clone them all. */
   repos?: string[];
   taskTemplate: string;
+  /** One line on what a run does, for the Autopilot table (the agent's `does:` field or the editor's). */
+  summary?: string;
+  /** What the user gets out of a run ("A PR", "Three merged PRs"); shown until the real result replaces it. */
+  outcome?: string;
   enabled: boolean;
   prComment: boolean;
   /** Quiet: a run that ends with QUIET_MARK (nothing needs the operator) sends no notification. */
@@ -713,6 +757,9 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
   const taskTemplate = typeof b.taskTemplate === "string" ? b.taskTemplate.trim() : "";
   if (!taskTemplate) return { ok: false, error: "task template is required" };
   if (taskTemplate.length > MAX_TASK_CHARS) return { ok: false, error: "task template is too long" };
+  const line = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
+  const summary = line(b.summary, 200);
+  const outcome = line(b.outcome, 80);
   // `repos` is the list; a lone `repo` string is still read from older mobile builds.
   const rawRepos: unknown[] = Array.isArray(b.repos) ? b.repos : typeof b.repo === "string" ? [b.repo] : [];
   const repos: string[] = [];
@@ -803,6 +850,8 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
       spec,
       ...(repos.length ? { repos } : {}),
       taskTemplate,
+      ...(summary ? { summary } : {}),
+      ...(outcome ? { outcome } : {}),
       enabled: b.enabled !== false,
       // Receipt comment: ON by default for GitHub triggers (plan §5); opt-in for the rest.
       prComment: typeof b.prComment === "boolean" ? b.prComment : kind === "github",

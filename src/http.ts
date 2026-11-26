@@ -1099,11 +1099,12 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
     if (!firstSighting(db, box, p.scope === "automation" ? `${p.cron}|${p.task}` : `${p.scope}|${p.when}|${p.task}`)) continue;
     // The same repeating proposal from another run (a re-run, a chain) is one row, not two.
     if (p.cron && existing.some((t) => t.sourceBox && t.spec.cron === p.cron && t.taskTemplate === p.task)) continue;
-    const name = p.task.split(/[.!?](?=\s|$)/)[0].trim().slice(0, 80) || (p.scope === "automation" ? "Automation" : "Follow-up");
+    // The agent's own title when it gave one (no time in it); else the task's first sentence.
+    const name = p.title || p.task.split(/[.!?](?=\s|$)/)[0].trim().slice(0, 80) || (p.scope === "automation" ? "Automation" : "Follow-up");
     // Routine work starts on its own; critical work (or work the agent flagged) waits for the owner.
     const ask = automateNeedsApproval(p.cron ?? "", p.task, p.asked);
     // A repo the task names ("in repo acme/api", a github.com URL) is cloned when it fires.
-    const repo = parent?.repos?.[0] ?? p.task.match(/(?:\brepo(?:sitory)?\s+|github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?(?=[\s,;:)]|\.?$|\.\s)/i)?.[1];
+    const repo = p.repo ?? parent?.repos?.[0] ?? p.task.match(/(?:\brepo(?:sitory)?\s+|github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?(?=[\s,;:)]|\.?$|\.\s)/i)?.[1];
     const { row } = createTrigger(
       db,
       secretBox,
@@ -1114,6 +1115,8 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
         spec: p.at ? { at: p.at } : { cron: p.cron, timezone: "UTC" },
         ...(repo ? { repos: [repo] } : {}),
         taskTemplate: p.task,
+        ...(p.summary ? { summary: p.summary } : {}),
+        ...(p.outcome ? { outcome: p.outcome } : {}),
         enabled: !ask,
         prComment: false,
         // Something asked for once ("merge the PR at 2pm") always reports back; a repeating check stays quiet when nothing is wrong.

@@ -1957,3 +1957,61 @@ button. Two toasts narrated it on top.
   including a three-message queue, one row edited in place, and its removal, light and dark,
   `.shots/interrupt-<n>-<state>-<scheme>.png`, with a per-step readout of bubble label, state pill
   and seams.
+
+## Round: Autopilot, one grid with filters (2026-11-26)
+
+The Automations tab was one table (Name · Type · When · Last run) with "All / Standing rules /
+From chat" chips. A schedule made in a chat for one moment ("force-merge at 12:45 Dubai time")
+sat beside a repo-activity rule as "Schedule · once, 2026-11-24 08:45 UTC", its name the task's
+first sentence with the time in it, and it stayed there forever, reading as a rule still in force.
+A first pass split the page into two stacked tables with two-line cells; the user asked instead
+for one table, single-line rows, many columns and filters. That is what shipped.
+
+- **One table, single-line rows, ten columns.** Name (kind glyph in muted ink, no tile; the name
+  in bright ink) · Type (One-time / Schedule / Repo activity / Webhook / GitHub / After another) ·
+  When (a one-time task's moment in the browser's clock, `Thu 26 Nov, 12:45`; a rule's trigger in
+  words) · Status (dot + word: `waiting on you` in attention ink, `running now` live, `coming up` /
+  `due now`, `done 25m ago` / `failed 9d ago` / `never fired` / `could not start`, `paused`,
+  `cancelled`) · Does (the agent's one line, the flexible column) · Repo (mono, `+n` past the
+  first) · Result (the last run's headline; before any run `gives <what the agent said>` for a
+  one-time task, the quiet counter or last delivery line for a rule) · Next (mono countdown, `on
+  event`, `—`) · Source (the chat it was asked in, opens it; or the playbook) · actions. Every cell
+  truncates to one line with the full text in its title; nothing stacks.
+- **Filters are the toolbar.** The table's own search (`/`), then a Type radiogroup of FilterChips
+  (All / One-time / Rules, counts under the other filters), a Status FilterSelect whose options
+  carry counts (`coming up · 1`) and hide at zero, and a Repo FilterSelect shown from two repos.
+  A miss shows one empty row with Clear filters. `FilterSelect` moved to `ui/filter-select.tsx`
+  (History used a private copy).
+- **Default order, replaced by any header sort:** waiting on you → running → coming up (soonest)
+  → rules by next fire (event rules after) → finished (newest) → paused and cancelled, by name.
+  `stateOf` (Automations.tsx) is that one word; the Status filter and the row tint use it too:
+  waiting rows take the attention tint, finished and paused rows sit at 60 % until hovered.
+- **Widths.** Fitted caps: Name 208, Type 112, When 152, Status 144, Repo 128, Result 144, Next
+  96, Source 104; Does is the flexible column with `minFlex` 160 (a new Column option: the
+  flexible column's least width before the card scrolls sideways, default 240). View is icon-only
+  with a title; Dismiss hides below `md` (the sheet's Delete still dismisses); Cancel / Remove are
+  ArmButtons with icons and `md`-only words. The ten columns fit 1399 px without a scroll; the PR
+  follow-up panel sits beside the table only from `@min-[120rem]`.
+- **Phone.** Status and Next fold away below `sm`, Type and When below `md`, Does, Repo, Result
+  and Source below `lg`; the state's dot rides before the name on a phone.
+- **No icon tiles.** The kind glyph is a bare icon in the Name cell; the Autopilot tab icons lost
+  their filled square (active = foreground ink, inactive = muted). Memory already recorded that
+  icon chips read as AI slop.
+- **The Up next card is gone** (a seven-day strip with a glyph per next run and a list of three):
+  the grid's Next column and the "Next:" line under the title say the same thing, and the user
+  found the strip meaningless. `autopilot/UpNext.tsx` stays for `fmtCountdown` / `upcoming`.
+- **The agent fills the columns.** The schedule/automate marker takes labelled segments in any
+  order before the task: `title:` (no time in it), `does:` (one line), `repo:` (owner/name),
+  `gives:` (what the user gets). `parseMarkerBody` (src/triggers.ts) reads them; `summary` and
+  `outcome` are new trigger columns the editor also edits ("What it does" and "Gives" under Name).
+  Rows from before fall back to the task past its first sentence when that sentence is the name
+  (`blurb`).
+- **The editor keeps a moment a moment.** A one-time task used to open on the cron picker (an
+  untouched one saved fine, a touched one became a rule). It now shows *Runs once at* with a
+  `datetime-local` input in the browser's clock and the full stamp as the hint.
+- **The live line and the tab count** say `3 rules on · 1 paused` and `1 one-time task coming up`
+  separately; a finished one-time task is not "on" anywhere.
+- Proof: `node .shots/autopilot-page.mjs [--dark] [--w=2000]` over `test/ui-mock-server.mjs` with
+  the list mocked (waiting on you, coming up, done, failed-old-form; watch, cron, paused, chat-made
+  rule): page, hovered row, the One-time chip, a search, the sheet and a phone, with the filter
+  bar, header row and one line per row printed.

@@ -106,7 +106,7 @@ export function UpNext({ rows, glyph, label, onOpen }: { rows: readonly Automati
           return (
             <span
               key={a.id}
-              className="pop-in bg-background text-live absolute grid size-6 -translate-x-1/2 place-items-center rounded-md border shadow-xs"
+              className="pop-in bg-card text-live absolute grid size-6 -translate-x-1/2 place-items-center"
               style={{ left: `max(0.75rem, min(calc(100% - 0.75rem), ${x}%))`, top: `${lane * 1.25}rem` }}
               title={`${label(a.name)} — ${whenLabel(a.nextFire!, now)}`}
             >

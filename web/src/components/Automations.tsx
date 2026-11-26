@@ -1,5 +1,5 @@
 ﻿import * as React from "react";
-import { ArrowUpRight, CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, History as HistoryIcon, Link2, ListChecks, PanelRight, Play, Plus, Radar, RotateCw, ShieldCheck, Trash2, Webhook, Workflow, X } from "lucide-react";
+import { AlarmClock, ArrowUpRight, CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, History as HistoryIcon, Link2, ListChecks, PanelRight, Play, Plus, Radar, RotateCw, ShieldCheck, Trash2, Webhook, Workflow, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
@@ -9,10 +9,11 @@ import { useCached, writeCache } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
 import { Switch } from "@/components/ui/switch";
+import { FilterChip } from "@/components/ui/filter-chip";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { Segmented } from "@/components/ui/segmented";
 import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/ui/empty-state";
-import { FilterChip } from "@/components/ui/filter-chip";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Swap } from "@/components/ui/swap";
 import { Collapse } from "@/components/ui/collapse";
@@ -22,7 +23,8 @@ import { PrFollowupsPanel } from "@/components/PrFollowupsPanel";
 import { SchedulePicker, describeCron } from "@/components/SchedulePicker";
 import { RepoPicker } from "@/components/RepoPicker";
 import { DataTable, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
-import { UpNext } from "@/components/autopilot/UpNext";
+import { fmtCountdown } from "@/components/autopilot/UpNext";
+import { useNow } from "@/hooks/useNow";
 import { RecipeGallery, type Recipe } from "@/components/autopilot/Recipes";
 
 /**
@@ -238,15 +240,6 @@ const RECIPES: Array<Recipe & { draft: () => AutomationDraft }> = [
   },
 ];
 
-/** "in 3h" / "in 12 min" — epoch ms in the future. */
-function fmtIn(ms: number, now = Date.now()): string {
-  const s = Math.max(0, Math.round((ms - now) / 1000));
-  if (s < 60) return "in under a minute";
-  if (s < 3600) return `in ${Math.round(s / 60)} min`;
-  if (s < 86_400) return `in ${Math.round(s / 3600)}h`;
-  return `in ${Math.round(s / 86_400)}d`;
-}
-
 let automationSeed: Partial<AutomationDraft> | null = null;
 /** Open the new-automation sheet pre-filled the next time the Automations tab mounts. */
 export function seedAutomation(d: Partial<AutomationDraft>): void {
@@ -264,21 +257,20 @@ export function editAutomation(id: string): void {
   editSeed = id;
 }
 
-/** One list for everything that runs on its own: standing rules and what a chat asked for later. */
-type Source = "all" | "rules" | "chat";
-const SOURCES: { value: Source; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "rules", label: "Standing rules" },
-  { value: "chat", label: "From chat" },
-];
-const fromChat = (a: Automation) => a.scope === "scheduled";
+/**
+ * Two kinds of thing run on their own, and the page keeps them apart: a ONE-TIME TASK (a schedule
+ * with an instant — "merge it at 2pm", nearly always asked for in a chat) has a lifecycle and a
+ * result; a STANDING RULE (a cron, a webhook, repo activity, a chain) keeps firing and has a switch.
+ */
+export const isOnce = (a: Pick<Automation, "kind" | "spec">) => a.kind === "schedule" && !!a.spec.at;
+/** What a search matches: the name, the agent's one-liners, the trigger in words and the repos. */
+const searchText = (a: Automation) => [a.name, a.summary ?? "", a.outcome ?? "", a.when, ...(a.repos ?? [])].join(" ").toLowerCase();
 
 /** The Automations tab of Autopilot (AutopilotPage owns the page header and tabs). */
 export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpenBox: (box: string) => void; onOpenPlaybooks: () => void; onOpenRuns: (id: string) => void }) {
   const [rows, setRows] = React.useState<Automation[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [attempt, setAttempt] = React.useState(0);
-  const [source, setSource] = React.useState<Source>("all");
   // `key` pins the editor instance across create → edit, so the shown-once webhook URL survives the save.
   const [editing, setEditing] = React.useState<{ id: string | null; draft: AutomationDraft; key?: string } | null>(null);
   // Keep the last draft while the sheet slides shut so its content doesn't vanish mid-exit.
@@ -317,11 +309,11 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
     }
   };
 
-  const dismiss = async (a: Automation) => {
+  const dismiss = async (a: Automation, word = "Proposal dismissed") => {
     try {
       await api.deleteTrigger(a.id);
       setRows((prev) => (prev ?? []).filter((x) => x.id !== a.id));
-      toast.success("Proposal dismissed");
+      toast.success(word);
     } catch (e) {
       toast.error("Could not dismiss", { description: e instanceof Error ? e.message : String(e) });
     }
@@ -332,11 +324,6 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
     if (r) setEditing({ id: null, draft: r.draft() });
   };
   const names = Object.fromEntries((rows ?? []).map((r) => [r.id, r.name]));
-  const counts = { all: rows?.length ?? 0, rules: rows?.filter((a) => !fromChat(a)).length ?? 0, chat: rows?.filter(fromChat).length ?? 0 };
-  // Waiting on you first, then live ones, then paused.
-  const listed = (rows ?? [])
-    .filter((a) => (source === "all" ? true : source === "chat" ? fromChat(a) : !fromChat(a)))
-    .sort((a, b) => Number(isPending(b)) - Number(isPending(a)) || Number(b.enabled) - Number(a.enabled));
 
   // "Automate this playbook" on the Playbooks tab lands here with a draft.
   React.useEffect(() => {
@@ -354,8 +341,9 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
   return (
     <div className="min-w-0">
       {/* On a wide page the list and the PR rules sit side by side: the rules are settings you
-          glance at, not something to scroll past the whole list to reach. */}
-      <div className="@7xl:grid @7xl:grid-cols-[minmax(0,1fr)_24rem] @7xl:items-start @7xl:gap-x-10">
+          glance at, not something to scroll past the whole list to reach. From 120rem, so the
+          ten-column table keeps its full width beside the panel. */}
+      <div className="@min-[120rem]:grid @min-[120rem]:grid-cols-[minmax(0,1fr)_24rem] @min-[120rem]:items-start @min-[120rem]:gap-x-10">
        <div className="min-w-0">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <p className="text-muted-foreground min-w-0 flex-[1_1_20rem] text-meta">
@@ -372,16 +360,8 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
             )}
           </AnimatePresence>
         </div>
-        {rows && rows.length > 0 && <UpNext rows={rows} glyph={GLYPH} label={automationLabel} onOpen={(a) => setEditing({ id: a.id, draft: toDraft(a) })} />}
-        {rows && rows.length > 0 && (
-          <div role="radiogroup" aria-label="Source" className="mb-3 flex flex-wrap gap-1.5">
-            {SOURCES.map((s) => (
-              <FilterChip key={s.value} group="automation-source" active={source === s.value} onClick={() => setSource(s.value)} label={s.label} count={counts[s.value]} />
-            ))}
-          </div>
-        )}
 
-        <Swap state={error ? "error" : rows === null ? "loading" : listed.length ? "list" : "empty"}>
+        <Swap state={error ? "error" : rows === null ? "loading" : rows.length ? "list" : "empty"}>
           {error ? (
             <EmptyState
               icon={Workflow}
@@ -405,11 +385,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
                 </div>
               ))}
             </div>
-          ) : !listed.length && source === "chat" ? (
-            <EmptyState icon={CalendarClock} title="Nothing scheduled from a chat" line="Ask the agent to run something later or on a schedule and it shows up here." />
-          ) : !listed.length && rows.length > 0 ? (
-            <EmptyState icon={Workflow} title="No standing rules yet" line="Everything here was scheduled from a chat. New automation starts a standing rule." />
-          ) : !listed.length ? (
+          ) : rows.length === 0 ? (
             <div className="space-y-6">
               <div className="bg-card enter flex flex-wrap items-center gap-x-5 gap-y-3 rounded-xl border px-5 py-4">
                 <span className="bg-muted text-foreground grid size-10 shrink-0 place-items-center rounded-xl" aria-hidden>
@@ -431,20 +407,20 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
               </p>
             </div>
           ) : (
-            <AutomationList
-              rows={listed}
+            <AutomationTable
+              rows={rows}
               onEdit={(a) => setEditing({ id: a.id, draft: toDraft(a) })}
               onRuns={(a) => onOpenRuns(a.id)}
               onToggle={(a, on) => void toggle(a, on)}
-              onDismiss={(a) => void dismiss(a)}
+              onRemove={(a) => void dismiss(a, isPending(a) || a.status === "needs-ok" ? "Proposal dismissed" : "Removed")}
               onOpenBox={onOpenBox}
               onOpenPlaybook={onOpenPlaybooks}
             />
           )}
         </Swap>
-        {rows && rows.length > 0 && rows.length < 4 && source !== "chat" && <RecipeGallery recipes={RECIPES} onPick={pickRecipe} heading="Add another from a recipe" className="mt-8" />}
+        {rows && rows.length > 0 && rows.filter((a) => !isOnce(a)).length < 4 && <RecipeGallery recipes={RECIPES} onPick={pickRecipe} heading="Add another from a recipe" className="mt-8" />}
        </div>
-        <div className="min-w-0 @7xl:sticky @7xl:top-6">
+        <div className="min-w-0 @min-[120rem]:sticky @min-[120rem]:top-6">
           <PrFollowupsPanel />
         </div>
       </div>
@@ -491,6 +467,8 @@ function toDraft(a: Automation): AutomationDraft {
     spec: a.spec,
     ...(a.repos?.length ? { repos: a.repos } : {}),
     taskTemplate: a.taskTemplate,
+    ...(a.summary ? { summary: a.summary } : {}),
+    ...(a.outcome ? { outcome: a.outcome } : {}),
     enabled: a.enabled,
     prComment: a.prComment,
     quiet: !!a.quiet,
@@ -581,12 +559,149 @@ function sourceLabel(a: Automation): string {
   return "from chat";
 }
 
-function AutomationList({
+/**
+ * The second line under a name: the agent's one-liner (`does:`) when it gave one; else the task
+ * past its first sentence when that sentence is the name (the old form: the name WAS the first
+ * sentence, so repeating it says nothing); else the task itself. Clipped to a line.
+ */
+function blurb(a: Automation): string | undefined {
+  if (a.summary) return a.summary;
+  const t = a.taskTemplate.replace(/\s+/g, " ").trim();
+  const first = t.split(/[.!?](?=\s|$)/)[0].trim();
+  const rest = first && first === a.name.replace(/[.!?]$/, "").trim() ? t.slice(first.length).replace(/^[.!?]\s*/, "") : t;
+  if (!rest) return undefined;
+  return rest.length > 160 ? `${rest.slice(0, 159).trimEnd()}…` : rest;
+}
+
+const atFmt = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+/** Epoch ms → the `datetime-local` value in the browser's zone ("2026-11-24T12:45"). */
+function toLocalInput(at: number): string {
+  const d = new Date(at);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+const atFmtFull = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "long" });
+
+/** What a row is doing, in one word, for the Status filter and the default order. */
+type State = "waiting on you" | "running" | "coming up" | "on" | "finished" | "paused";
+const STATES: State[] = ["waiting on you", "running", "coming up", "on", "finished", "paused"];
+function stateOf(a: Automation): State {
+  if (isPending(a) || a.status === "needs-ok") return "waiting on you";
+  if (a.active > 0 || a.status === "running") return "running";
+  if (isOnce(a)) return a.status === "waiting" ? "coming up" : a.status === "cancelled" || a.status === "paused" ? "paused" : "finished";
+  return a.enabled ? "on" : "paused";
+}
+const STATE_DOT: Record<State, string> = { "waiting on you": "bg-attention", running: "bg-live", "coming up": "bg-faint", on: "bg-ok", finished: "bg-faint", paused: "bg-faint" };
+const STATE_RANK: Record<State, number> = { "waiting on you": 0, running: 1, "coming up": 2, on: 3, finished: 4, paused: 5 };
+/** Default order: what needs you, what runs, what comes soonest, then rules by their next fire, finished newest first, paused last. */
+function defaultOrder(a: Automation, b: Automation): number {
+  const sa = stateOf(a);
+  const sb = stateOf(b);
+  if (sa !== sb) return STATE_RANK[sa] - STATE_RANK[sb];
+  if (sa === "coming up") return (a.spec.at ?? 0) - (b.spec.at ?? 0);
+  if (sa === "on") return (a.nextFire ?? Number.MAX_SAFE_INTEGER) - (b.nextFire ?? Number.MAX_SAFE_INTEGER);
+  if (sa === "finished") return (b.lastFired ?? b.spec.at ?? 0) - (a.lastFired ?? a.spec.at ?? 0);
+  return a.name.localeCompare(b.name);
+}
+const typeLabel = (a: Automation) => (isOnce(a) ? "One-time" : KIND_LABEL[a.kind]);
+const typeGlyph = (a: Automation): LucideIcon => (isOnce(a) ? AlarmClock : GLYPH[a.kind]);
+
+/** Status as a dot and a word, one line: what needs you, what runs, and how the last run went. */
+function StatusCell({ a, now, onOpenBox }: { a: Automation; now: number; onOpenBox: (box: string) => void }) {
+  const s = stateOf(a);
+  if (s === "waiting on you") return <StatusDot tone="attention">waiting on you</StatusDot>;
+  if (s === "running") {
+    const box = a.lastResult?.box;
+    const dot = (
+      <StatusDot tone="live" pulse>
+        running now
+      </StatusDot>
+    );
+    return box ? (
+      <button type="button" className="max-w-full cursor-pointer hover:underline" onClick={(e) => (stopRow(e), onOpenBox(box))}>
+        {dot}
+      </button>
+    ) : (
+      dot
+    );
+  }
+  if (s === "coming up") return a.spec.at! < now - 60_000 ? <StatusDot tone="attention">due now</StatusDot> : <StatusDot tone="muted">coming up</StatusDot>;
+  if (s === "paused") return <StatusDot tone="muted">{isOnce(a) ? "cancelled" : "paused"}</StatusDot>;
+  return <LastResult a={a} onOpenBox={onOpenBox} />;
+}
+
+/** What came of it: the last run's headline; before any run, what the agent said it gives (one-time) or the quiet counter / last delivery (rules). */
+function ResultCell({ a }: { a: Automation }) {
+  const r = a.lastResult;
+  if (r?.outcome === "started" && r.finished?.headline)
+    return (
+      <span className="text-muted-foreground block truncate text-meta" title={r.finished.headline}>
+        {r.finished.headline}
+      </span>
+    );
+  if (r && r.outcome !== "started" && r.reason)
+    return (
+      <span className="text-muted-foreground block truncate text-meta" title={r.reason}>
+        {r.reason}
+      </span>
+    );
+  if (isOnce(a))
+    return a.outcome && a.status !== "cancelled" ? (
+      <span className="text-muted-foreground block truncate text-meta" title={`What the agent said it gives: ${a.outcome}`}>
+        <span className="text-faint">gives</span> {a.outcome}
+      </span>
+    ) : (
+      <span className="text-faint text-meta">—</span>
+    );
+  const fires = a.lastDelivery && (a.kind === "webhook" || a.kind === "github" || a.kind === "watch");
+  const line = a.quiet && a.counts ? countsLine(a.counts) : fires ? deliveryLine(a.lastDelivery!) : "";
+  return line ? (
+    <span className={cn("block truncate font-mono text-micro tabular", fires && !a.quiet ? deliveryTone(a.lastDelivery!) : "text-muted-foreground")} title={line}>
+      {line}
+    </span>
+  ) : (
+    <span className="text-faint text-meta">—</span>
+  );
+}
+
+/** Where it came from, one line: the chat it was asked in (opens it) or the playbook it runs. */
+function SourceCell({ a, workflows, onOpenBox, onOpenPlaybook }: { a: Automation; workflows: { id: string; name: string }[]; onOpenBox: (box: string) => void; onOpenPlaybook: () => void }) {
+  if (a.sourceBox)
+    return (
+      <button
+        type="button"
+        onClick={(e) => (stopRow(e), onOpenBox(a.sourceBox!))}
+        className="text-muted-foreground hover:text-foreground inline-flex max-w-full cursor-pointer items-center gap-0.5 text-meta underline-offset-2 hover:underline"
+        title={`From chat: ${a.sourceTitle || a.sourceBox}`}
+      >
+        <span className="truncate">{sourceLabel(a)}</span>
+        <ArrowUpRight className="size-3 shrink-0" aria-hidden />
+      </button>
+    );
+  if (a.workflowId) {
+    const wf = workflows.find((w) => w.id === a.workflowId)?.name ?? "missing playbook";
+    return (
+      <button type="button" onClick={(e) => (stopRow(e), onOpenPlaybook())} className="text-muted-foreground hover:text-foreground inline-flex max-w-full cursor-pointer items-center gap-1 text-meta" title={`Playbook: ${wf}`}>
+        <ListChecks className="size-3 shrink-0" aria-hidden />
+        <span className="truncate">{wf}</span>
+      </button>
+    );
+  }
+  return <span className="text-faint text-meta">—</span>;
+}
+
+/**
+ * Every automation as one single-line row: Name · Type · When · Status · Does · Repo · Result ·
+ * Next · Source · the actions. Filters above the table (type chips, status and repo selects) and
+ * the table's own search; a sort on any header replaces the default order (what needs you, what
+ * runs, what comes soonest, rules by their next fire, finished newest, paused last).
+ */
+function AutomationTable({
   rows,
   onEdit,
   onRuns,
   onToggle,
-  onDismiss,
+  onRemove,
   onOpenBox,
   onOpenPlaybook,
 }: {
@@ -594,120 +709,181 @@ function AutomationList({
   onEdit: (a: Automation) => void;
   onRuns: (a: Automation) => void;
   onToggle: (a: Automation, on: boolean) => void;
-  onDismiss: (a: Automation) => void;
+  onRemove: (a: Automation) => void;
   onOpenBox: (box: string) => void;
   onOpenPlaybook: () => void;
 }) {
   const workflows = useWorkflowList();
-  const anyPending = rows.some(isPending);
+  const now = useNow(rows.some((a) => stateOf(a) === "coming up" || (a.enabled && !!a.nextFire)), 30_000);
+  const [type, setType] = React.useState<"all" | "once" | "rules">("all");
+  const [state, setState] = React.useState("");
+  const [repo, setRepo] = React.useState("");
+
+  const byState = (a: Automation) => !state || stateOf(a) === state;
+  const byRepo = (a: Automation) => !repo || (a.repos ?? []).includes(repo);
+  const byType = (a: Automation) => type === "all" || (type === "once") === isOnce(a);
+  const others = rows.filter((a) => byState(a) && byRepo(a));
+  const typed = rows.filter((a) => byType(a) && byRepo(a));
+  const shown = React.useMemo(() => rows.filter((a) => byType(a) && byState(a) && byRepo(a)).sort(defaultOrder), [rows, type, state, repo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const repos = Array.from(new Set(rows.flatMap((a) => a.repos ?? []))).sort();
+  const stateCount = (s: State) => typed.filter((a) => stateOf(a) === s).length;
+
   const columns: Column<Automation>[] = [
     {
       id: "name",
       primary: true,
       header: "Name",
+      width: "w-52",
+      fitMax: 208,
       sort: (a) => a.name,
       cell: (a) => {
-        const Glyph = GLYPH[a.kind];
-        const wf = a.workflowId ? (workflows.find((w) => w.id === a.workflowId)?.name ?? "missing") : undefined;
-        const playbook = wf && (
-          <button type="button" onClick={(e) => (stopRow(e), onOpenPlaybook())} className="hover:text-foreground inline-flex max-w-full cursor-pointer items-center gap-1" title={`Playbook: ${wf}`}>
-            <ListChecks className="size-3 shrink-0" aria-hidden />
-            <span className="truncate">{wf}</span>
-          </button>
-        );
+        const Glyph = typeGlyph(a);
+        const s = stateOf(a);
         return (
-          <span className="flex min-w-0 items-center gap-3">
-            <span className={cn("grid size-7 shrink-0 place-items-center rounded-lg border", a.enabled ? "bg-background text-live" : "bg-muted/50 text-muted-foreground")} title={KIND_LABEL[a.kind]} aria-hidden>
-              <Glyph className="size-3.5" strokeWidth={1.75} />
-            </span>
-            <span className="text-foreground min-w-0 truncate font-medium" title={a.name}>
+          <span className="flex min-w-0 items-center gap-2">
+            {/* On a phone the Status column is gone: its dot rides before the name. */}
+            <span className={cn("size-1.5 shrink-0 rounded-full sm:hidden", STATE_DOT[s])} title={s} aria-hidden />
+            <Glyph className="text-muted-foreground size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
+            <span className="text-foreground min-w-0 truncate font-medium" title={a.taskTemplate}>
               {automationLabel(a.name)}
             </span>
-            {playbook && <span className="text-muted-foreground shrink-0 text-micro">{playbook}</span>}
-            {a.sourceBox && (
-              <button
-                type="button"
-                onClick={(e) => (stopRow(e), onOpenBox(a.sourceBox!))}
-                className="text-muted-foreground hover:text-foreground inline-flex max-w-[14rem] shrink-0 cursor-pointer items-center gap-0.5 text-micro underline-offset-2 hover:underline"
-                title={`From chat: ${a.sourceTitle || a.sourceBox}`}
-              >
-                <span className="truncate">{sourceLabel(a)}</span>
-                <ArrowUpRight className="size-3 shrink-0" aria-hidden />
-              </button>
-            )}
           </span>
         );
       },
     },
-    {
-      id: "kind",
-      header: "Type",
-      width: "w-28",
-      hideBelow: "lg",
-      sort: (a) => KIND_LABEL[a.kind],
-      cell: (a) => <span className="text-muted-foreground text-meta">{KIND_LABEL[a.kind]}</span>,
-    },
+    { id: "type", header: "Type", width: "w-28", fitMax: 112, hideBelow: "md", sort: typeLabel, cell: (a) => <span className="text-muted-foreground block truncate text-meta">{typeLabel(a)}</span> },
     {
       id: "when",
       header: "When",
-      width: "w-64",
+      width: "w-40",
+      fitMax: 152,
       hideBelow: "md",
-      cell: (a) => (
-        <span className="text-muted-foreground block truncate text-meta" title={a.when}>
-          {a.when}
-        </span>
-      ),
+      sort: (a) => (isOnce(a) ? a.spec.at : a.when),
+      cell: (a) =>
+        isOnce(a) ? (
+          <span className="text-foreground block truncate text-meta tabular-nums" title={`${atFmtFull.format(new Date(a.spec.at!))} · ${a.when}`}>
+            {atFmt.format(new Date(a.spec.at!))}
+          </span>
+        ) : (
+          <span className="text-foreground block truncate text-meta" title={a.when}>
+            {a.when}
+          </span>
+        ),
+    },
+    { id: "status", header: "Status", width: "w-36", fitMax: 144, hideBelow: "sm", sort: (a) => STATE_RANK[stateOf(a)], cell: (a) => <StatusCell a={a} now={now} onOpenBox={onOpenBox} /> },
+    {
+      id: "does",
+      header: "Does",
+      hideBelow: "lg",
+      minFlex: 160,
+      cell: (a) => {
+        const line = blurb(a);
+        return line ? (
+          <span className="text-muted-foreground block truncate text-meta" title={line}>
+            {line}
+          </span>
+        ) : (
+          <span className="text-faint text-meta">—</span>
+        );
+      },
     },
     {
-      id: "last",
-      header: "Last run",
-      width: "w-44",
-      hideBelow: "sm",
-      sort: (a) => (a.active > 0 ? Number.MAX_SAFE_INTEGER : a.lastResult?.at),
+      id: "repo",
+      header: "Repo",
+      width: "w-32",
+      fitMax: 128,
+      hideBelow: "lg",
+      sort: (a) => a.repos?.[0],
       cell: (a) => {
-        const fires = a.lastDelivery && (a.kind === "webhook" || a.kind === "github" || a.kind === "watch");
+        const rs = a.repos ?? [];
+        return rs.length ? (
+          <span className="text-muted-foreground block truncate font-mono text-micro" title={rs.join("\n")}>
+            {rs[0]}
+            {rs.length > 1 && <span className="text-faint"> +{rs.length - 1}</span>}
+          </span>
+        ) : (
+          <span className="text-faint text-meta">—</span>
+        );
+      },
+    },
+    { id: "result", header: "Result", width: "w-36", fitMax: 144, hideBelow: "lg", cell: (a) => <ResultCell a={a} /> },
+    {
+      id: "next",
+      header: "Next",
+      width: "w-24",
+      fitMax: 96,
+      hideBelow: "sm",
+      sort: (a) => (stateOf(a) === "coming up" ? a.spec.at : a.enabled && a.nextFire ? a.nextFire : null),
+      cell: (a) => {
+        const s = stateOf(a);
+        const at = s === "coming up" ? a.spec.at! : s === "on" ? a.nextFire : null;
         return (
-          <span className="flex min-w-0 flex-col gap-0.5">
-            <LastResult a={a} onOpenBox={onOpenBox} />
-            <span className="text-faint truncate font-mono text-micro tabular">
-              {a.quiet && a.counts ? countsLine(a.counts) : fires ? deliveryLine(a.lastDelivery!) : isPending(a) ? "waiting on you" : a.enabled && a.nextFire ? `next ${fmtIn(a.nextFire)}` : a.enabled ? "on event" : "paused"}
-            </span>
+          <span className="text-muted-foreground block truncate font-mono text-micro tabular" title={at ? atFmtFull.format(new Date(at)) : undefined}>
+            {at ? fmtCountdown(at, now) : s === "on" ? "on event" : "—"}
           </span>
         );
       },
     },
+    { id: "source", header: "Source", width: "w-26", fitMax: 104, hideBelow: "lg", sort: (a) => a.sourceTitle ?? (a.workflowId ? "playbook" : null), cell: (a) => <SourceCell a={a} workflows={workflows} onOpenBox={onOpenBox} onOpenPlaybook={onOpenPlaybook} /> },
   ];
   return (
     <DataTable
       aria-label="Automations"
-      rows={rows}
+      rows={shown}
       columns={columns}
       rowKey={(a) => a.id}
       onRowClick={onRuns}
       rowLabel={(a) => `Open runs of ${a.name}`}
-      search={{ placeholder: "Search automations", text: (a) => [a.name, a.when, ...(a.repos ?? [])].join(" ") }}
-      actions={(a) => (
-        <span className="inline-flex items-center justify-end gap-1.5" onClick={stopRow} onKeyDown={stopRow}>
-          <Button size="sm" variant="ghost" onClick={() => onEdit(a)} aria-label={`View ${a.name}`} className="h-8 px-2.5">
-            <PanelRight className="size-3.5" />
-            <span className="hidden md:inline">View</span>
+      search={{ placeholder: "Search automations", text: searchText }}
+      toolbar={
+        <>
+          <div role="radiogroup" aria-label="Type" className="flex items-center gap-1">
+            <FilterChip group="automations-type" active={type === "all"} onClick={() => setType("all")} label="All" count={others.length} />
+            <FilterChip group="automations-type" active={type === "once"} onClick={() => setType("once")} label="One-time" count={others.filter(isOnce).length} />
+            <FilterChip group="automations-type" active={type === "rules"} onClick={() => setType("rules")} label="Rules" count={others.filter((a) => !isOnce(a)).length} />
+          </div>
+          <FilterSelect label="Status" value={state} onChange={setState} options={[{ value: "", label: "any" }, ...STATES.filter((s) => stateCount(s) > 0 || s === state).map((s) => ({ value: s, label: `${s} · ${stateCount(s)}` }))]} />
+          {repos.length > 1 && <FilterSelect label="Repo" value={repo} onChange={setRepo} options={[{ value: "", label: "any" }, ...repos.map((r) => ({ value: r, label: r.split("/").pop() ?? r }))]} />}
+        </>
+      }
+      empty={
+        <span className="flex flex-col items-center gap-2">
+          <span>No automation matches these filters.</span>
+          <Button size="xs" variant="outline" onClick={() => (setType("all"), setState(""), setRepo(""))}>
+            Clear filters
           </Button>
-          {isPending(a) ? (
-            <>
-              <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => onDismiss(a)} aria-label={`Dismiss ${a.name}`}>
-                <Trash2 />
-              </Button>
-              <Button size="sm" onClick={() => onToggle(a, true)}>
-                Approve
-              </Button>
-            </>
-          ) : (
-            <Switch checked={a.enabled} onCheckedChange={(on) => onToggle(a, on)} aria-label={a.enabled ? `Pause ${a.name}` : `Turn on ${a.name}`} />
-          )}
         </span>
-      )}
-      groupOf={anyPending ? (a) => (isPending(a) ? "Proposed — waiting on you" : "Automations") : undefined}
-      rowProps={(a) => ({ className: isPending(a) ? "bg-attention/[0.04]" : !a.enabled ? "opacity-60 hover:opacity-100 focus-visible:opacity-100" : undefined })}
+      }
+      actions={(a) => {
+        const s = stateOf(a);
+        return (
+          <span className="inline-flex items-center justify-end gap-1.5" onClick={stopRow} onKeyDown={stopRow}>
+            <Button size="sm" variant="ghost" onClick={() => onEdit(a)} aria-label={`View ${a.name}`} title="View" className="h-8 px-2.5">
+              <PanelRight className="size-3.5" />
+            </Button>
+            {s === "waiting on you" ? (
+              <>
+                <Button size="sm" variant="ghost" className="text-muted-foreground hidden md:inline-flex" onClick={() => onRemove(a)} aria-label={`Dismiss ${a.name}`}>
+                  <Trash2 />
+                </Button>
+                <Button size="sm" onClick={() => onToggle(a, true)}>
+                  Approve
+                </Button>
+              </>
+            ) : !isOnce(a) ? (
+              <Switch checked={a.enabled} onCheckedChange={(on) => onToggle(a, on)} aria-label={a.enabled ? `Pause ${a.name}` : `Turn on ${a.name}`} />
+            ) : s === "coming up" ? (
+              <ArmButton variant="ghost" size="sm" icon={<X className="size-3.5" />} label={<span className="hidden md:inline">Cancel</span>} armedLabel="Cancel it?" onConfirm={() => onToggle(a, false)} className="text-muted-foreground" />
+            ) : s === "running" ? null : (
+              <ArmButton variant="ghost" size="sm" icon={<Trash2 className="size-3.5" />} label={<span className="hidden md:inline">Remove</span>} armedLabel="Remove?" onConfirm={() => onRemove(a)} className="text-muted-foreground" />
+            )}
+          </span>
+        );
+      }}
+      rowProps={(a) => {
+        const s = stateOf(a);
+        return { className: s === "waiting on you" ? "bg-attention/[0.04]" : s === "finished" || s === "paused" ? "opacity-60 hover:opacity-100 focus-visible:opacity-100" : undefined };
+      }}
     />
   );
 }
@@ -969,6 +1145,16 @@ function Editor({
         <Label>Name</Label>
         <input className={field} value={d.name} maxLength={80} placeholder="Nightly test fixer" onChange={(e) => set({ name: e.target.value })} />
       </label>
+      <div className="grid gap-4 sm:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <label className="block">
+          <Label hint="one line, under the name in the table">What it does</Label>
+          <input className={field} value={d.summary ?? ""} maxLength={200} placeholder="Runs the tests and opens a PR that fixes what fails" onChange={(e) => set({ summary: e.target.value || undefined })} />
+        </label>
+        <label className="block">
+          <Label hint="what you get">Gives</Label>
+          <input className={field} value={d.outcome ?? ""} maxLength={80} placeholder="A PR" onChange={(e) => set({ outcome: e.target.value || undefined })} />
+        </label>
+      </div>
 
       <div>
         <Label>Starts on</Label>
@@ -1014,12 +1200,28 @@ function Editor({
         </div>
       )}
 
-      {d.kind === "schedule" && (
+      {d.kind === "schedule" && d.spec.at ? (
+        // A one-time task keeps its moment: the cron picker would read as a repeat and, once touched,
+        // turn "at 12:45" into a rule. The input is the browser's clock; the stored value is UTC.
+        <div>
+          <Label hint={atFmtFull.format(new Date(d.spec.at))}>Runs once at</Label>
+          <input
+            type="datetime-local"
+            className={cn(field, "font-mono")}
+            value={toLocalInput(d.spec.at)}
+            onChange={(e) => {
+              const t = new Date(e.target.value).getTime();
+              if (Number.isFinite(t)) setD((cur) => ({ ...cur, spec: { at: t } }));
+            }}
+          />
+          <p className="text-faint mt-1.5 text-micro">A moment already past runs as soon as it is saved and on.</p>
+        </div>
+      ) : d.kind === "schedule" ? (
         <div>
           <Label hint={describeCron(d.spec.cron ?? "") || undefined}>Runs</Label>
           <SchedulePicker cron={d.spec.cron ?? ""} timezone={d.spec.timezone ?? ""} onChange={(p) => setSpec(p)} />
         </div>
-      )}
+      ) : null}
 
       {(d.kind === "github" || d.kind === "watch" || d.kind === "schedule" || d.kind === "webhook") && (
         <div>

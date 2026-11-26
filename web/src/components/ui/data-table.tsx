@@ -27,6 +27,8 @@ export interface Column<T> {
   width?: string;
   /** Raise the widest this column may be fitted to its content, in px (default 360). */
   fitMax?: number;
+  /** The flexible column's least width before the card scrolls sideways, in px (default 240). */
+  minFlex?: number;
   /** Hide below this breakpoint (the primary column should carry a mobile meta line instead). */
   hideBelow?: "sm" | "md" | "lg";
   /** The column that names the row: bright ink and medium weight; every other column stays muted (Orbit). */
@@ -233,8 +235,8 @@ export function DataTable<T>({
       className={cn("table-fixed", !narrow && minWidth)}
       style={(() => {
         if (narrow) return undefined;
-        // Sized columns + the flexible one's share (≥240px and ≥ its header): below that the card scrolls sideways.
-        const fixed = visibleCols.reduce((s, c) => s + (c.width || cols.isManual(c.id) ? Math.max(cols.width(c.id) ?? 0, cols.floor(c.id) ?? 0) : Math.max(240, cols.floor(c.id) ?? 0)), 0) + (actions ? (actionsW ?? 112) : 0);
+        // Sized columns + the flexible one's share (≥240px unless `minFlex`, and ≥ its header): below that the card scrolls sideways.
+        const fixed = visibleCols.reduce((s, c) => s + (c.width || cols.isManual(c.id) ? Math.max(cols.width(c.id) ?? 0, cols.floor(c.id) ?? 0) : Math.max(c.minFlex ?? 240, cols.floor(c.id) ?? 0)), 0) + (actions ? (actionsW ?? 112) : 0);
         return fixed ? { minWidth: fixed } : undefined;
       })()}
       aria-busy={loading || undefined}

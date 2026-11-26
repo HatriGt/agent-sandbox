@@ -7,7 +7,7 @@ import { TabPanel } from "@/components/ui/animated-tabs";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { useNow } from "@/hooks/useNow";
 import { fmtCountdown, upcoming } from "@/components/autopilot/UpNext";
-import { automationLabel } from "@/components/Automations";
+import { automationLabel, isOnce } from "@/components/Automations";
 import { cn } from "@/lib/utils";
 import { api, type Automation, type BoxView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
@@ -43,7 +43,8 @@ export function AutopilotPage({
   const triggers = useCached("triggers", (signal) => api.triggers(signal)).data?.triggers;
   const workflows = useCached("workflows", (signal) => api.workflows(signal)).data?.workflows;
   const tabs: { id: AutopilotTab; label: string; hint: string; icon: React.ReactNode; count?: number; attention?: boolean }[] = [
-    { id: "automations", label: "Automations", hint: "When it starts", icon: <Workflow className="size-4" />, count: triggers?.filter((t) => t.enabled).length, attention: triggers?.some((t) => t.status === "needs-ok") },
+    // Live standing rules plus the one-time tasks still to come; a finished one-time task is not "on".
+    { id: "automations", label: "Automations", hint: "When it starts", icon: <Workflow className="size-4" />, count: triggers?.filter((t) => (isOnce(t) ? t.status === "waiting" || t.status === "running" : t.enabled)).length, attention: triggers?.some((t) => t.status === "needs-ok") },
     { id: "playbooks", label: "Playbooks", hint: "How it gets done", icon: <ListChecks className="size-4" />, count: workflows?.length },
   ];
   return (
@@ -93,7 +94,7 @@ export function AutopilotPage({
                     transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 40 }}
                   />
                 )}
-                <span className={cn("relative grid size-8 shrink-0 place-items-center rounded-lg transition-colors", on ? "bg-foreground text-background" : "bg-(--viz-tile)/60")} aria-hidden>
+                <span className={cn("relative grid size-8 shrink-0 place-items-center transition-colors", on ? "text-foreground" : "text-muted-foreground")} aria-hidden>
                   {t.icon}
                 </span>
                 <span className="relative min-w-0">
@@ -136,17 +137,27 @@ export function AutopilotPage({
 function LiveLine({ triggers, onOpen }: { triggers: Automation[] | undefined; onOpen: () => void }) {
   const now = useNow(!!triggers?.length, 30_000);
   if (!triggers?.length) return null;
-  const on = triggers.filter((t) => t.enabled).length;
+  // Standing rules are on or paused; one-time tasks are coming up or over — the two are never summed.
+  const rules = triggers.filter((t) => !isOnce(t));
+  const on = rules.filter((t) => t.enabled).length;
+  const comingUp = triggers.filter((t) => isOnce(t) && t.status === "waiting").length;
   const running = triggers.reduce((n, t) => n + (t.active > 0 ? 1 : 0), 0);
   const waiting = triggers.filter((t) => t.status === "needs-ok" || (t.proposed && !t.enabled)).length;
   const next = upcoming(triggers, now)[0];
   return (
     <p className="enter text-muted-foreground mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-micro" aria-live="polite">
-      <span className="inline-flex items-center gap-1.5">
-        <span className={cn("size-1.5 rounded-full", on ? "bg-ok" : "bg-muted-foreground/50")} aria-hidden />
-        <span className="text-foreground tabular font-medium">{on}</span> on
-        {triggers.length > on ? <span className="text-faint">· {triggers.length - on} paused</span> : null}
-      </span>
+      {rules.length > 0 && (
+        <span className="inline-flex items-center gap-1.5">
+          <span className={cn("size-1.5 rounded-full", on ? "bg-ok" : "bg-muted-foreground/50")} aria-hidden />
+          <span className="text-foreground tabular font-medium">{on}</span> {on === 1 ? "rule" : "rules"} on
+          {rules.length > on ? <span className="text-faint">· {rules.length - on} paused</span> : null}
+        </span>
+      )}
+      {comingUp > 0 && (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="text-foreground tabular font-medium">{comingUp}</span> one-time {comingUp === 1 ? "task" : "tasks"} coming up
+        </span>
+      )}
       {running > 0 && (
         <span className="inline-flex items-center gap-1.5">
           <span className="bg-live animate-pulse size-1.5 rounded-full" aria-hidden />

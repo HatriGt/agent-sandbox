@@ -1603,6 +1603,10 @@ export interface AutomationDraft {
   spec: AutomationSpec;
   repos?: string[];
   taskTemplate: string;
+  /** One line on what a run does (the agent's `does:` field or the editor's), for the Autopilot table. */
+  summary?: string;
+  /** What the user gets out of a run ("A PR", "Three merged PRs"); shown until the real result replaces it. */
+  outcome?: string;
   enabled: boolean;
   prComment: boolean;
   /** Quiet: a run that finds nothing for the operator sends no notification. */
@@ -1641,6 +1645,10 @@ export interface ThreadScheduleItem {
   repos?: string[];
   enabled: boolean;
   task: string;
+  /** One line on what the run does, from the agent's `does:` field. */
+  summary?: string;
+  /** What the user gets ("Three merged PRs"), from the agent's `gives:` field. */
+  outcome?: string;
   why?: string;
 }
 /** A schedule the agent tried to set up from this thread that the controller could not read. */
