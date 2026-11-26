@@ -1129,6 +1129,11 @@ export default function App() {
                     onDensity={(d) => setTraceDensity(d === "trace")}
                     onFocusRequest={onFocusRequest}
                     onRepliesFlushed={() => setReplies((prev) => ({ ...prev, [selectedBox.name]: [] }))}
+                    // A queued message rewritten in the tray: its echo carries the new words (and a
+                    // fresh stamp), same id and slot, so the edited line is the one that retires it.
+                    onReplyEdited={(reply) =>
+                      setReplies((prev) => ({ ...prev, [selectedBox.name]: (prev[selectedBox.name] ?? []).map((r) => (r.id === reply.id ? reply : r)) }))
+                    }
                     onReplyFailed={(text) =>
                       setReplies((prev) => {
                         const list = [...(prev[selectedBox.name] ?? [])];

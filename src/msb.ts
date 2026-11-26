@@ -69,7 +69,7 @@ import { askHookScript, autoCompactEnv, claudeDriver, claudeInstallSh, streamFmt
 import { ompInstallSh, ompSeedSh } from "./drivers/omp.js";
 import { NEED_HOOK, needSetup } from "./drivers/need.js";
 import { AGENT_LOG, AT_MARK, MCP_CONFIG_PATH, isCompactCommand, PROVIDER_ENV_PATH, QUESTION_MARK, USAGE_OPEN, YOU_MARK_CLOSE, YOU_MARK_OPEN } from "./drivers/sentinels.js";
-import { INBOX_APPEND_SH, INBOX_RESET_SH, INBOX_TAKE_DELIVERED_SH, inboxLine, type InboxLine } from "./drivers/inbox-gate.js";
+import { INBOX_APPEND_SH, INBOX_RESET_SH, INBOX_TAKE_DELIVERED_SH, inboxLine, inboxUnmirrorSh, type InboxLine } from "./drivers/inbox-gate.js";
 import { isStalled } from "./stall.js";
 import { EXIT_DISK_FULL } from "./run-health.js";
 import { parseBakedManifest, type LastProvision } from "./package-watch.js";
@@ -2665,6 +2665,16 @@ export async function resumeAgentTask(
  */
 export async function mirrorInboxMessage(cfg: Config, box: string, m: InboxLine): Promise<void> {
   await exec(cfg, box, INBOX_APPEND_SH, { input: inboxLine(m) });
+}
+
+/** Take a mirrored message back out of the box (cancelled or rewritten before the gate read it).
+ *  Best-effort like the mirror: a sleeping or broken box simply has nothing to take back. */
+export async function unmirrorInboxMessage(cfg: Config, box: string, id: string): Promise<void> {
+  try {
+    await exec(cfg, box, inboxUnmirrorSh(id), { timeoutMs: PROBE_TIMEOUT_MS });
+  } catch {
+    /* nothing mirrored, or no box to reach: the inbox is the source of truth */
+  }
 }
 
 /** Ids the box's gate has already delivered mid-turn (and clears the receipt), so the controller

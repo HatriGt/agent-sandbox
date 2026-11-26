@@ -124,6 +124,13 @@ const server = createServer(async (req, res) => {
 
   // --- the inbox ---
   if (p === "/inbox.json" && req.method === "GET") return json(res, 200, { queued: state.queue });
+  if (p === "/inbox.json" && req.method === "PATCH") {
+    const { id, message } = await readBody(req);
+    const m = state.queue.find((x) => x.id === id);
+    if (!m) return json(res, 404, { error: "that queued message is gone (already delivered or removed)" });
+    m.text = String(message ?? "").trim();
+    return json(res, 200, { queued: state.queue });
+  }
   if (p === "/inbox.json" && req.method === "DELETE") {
     const id = u.searchParams.get("id");
     state.queue = id ? state.queue.filter((m) => m.id !== id) : [];

@@ -1249,6 +1249,11 @@ export const api = {
   sendNow: (session: string, id: string) => post<{ ok: true; queued: QueuedMessage[] }>("/send-now.json", { box: session, id }),
   /** Stop the running turn (session kept; a later message resumes it). The watch pill's Stop. */
   interrupt: (session: string) => post<{ ok: true; stopped: boolean }>("/interrupt.json", { box: session }),
+  /** Rewrite a queued message before the agent has it (409 once the in-box gate delivered it). */
+  editQueued: (session: string, id: string, message: string) =>
+    fetch(url("/inbox.json"), { method: "PATCH", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ box: session, id, message }) }).then(
+      parse<{ queued: QueuedMessage[] }>
+    ),
   dequeue: (session: string, id?: string) =>
     fetch(url("/inbox.json", id ? { box: session, id } : { box: session }), { method: "DELETE", headers: authHeaders }).then(
       parse<{ queued: QueuedMessage[] }>

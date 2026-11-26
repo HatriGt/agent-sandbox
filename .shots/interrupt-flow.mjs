@@ -7,7 +7,7 @@
 // Two flows, shot at every state:
 //   A  message queued mid-turn → "Send now" in the composer's queue tray → stopping → seam + delivering → settled
 //   B  a second message queued → header "Stop & send" → same states, from the other button
-//   D  three messages queued → the tray as a list → one removed → the rest removed
+//   D  three messages queued → the tray as a list → one edited in place → one removed → the rest removed
 //   C  plain Stop with nothing queued
 // Every shot is a clip of the conversation column's lower half (the part that changes) and the
 // header strip, so the state pill and the Stop button are in the frame too. Prints a per-step
@@ -45,7 +45,7 @@ const read = () =>
     const t = (el) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
     const tray = document.querySelector("[data-queue-tray]");
     const pending = tray
-      ? [...tray.querySelectorAll("li")].map((li) => t(li.querySelector("p")).slice(0, 24) + " | " + [...li.querySelectorAll("button,[role=status]")].map((b) => t(b) || b.getAttribute("aria-label")).join(", "))
+      ? [...tray.querySelectorAll("li")].map((li) => (li.querySelector("textarea") ? "[editing] " + li.querySelector("textarea").value.slice(0, 24) : t(li.querySelector("p")).slice(0, 24)) + " | " + [...li.querySelectorAll("button,[role=status]")].map((b) => t(b) || b.getAttribute("aria-label")).join(", "))
       : [];
     const trayHead = t(tray?.firstElementChild);
     const bubbles = [...document.querySelectorAll(".you-bubble")].map((b) => t(b).slice(0, 40));
@@ -107,20 +107,28 @@ await send("Tag it infra and assign it to me.");
 await send("And post the issue link in the PR thread when you are done.");
 await sleep(700);
 await shot("9-queue-list");
+// Edit the second row in place: pencil → editor → new words → Enter.
+await page.evaluate(() => [...document.querySelectorAll("[data-queue-tray] button[aria-label='Edit']")][1].click());
+await sleep(300);
+await shot("10-queue-editing");
+await page.fill("[data-queue-tray] textarea", "Tag it infra, assign it to me, and link the failing run.");
+await page.keyboard.press("Enter");
+await sleep(600);
+await shot("11-queue-edited");
 await page.evaluate(() => [...document.querySelectorAll("[data-queue-tray] button[aria-label='Remove from the queue']")][1].click());
 await sleep(600);
-await shot("10-queue-list-one-removed");
+await shot("12-queue-list-one-removed");
 for (let i = 0; i < 2; i++) {
   await page.evaluate(() => document.querySelector("[data-queue-tray] button[aria-label='Remove from the queue']").click());
   await sleep(400);
 }
 await sleep(500);
-await shot("11-queue-empty");
+await shot("13-queue-empty");
 
 // C — plain Stop with nothing queued: the seam and the composer, no red pill.
 await clickLabel("Stop");
 await sleep(2200);
-await shot("12-plain-stop");
+await shot("14-plain-stop");
 
 const st = await fetch(`http://localhost:${port}/__state`).then((r) => r.json());
 console.log("server queue after:", st.queue.length, "| log tail:", JSON.stringify(st.log.split("\n").slice(-6).join(" ⏎ ")));

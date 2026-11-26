@@ -1940,11 +1940,20 @@ button. Two toasts narrated it on top.
   exit 253 (`OPERATOR_STOP_EXIT`). 253 is "stopped" in ink everywhere (`isOperatorStop`,
   `isFailedExit` excludes 252/253): header pill, sidebar row, capacity cell, run-end pill (not
   drawn; a stopped WATCH keeps its "Stopped watching …" pill), no failed toast.
+- **A queued message can be rewritten where it waits.** The pencil on a tray row turns the text into
+  a one-field editor in the same slot (Enter saves, Shift+Enter breaks a line, Esc keeps the
+  original; `Save` is the one ink-filled control and stays inert until the words change). The
+  controller rewrites it in place (`PATCH /inbox.json`: same id, same order, same stamp), takes the
+  old copy back out of the box's mirror first and mirrors the new words, so the in-box gate never
+  delivers the old ones; if the gate already read it the edit is refused (409) and the row leaves
+  with the next poll. Cancelling a row takes its mirror back too (it did not, before: a cancelled
+  message could still land mid-turn). The echo keeps its id and gets the new words and a fresh stamp,
+  so the edited log line is the one that retires it.
 - **Stop with a message waiting is "Stop & send".** The header button says so and calls send-now
   on the first queued message; the queued text was always going to be delivered the moment the turn
   ended, so one press does both. The tray row's own "Send now" still arms before it fires.
 - Proof: `node .shots/interrupt-flow.mjs [--dark]` over `test/ui-mock-server.mjs` (the mock now
-  mirrors the stop gap, exit 253, the seam and the delivery loop): thirteen states, including a
-  three-message queue and its removal, light and dark,
+  mirrors the stop gap, exit 253, the seam, the delivery loop and the edit route): fifteen states,
+  including a three-message queue, one row edited in place, and its removal, light and dark,
   `.shots/interrupt-<n>-<state>-<scheme>.png`, with a per-step readout of bubble label, state pill
   and seams.

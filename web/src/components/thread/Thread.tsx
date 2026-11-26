@@ -97,6 +97,7 @@ export function Thread({
   onTornDown,
   onFocusRequest,
   onReplyFailed,
+  onReplyEdited,
   onRepliesFlushed,
   density = "chat",
   onDensity = () => {},
@@ -129,6 +130,8 @@ export function Thread({
   onFocusRequest?: (focus: () => void) => void;
   /** A reply the server could not deliver: the parent drops its optimistic echo. */
   onReplyFailed?: (text: string) => void;
+  /** A queued reply rewritten before delivery: the parent swaps the echo (same id) for this one. */
+  onReplyEdited?: (reply: PendingReply) => void;
 }) {
   // Opening a sleeping sandbox wakes it at once — nobody should have to type to see their run.
   const [wake, setWake] = React.useState<{ startedAt: number; error: string | null; slowHost: boolean } | null>(null);
@@ -900,6 +903,27 @@ export function Thread({
       .finally(() => setStopping(false));
   };
 
+  // Rewrite a queued message in place. The server keeps its id and slot; the echo gets the new
+  // words and a fresh log stamp so the edited line, not the old one, retires it.
+  const editQueued = async (id: string, text: string) => {
+    if (id.startsWith("fleet-")) {
+      refreshQueue();
+      throw new Error("The queue is still loading — try again in a moment.");
+    }
+    try {
+      const r = await api.editQueued(box.name, id, text);
+      setQueued(r.queued);
+      const echoId = Object.keys(queueMeta).find((k) => queueMeta[k].queueId === id);
+      if (echoId && onReplyEdited) {
+        onReplyEdited({ ...stampReply(text, echoBasis.current.sentLines, echoBasis.current.logClock), id: echoId });
+      }
+    } catch (e: unknown) {
+      refreshQueue();
+      toast.error("Could not change the message", { description: e instanceof Error ? e.message : String(e) });
+      throw e;
+    }
+  };
+
   // A just-delegated box reports `idle` until the run sentinel is written (a few seconds after
   // boot/claim) — that is "starting", not "idle": showing "Nothing has run here yet · send an
   // instruction" there invites a duplicate task. A claimed box or one that already has a task is a
@@ -948,6 +972,7 @@ export function Thread({
           status,
           onSendNow: status === "queued" && runState === "running" && !sleeping ? () => sendQueuedNow(queueId) : undefined,
           onCancel: status === "queued" ? () => cancelQueued(queueId) : undefined,
+          onEdit: status === "queued" ? (next: string) => editQueued(queueId, next) : undefined,
         };
       }),
     ...queuedItems
@@ -958,6 +983,7 @@ export function Thread({
         status: (stopping ? "stopping" : "queued") as QueueTrayItem["status"],
         onSendNow: !stopping && runState === "running" && !sleeping ? () => sendQueuedNow(q.id) : undefined,
         onCancel: !stopping ? () => cancelQueued(q.id) : undefined,
+        onEdit: !stopping ? (next: string) => editQueued(q.id, next) : undefined,
       })),
   ];
   const stopTurn = async () => {

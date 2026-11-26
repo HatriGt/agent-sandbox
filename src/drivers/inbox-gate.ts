@@ -78,6 +78,17 @@ export function inboxLine(m: InboxLine): string {
 
 /** Shell that appends stdin to INBOX_MARK (used with exec { input }). */
 export const INBOX_APPEND_SH = `cat >> ${INBOX_MARK}`;
+/**
+ * Shell that takes ONE message back out of INBOX_MARK by id (the operator cancelled or rewrote it
+ * before the gate got to it). The id is the first key of the line `inboxLine` writes, so the
+ * fixed-string match is exact. A torn or already-consumed file is left alone: best effort, the
+ * controller's inbox is the source of truth and the receipt reconciliation covers the race.
+ */
+export function inboxUnmirrorSh(id: string): string {
+  if (!/^q\d+$/.test(id)) throw new Error(`inboxUnmirrorSh: bad id ${id}`);
+  const I = INBOX_MARK;
+  return `if [ -f ${I} ]; then grep -v -F '{"id":"${id}",' ${I} > ${I}.tmp; if [ -s ${I}.tmp ]; then mv ${I}.tmp ${I}; else rm -f ${I} ${I}.tmp; fi; fi; true`;
+}
 /** Shell that prints and clears the delivered ids (atomic enough: rename, then read). */
 export const INBOX_TAKE_DELIVERED_SH = `if [ -f ${INBOX_DELIVERED} ]; then mv ${INBOX_DELIVERED} ${INBOX_DELIVERED}.take && cat ${INBOX_DELIVERED}.take && rm -f ${INBOX_DELIVERED}.take; fi; true`;
 /** Shell for the run wrapper: a fresh turn starts with no stale mail or receipts. */

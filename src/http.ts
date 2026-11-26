@@ -92,7 +92,7 @@ import { seedStarterSkills } from "./starter-skills.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { currentPrincipal, guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { allowShellScripts, securityHeaders } from "./security-headers.js";
-import { gatherMonitor, gatherWatch, readAgentLogFull, askInBox, driverStateLine, startBoxIfStopped, noteRunning, wokenAtOf, stopBox, noteStopped, interruptAgentRun, mirrorInboxMessage, takeDeliveredInbox, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo, pauseRunForResize, type MemoryTier, type DiskTier } from "./msb.js";
+import { gatherMonitor, gatherWatch, readAgentLogFull, askInBox, driverStateLine, startBoxIfStopped, noteRunning, wokenAtOf, stopBox, noteStopped, interruptAgentRun, mirrorInboxMessage, unmirrorInboxMessage, takeDeliveredInbox, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo, pauseRunForResize, type MemoryTier, type DiskTier } from "./msb.js";
 import { isBoxName } from "./sync.js";
 import { run as runCmd, shellQuote, sshLaneFront } from "./exec.js";
 import { touchClaimed, markParked } from "./claims.js";
@@ -4243,9 +4243,62 @@ app.delete("/inbox.json", (req: Request, res: Response) => {
     res.status(400).json({ error: "session query param required" });
     return;
   }
-  if (id) inbox.remove(session, id);
-  else inbox.clear(session);
+  // The box's mirrored copy goes too, or the gate would still deliver a cancelled message at the
+  // next tool call. Not awaited: the inbox answers now, the box catches up.
+  if (id) {
+    if (inbox.remove(session, id)) void unmirrorInboxMessage(hcfg(session), session, id);
+  } else {
+    for (const m of inbox.list(session)) void unmirrorInboxMessage(hcfg(session), session, m.id);
+    inbox.clear(session);
+  }
   res.json({ queued: inbox.list(session) });
+});
+// Rewrite a queued message before the agent has it. Same id and slot; the box's mirrored copy is
+// taken back first and mirrored again with the new words, so the gate never delivers the old ones.
+// If the gate already delivered it (a receipt is waiting), the edit is too late: 409, and the
+// receipt is reconciled here exactly as the delivery loop would have.
+app.patch("/inbox.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = boxParam(req.body);
+  const { id, message } = (req.body ?? {}) as { id?: string; message?: string };
+  const text = typeof message === "string" ? message.trim() : "";
+  if (!session || !id || !/^q\d+$/.test(id)) {
+    res.status(400).json({ error: "session and a queued message id are required" });
+    return;
+  }
+  if (!text) {
+    res.status(400).json({ error: "the message cannot be empty — remove it from the queue instead" });
+    return;
+  }
+  const list = inbox.list(session);
+  const at = list.findIndex((m) => m.id === id);
+  if (at < 0) {
+    res.status(404).json({ error: "that queued message is gone (already delivered or removed)" });
+    return;
+  }
+  try {
+    const delivered = await takeDeliveredInbox(hcfg(session), session);
+    for (const d of delivered) inbox.remove(session, d);
+    if (delivered.includes(id)) {
+      res.status(409).json({ error: "the agent already read that message — send a new one", queued: inbox.list(session) });
+      return;
+    }
+    await unmirrorInboxMessage(hcfg(session), session, id);
+    const m = inbox.update(session, id, text);
+    if (!m) {
+      res.status(404).json({ error: "that queued message is gone (already delivered or removed)", queued: inbox.list(session) });
+      return;
+    }
+    // Mirrored again on the same terms as a fresh send: only into a running box, never a /compact
+    // or anything that waits behind one.
+    const behindCompact = isCompactCommand(text) || list.slice(0, at).some((x) => isCompactCommand(x.text));
+    if (!behindCompact && (await watchHub.read(session)).runState === "running") {
+      mirrorInboxMessage(hcfg(session), session, m).catch((e) => console.error(`[inbox] mirror to ${session} failed: ${(e as Error).message}`));
+    }
+    res.json({ queued: inbox.list(session) });
+  } catch (e) {
+    failWith(res, e);
+  }
 });
 
 // Workspace files for `@` mentions: ?session=&q=; at most 40 ranked matches.

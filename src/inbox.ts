@@ -74,6 +74,15 @@ export class Inbox {
     return [...(this.queues.get(session) ?? [])];
   }
 
+  /** Rewrite a queued message's text in place: same id, same slot in the order, same stamp. */
+  update(session: string, id: string, text: string): QueuedMessage | null {
+    const m = this.queues.get(session)?.find((x) => x.id === id);
+    if (!m) return null;
+    m.text = text;
+    this.persist((db) => db.prepare(`UPDATE inbox_messages SET text = ? WHERE box = ? AND msg_id = ?`).run(text, session, id));
+    return { ...m };
+  }
+
   remove(session: string, id: string): boolean {
     const list = this.queues.get(session);
     if (!list) return false;
