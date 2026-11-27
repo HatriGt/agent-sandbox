@@ -9,6 +9,8 @@
 // row and one line per row.
 import { spawn } from "node:child_process";
 import { chromium } from "file:///C:/Users/ak/AppData/Roaming/npm/node_modules/@playwright/mcp/node_modules/playwright/index.mjs";
+// The structured columns come from the controller (`brief` on every row): the built module does here what viewTrigger does live.
+import { briefOf } from "../dist/trigger-facts.js";
 
 const args = process.argv.slice(2);
 const dark = args.includes("--dark");
@@ -44,12 +46,13 @@ const base = (o) => ({
 });
 const chat = "pool-1791864841224-omp-qyt2hi";
 const triggers = [
-  // One-time, the new form: title / does / repo / gives, waiting for its moment.
+  // One-time, the new form: title / does / repo / gives plus the agent's own column values (target / into), waiting for its moment.
   base({
     id: "t-once-wait",
     name: "Force-merge 3 production PRs",
     summary: "Merges #2910, #2911 and #2912 with admin override once their checks are green",
     outcome: "Three merged PRs",
+    facts: { target: "PRs #2910–#2912", into: "main" },
     taskTemplate: "Merge PRs #2910, #2911 and #2912 in atom-insurance/elseco-deal-service with `gh pr merge --admin` once CI is green on each; report what merged and what did not.",
     repos: ["atom-insurance/elseco-deal-service"],
     spec: { at: now + 2 * H + 10 * 60_000 },
@@ -167,7 +170,22 @@ const triggers = [
     quiet: true,
     counts: { checked: 4, reports: 2 },
   }),
-];
+  // One-time, the OLD form with a long first-sentence name, as the live row of 2026-11-24 read.
+  base({
+    id: "t-once-old-long",
+    name: "Force-merge 3 production PRs at 12:45 PM Dubai time; the user explicitly authori",
+    taskTemplate:
+      "Force-merge 3 production PRs at 12:45 PM Dubai time; the user explicitly authorized this and said not to ask again. Run each with `gh pr merge <n> -R <repo> --admin` plus the merge method the repo allows (prefer merge commit, keep the branch): atom-insurance/atom-ui-spacerdb#282, atom-insurance/elseco-riskdb-services#164, atom-insurance/elseco-deal-service#2889.",
+    spec: { at: now - 3 * D },
+    lastFired: now - 3 * D,
+    lastResult: { at: now - 3 * D, outcome: "started", box: "pool-1791700000000-omp-fm3", finished: { state: "done", headline: "done · 4 steps", archiveId: 456 } },
+    scope: "scheduled",
+    status: "done",
+    sourceBox: "pool-1791700000000-omp-src3",
+    when: `once, ${new Date(now - 3 * D).toISOString().slice(0, 16).replace("T", " ")} UTC`,
+  }),
+].map((t) => ({ ...t, brief: briefOf(t) }));
+console.log("brief:", JSON.stringify(Object.fromEntries(triggers.map((t) => [t.name.slice(0, 28), t.brief]))));
 
 const server = spawn(process.execPath, ["test/ui-mock-server.mjs", String(port)], { stdio: ["ignore", "pipe", "inherit"] });
 await new Promise((r) => server.stdout.once("data", r));
@@ -195,6 +213,7 @@ const T = "[aria-label='Automations']";
 await page.waitForSelector(T, { timeout: 20000 });
 await page.waitForTimeout(1400);
 await page.screenshot({ path: out("page"), fullPage: true });
+await page.locator(T).screenshot({ path: out("grid") });
 
 // Readout: the filter bar, the header row and one line per row.
 const readTable = () =>
@@ -212,7 +231,7 @@ const tabs = await page.evaluate(() => [...document.querySelectorAll("[role=tab]
 console.log(JSON.stringify({ live, tabs, ...(await readTable()) }, null, 1));
 
 // Hover a coming-up row: the actions (View · Cancel) show, like every table here.
-const waitRow = page.locator(`${T} tbody tr`, { hasText: "Force-merge 3 production PRs" });
+const waitRow = page.getByRole("row", { name: "Open runs of Force-merge 3 production PRs", exact: true });
 await waitRow.hover();
 await page.waitForTimeout(400);
 await waitRow.screenshot({ path: out("row-hover") });
@@ -224,6 +243,21 @@ console.log("widths:", JSON.stringify(await page.evaluate((T) => {
   return { table: t.clientWidth, wrap: t.parentElement.clientWidth, scroll: t.parentElement.scrollWidth, cols, cells, tr: tr.getBoundingClientRect().width };
 }, T)));
 console.log("hover row buttons:", JSON.stringify(await waitRow.locator("button").allInnerTexts()));
+
+// Scrolled sideways: the Name column stays put (sticky) while Result · Next · Source come into view.
+await page.mouse.move(10, 10);
+const scrolled = await page.evaluate((T) => {
+  const box = document.querySelector(T).parentElement;
+  box.scrollLeft = box.scrollWidth;
+  const td = document.querySelector(`${T} tbody tr td`);
+  const cs = getComputedStyle(td);
+  const tr = getComputedStyle(td.parentElement);
+  return new Promise((r) => setTimeout(() => r({ left: box.scrollLeft, max: box.scrollWidth - box.clientWidth, nameX: td.getBoundingClientRect().left, boxX: box.getBoundingClientRect().left, position: cs.position, bg: cs.backgroundColor, trTransform: tr.transform, trAnim: tr.animationName, cls: td.className.slice(0, 80) }), 300));
+}, T);
+console.log("scrolled:", JSON.stringify(scrolled));
+await page.locator(T).screenshot({ path: out("scrolled") });
+await page.evaluate((T) => (document.querySelector(T).parentElement.scrollLeft = 0), T);
+await page.waitForTimeout(300);
 
 // Filters: the One-time chip, then Status = waiting on you, then search.
 await page.getByRole("radio", { name: /^One-time/ }).click();
@@ -244,11 +278,11 @@ await page.getByRole("searchbox", { name: "Search automations" }).fill("");
 await page.waitForTimeout(400);
 
 // The editor sheet on a one-time task: the "What it does" / "Gives" fields.
-await page.getByRole("button", { name: "View Force-merge 3 production PRs" }).click();
+await page.getByRole("button", { name: "View Force-merge 3 production PRs", exact: true }).click();
 await page.waitForSelector("[role=dialog]", { timeout: 10000 });
 await page.waitForTimeout(900);
 await page.locator("[role=dialog]").screenshot({ path: out("sheet") });
-const sheet = await page.evaluate(() => [...document.querySelectorAll("[role=dialog] label")].slice(0, 4).map((l) => `${l.querySelector("span.label")?.innerText ?? "?"}=${l.querySelector("input")?.value ?? ""}`));
+const sheet = await page.evaluate(() => [...document.querySelectorAll("[role=dialog] input")].slice(0, 8).map((i) => `${i.closest("label")?.querySelector("span")?.innerText ?? "?"}=${i.value}${i.value ? "" : ` (${i.placeholder})`}`));
 console.log("sheet:", JSON.stringify(sheet));
 await page.keyboard.press("Escape");
 await page.waitForTimeout(500);

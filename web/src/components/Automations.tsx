@@ -3,7 +3,7 @@ import { AlarmClock, ArrowUpRight, CalendarClock, ChevronRight, Copy, FlaskConic
 import type { LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
-import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent, type PrFollow, type WatchEvent } from "@/lib/api";
+import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent, type PrFollow, type TaskFacts, type WatchEvent } from "@/lib/api";
 import { fmtAgo, friendlyName } from "@/lib/format";
 import { useCached, writeCache } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
@@ -264,7 +264,7 @@ export function editAutomation(id: string): void {
  */
 export const isOnce = (a: Pick<Automation, "kind" | "spec">) => a.kind === "schedule" && !!a.spec.at;
 /** What a search matches: the name, the agent's one-liners, the trigger in words and the repos. */
-const searchText = (a: Automation) => [a.name, a.summary ?? "", a.outcome ?? "", a.when, ...(a.repos ?? [])].join(" ").toLowerCase();
+const searchText = (a: Automation) => [a.name, a.summary ?? "", a.outcome ?? "", a.when, ...Object.values(a.brief ?? {}), ...(a.repos ?? [])].join(" ").toLowerCase();
 
 /** The Automations tab of Autopilot (AutopilotPage owns the page header and tabs). */
 export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpenBox: (box: string) => void; onOpenPlaybooks: () => void; onOpenRuns: (id: string) => void }) {
@@ -436,6 +436,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
               key={shown.key ?? shown.id ?? "new"}
               id={shown.id}
               initial={shown.draft}
+              brief={(rows ?? []).find((r) => r.id === shown.id)?.brief}
               others={(rows ?? []).filter((r) => r.id !== shown.id)}
               names={names}
               onSaved={(t) => {
@@ -469,6 +470,7 @@ function toDraft(a: Automation): AutomationDraft {
     taskTemplate: a.taskTemplate,
     ...(a.summary ? { summary: a.summary } : {}),
     ...(a.outcome ? { outcome: a.outcome } : {}),
+    ...(a.facts ? { facts: a.facts } : {}),
     enabled: a.enabled,
     prComment: a.prComment,
     quiet: !!a.quiet,
@@ -560,17 +562,33 @@ function sourceLabel(a: Automation): string {
 }
 
 /**
- * The second line under a name: the agent's one-liner (`does:`) when it gave one; else the task
- * past its first sentence when that sentence is the name (the old form: the name WAS the first
- * sentence, so repeating it says nothing); else the task itself. Clipped to a line.
+ * The name as the grid shows it. A row from before the agent's `title:` field carries the task's
+ * first sentence, time and all ("Force-merge 3 production PRs at 12:45 PM Dubai time; the user
+ * explicitly authori…"): for a one-time task the time lives in the When column, so the clause from
+ * " at <time>" on, or from the first ";" or ":", is cut. The full name stays in the cell's title.
  */
-function blurb(a: Automation): string | undefined {
-  if (a.summary) return a.summary;
+function shortName(a: Automation): string {
+  const n = automationLabel(a.name);
+  if (!isOnce(a)) return n;
+  const cut = /\s+(?:at|by|on|before|after)\s+\d{1,2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?\b.*$|\s*[;:]\s.*$|\s+(?:tomorrow|tonight|today)\b.*$/i.exec(n);
+  const s = cut ? n.slice(0, cut.index).trim() : n;
+  return s.length >= 6 ? s : n;
+}
+
+/** The hover text behind a name: the agent's one line, then the task. */
+function nameTitle(a: Automation): string {
   const t = a.taskTemplate.replace(/\s+/g, " ").trim();
-  const first = t.split(/[.!?](?=\s|$)/)[0].trim();
-  const rest = first && first === a.name.replace(/[.!?]$/, "").trim() ? t.slice(first.length).replace(/^[.!?]\s*/, "") : t;
-  if (!rest) return undefined;
-  return rest.length > 160 ? `${rest.slice(0, 159).trimEnd()}…` : rest;
+  return a.summary ? `${a.summary}\n\n${t}` : t;
+}
+
+/** One structured column: the value on one line, the full text on hover, a dash when there is none. */
+function Fact({ value, mono, bright }: { value?: string; mono?: boolean; bright?: boolean }) {
+  if (!value) return <span className="text-faint text-meta">—</span>;
+  return (
+    <span className={cn("block truncate", mono ? "font-mono text-micro" : "text-meta", bright ? "text-foreground" : "text-muted-foreground")} title={value}>
+      {value}
+    </span>
+  );
 }
 
 const atFmt = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -630,7 +648,7 @@ function StatusCell({ a, now, onOpenBox }: { a: Automation; now: number; onOpenB
   return <LastResult a={a} onOpenBox={onOpenBox} />;
 }
 
-/** What came of it: the last run's headline; before any run, what the agent said it gives (one-time) or the quiet counter / last delivery (rules). */
+/** What came of it: the last run's headline; before any run, what the agent said it gives (`gives …`) or the quiet counter / last delivery (rules). */
 function ResultCell({ a }: { a: Automation }) {
   const r = a.lastResult;
   if (r?.outcome === "started" && r.finished?.headline)
@@ -645,14 +663,13 @@ function ResultCell({ a }: { a: Automation }) {
         {r.reason}
       </span>
     );
-  if (isOnce(a))
-    return a.outcome && a.status !== "cancelled" ? (
+  if (a.outcome && a.status !== "cancelled" && !r)
+    return (
       <span className="text-muted-foreground block truncate text-meta" title={`What the agent said it gives: ${a.outcome}`}>
         <span className="text-faint">gives</span> {a.outcome}
       </span>
-    ) : (
-      <span className="text-faint text-meta">—</span>
     );
+  if (isOnce(a)) return <span className="text-faint text-meta">—</span>;
   const fires = a.lastDelivery && (a.kind === "webhook" || a.kind === "github" || a.kind === "watch");
   const line = a.quiet && a.counts ? countsLine(a.counts) : fires ? deliveryLine(a.lastDelivery!) : "";
   return line ? (
@@ -691,10 +708,13 @@ function SourceCell({ a, workflows, onOpenBox, onOpenPlaybook }: { a: Automation
 }
 
 /**
- * Every automation as one single-line row: Name · Type · When · Status · Does · Repo · Result ·
- * Next · Source · the actions. Filters above the table (type chips, status and repo selects) and
- * the table's own search; a sort on any header replaces the default order (what needs you, what
- * runs, what comes soonest, rules by their next fire, finished newest, paused last).
+ * Every automation as one single-line row: Name · Type · When · Status · Action · Target · Into ·
+ * Repo · Only if · How · Gives · Result · Next · Source · the actions. The five structured columns
+ * are the server's `brief` (the agent's marker fields, else read from the text), so a schedule made
+ * in a chat spreads across the grid instead of sitting as one paragraph. Filters above the table
+ * (type chips, status and repo selects) and the table's own search; a sort on any header replaces
+ * the default order (what needs you, what runs, what comes soonest, rules by their next fire,
+ * finished newest, paused last).
  */
 function AutomationTable({
   rows,
@@ -734,7 +754,7 @@ function AutomationTable({
       primary: true,
       header: "Name",
       width: "w-52",
-      fitMax: 208,
+      fitMax: 232,
       sort: (a) => a.name,
       cell: (a) => {
         const Glyph = typeGlyph(a);
@@ -744,19 +764,19 @@ function AutomationTable({
             {/* On a phone the Status column is gone: its dot rides before the name. */}
             <span className={cn("size-1.5 shrink-0 rounded-full sm:hidden", STATE_DOT[s])} title={s} aria-hidden />
             <Glyph className="text-muted-foreground size-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
-            <span className="text-foreground min-w-0 truncate font-medium" title={a.taskTemplate}>
-              {automationLabel(a.name)}
+            <span className="text-foreground min-w-0 truncate font-medium" title={nameTitle(a)}>
+              {shortName(a)}
             </span>
           </span>
         );
       },
     },
-    { id: "type", header: "Type", width: "w-28", fitMax: 112, hideBelow: "md", sort: typeLabel, cell: (a) => <span className="text-muted-foreground block truncate text-meta">{typeLabel(a)}</span> },
+    { id: "type", header: "Type", width: "w-26", fitMax: 104, hideBelow: "md", sort: typeLabel, cell: (a) => <span className="text-muted-foreground block truncate text-meta">{typeLabel(a)}</span> },
     {
       id: "when",
       header: "When",
-      width: "w-40",
-      fitMax: 152,
+      width: "w-36",
+      fitMax: 140,
       hideBelow: "md",
       sort: (a) => (isOnce(a) ? a.spec.at : a.when),
       cell: (a) =>
@@ -771,22 +791,10 @@ function AutomationTable({
         ),
     },
     { id: "status", header: "Status", width: "w-36", fitMax: 144, hideBelow: "sm", sort: (a) => STATE_RANK[stateOf(a)], cell: (a) => <StatusCell a={a} now={now} onOpenBox={onOpenBox} /> },
-    {
-      id: "does",
-      header: "Does",
-      hideBelow: "lg",
-      minFlex: 160,
-      cell: (a) => {
-        const line = blurb(a);
-        return line ? (
-          <span className="text-muted-foreground block truncate text-meta" title={line}>
-            {line}
-          </span>
-        ) : (
-          <span className="text-faint text-meta">—</span>
-        );
-      },
-    },
+    // The structured columns: what it does, to what, where it lands, on what conditions, by what means.
+    { id: "action", header: "Action", width: "w-24", fitMax: 104, sort: (a) => a.brief?.action, cell: (a) => <Fact value={a.brief?.action} bright /> },
+    { id: "target", header: "Target", width: "w-32", fitMax: 136, hideBelow: "md", sort: (a) => a.brief?.target, cell: (a) => <Fact value={a.brief?.target} bright /> },
+    { id: "into", header: "Into", width: "w-24", fitMax: 104, hideBelow: "lg", sort: (a) => a.brief?.into, cell: (a) => <Fact value={a.brief?.into} mono /> },
     {
       id: "repo",
       header: "Repo",
@@ -806,6 +814,8 @@ function AutomationTable({
         );
       },
     },
+    { id: "only", header: "Only if", hideBelow: "lg", minFlex: 150, cell: (a) => <Fact value={a.brief?.only} /> },
+    { id: "how", header: "How", width: "w-32", fitMax: 136, hideBelow: "xl", sort: (a) => a.brief?.how, cell: (a) => <Fact value={a.brief?.how} mono /> },
     { id: "result", header: "Result", width: "w-36", fitMax: 144, hideBelow: "lg", cell: (a) => <ResultCell a={a} /> },
     {
       id: "next",
@@ -824,11 +834,12 @@ function AutomationTable({
         );
       },
     },
-    { id: "source", header: "Source", width: "w-26", fitMax: 104, hideBelow: "lg", sort: (a) => a.sourceTitle ?? (a.workflowId ? "playbook" : null), cell: (a) => <SourceCell a={a} workflows={workflows} onOpenBox={onOpenBox} onOpenPlaybook={onOpenPlaybook} /> },
+    { id: "source", header: "Source", width: "w-26", fitMax: 104, hideBelow: "xl", sort: (a) => a.sourceTitle ?? (a.workflowId ? "playbook" : null), cell: (a) => <SourceCell a={a} workflows={workflows} onOpenBox={onOpenBox} onOpenPlaybook={onOpenPlaybook} /> },
   ];
   return (
     <DataTable
       aria-label="Automations"
+      stickyFirst
       rows={shown}
       columns={columns}
       rowKey={(a) => a.id}
@@ -882,7 +893,16 @@ function AutomationTable({
       }}
       rowProps={(a) => {
         const s = stateOf(a);
-        return { className: s === "waiting on you" ? "bg-attention/[0.04]" : s === "finished" || s === "paused" ? "opacity-60 hover:opacity-100 focus-visible:opacity-100" : undefined };
+        // Opaque tints and per-cell dimming (not row opacity): the pinned Name cell paints the row's
+        // background over the cells that scroll under it, so nothing may be see-through.
+        return {
+          className:
+            s === "waiting on you"
+              ? "bg-[color-mix(in_oklab,var(--attention)_4%,var(--table-bg))]"
+              : s === "finished" || s === "paused"
+                ? "[&>td>*]:opacity-60 hover:[&>td>*]:opacity-100 focus-visible:[&>td>*]:opacity-100"
+                : undefined,
+        };
       }}
     />
   );
@@ -1028,6 +1048,7 @@ function Editor({
   onRan,
   onOpenRuns,
   initialHasSecret,
+  brief,
 }: {
   id: string | null;
   initial: AutomationDraft;
@@ -1038,8 +1059,17 @@ function Editor({
   onRan: () => void;
   onOpenRuns: (id: string) => void;
   initialHasSecret: boolean;
+  /** What the grid shows for this row now: the placeholders of the column fields (a blank field keeps the read value). */
+  brief?: TaskFacts;
 }) {
   const [d, setD] = React.useState<AutomationDraft>(initial);
+  const setFact = (k: keyof TaskFacts, v: string) =>
+    setD((cur) => {
+      const facts = { ...(cur.facts ?? {}) };
+      if (v.trim()) facts[k] = v;
+      else delete facts[k];
+      return { ...cur, ...(Object.keys(facts).length ? { facts } : { facts: undefined }) };
+    });
   const [saving, setSaving] = React.useState(false);
   const [running, setRunning] = React.useState(false);
   const [hook, setHook] = React.useState<{ url: string; secret: string } | null>(null);
@@ -1154,6 +1184,26 @@ function Editor({
           <Label hint="what you get">Gives</Label>
           <input className={field} value={d.outcome ?? ""} maxLength={80} placeholder="A PR" onChange={(e) => set({ outcome: e.target.value || undefined })} />
         </label>
+      </div>
+      {/* The grid's structured columns. A blank field shows what the controller read from the text (the placeholder); typing overrides it. */}
+      <div>
+        <Label hint="the table's columns · blank keeps what was read from the task">Columns</Label>
+        <div className="grid gap-3 sm:grid-cols-6">
+          {(
+            [
+              ["action", "Action", "Merge", "sm:col-span-2"],
+              ["target", "Target", "PR #290", "sm:col-span-2"],
+              ["into", "Into", "Production", "sm:col-span-2"],
+              ["only", "Only if", "checks green · not draft", "sm:col-span-4"],
+              ["how", "How", "merge commit", "sm:col-span-2"],
+            ] as [keyof TaskFacts, string, string, string][]
+          ).map(([k, label, sample, span]) => (
+            <label key={k} className={cn("block min-w-0", span)}>
+              <span className="text-faint mb-1 block text-micro">{label}</span>
+              <input className={field} value={d.facts?.[k] ?? ""} maxLength={k === "only" ? 120 : 80} placeholder={brief?.[k] ?? sample} onChange={(e) => setFact(k, e.target.value)} />
+            </label>
+          ))}
+        </div>
       </div>
 
       <div>

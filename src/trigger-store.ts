@@ -4,6 +4,7 @@ import type { SecretBox } from "./secretbox.js";
 import { scheduleStatus, type ScheduleStatus } from "./thread-schedule.js";
 import { describeWhen, newSecret, nextFire, parseCron, type TriggerInput, type TriggerKind, type TriggerSpec } from "./triggers.js";
 import type { RunFacts } from "./run-facts.js";
+import { briefOf, type TaskFacts } from "./trigger-facts.js";
 
 /**
  * Owner-scoped persistence for triggers (the pure rules live in src/triggers.ts). Every read and
@@ -70,6 +71,7 @@ function toRow(r: Record<string, any>): TriggerRow {
     taskTemplate: r.task_template,
     ...(r.summary ? { summary: String(r.summary) } : {}),
     ...(r.outcome ? { outcome: String(r.outcome) } : {}),
+    ...(r.facts_json ? { facts: parse<TaskFacts>(r.facts_json, {}) } : {}),
     enabled: !!r.enabled,
     // triggers.concurrency is orphaned: every fire gets its own box; the column is neither read nor written.
     // triggers.budget_json is orphaned: budgets were removed; the column is neither read nor written.
@@ -123,10 +125,10 @@ export function createTrigger(
   // A proposal is always created paused: the agent suggests, the owner enables.
   const enabled = opts.proposed ? false : t.enabled;
   db.prepare(
-    `INSERT INTO triggers (id, owner, name, kind, spec_json, repos_json, task_template, summary, outcome, enabled, pr_comment, quiet, proposed, agent, model, harness_id, workflow_id, source_box, scope, secret_enc, next_fire, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO triggers (id, owner, name, kind, spec_json, repos_json, task_template, summary, outcome, facts_json, enabled, pr_comment, quiet, proposed, agent, model, harness_id, workflow_id, source_box, scope, secret_enc, next_fire, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repos?.length ? JSON.stringify(t.repos) : null, t.taskTemplate, t.summary ?? null, t.outcome ?? null, enabled ? 1 : 0,
+    id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repos?.length ? JSON.stringify(t.repos) : null, t.taskTemplate, t.summary ?? null, t.outcome ?? null, t.facts ? JSON.stringify(t.facts) : null, enabled ? 1 : 0,
     t.prComment ? 1 : 0, t.quiet ? 1 : 0, opts.proposed ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, opts.sourceBox ?? null, opts.scope ?? "automation", box.seal(secret),
     computeNextFire({ ...t, enabled }, now), now, now
   );
@@ -137,11 +139,11 @@ export function updateTrigger(db: Db, owner: string, id: string, t: TriggerInput
   const cur = getTrigger(db, owner, id);
   const r = db
     .prepare(
-      `UPDATE triggers SET name = ?, kind = ?, spec_json = ?, repos_json = ?, task_template = ?, summary = ?, outcome = ?, enabled = ?,
+      `UPDATE triggers SET name = ?, kind = ?, spec_json = ?, repos_json = ?, task_template = ?, summary = ?, outcome = ?, facts_json = ?, enabled = ?,
        pr_comment = ?, quiet = ?, agent = ?, model = ?, harness_id = ?, workflow_id = ?, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`
     )
     .run(
-      t.name, t.kind, JSON.stringify(t.spec), t.repos?.length ? JSON.stringify(t.repos) : null, t.taskTemplate, t.summary ?? null, t.outcome ?? null, t.enabled ? 1 : 0,
+      t.name, t.kind, JSON.stringify(t.spec), t.repos?.length ? JSON.stringify(t.repos) : null, t.taskTemplate, t.summary ?? null, t.outcome ?? null, t.facts ? JSON.stringify(t.facts) : null, t.enabled ? 1 : 0,
       t.prComment ? 1 : 0, t.quiet ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, computeNextFire(t, now, cur?.lastFired != null), now, id, owner
     );
   return r.changes ? getTrigger(db, owner, id) : undefined;
@@ -343,10 +345,11 @@ export function pruneDeliveries(db: Db, now = Date.now(), maxAgeMs = 7 * 24 * 36
 }
 
 /** The API view: adds "when" in words (and the quiet counter for quiet automations); never includes the secret. */
-export function viewTrigger(t: TriggerRow, names: Record<string, string>, db?: Db): TriggerRow & { when: string; status: ScheduleStatus; lastDelivery?: DeliveryEntry; counts?: QuietCounts } {
+export function viewTrigger(t: TriggerRow, names: Record<string, string>, db?: Db): TriggerRow & { when: string; status: ScheduleStatus; brief: TaskFacts; lastDelivery?: DeliveryEntry; counts?: QuietCounts } {
   const ld = db ? lastDelivery(db, t.id) : undefined;
   const counts = db && t.quiet ? quietCounts(db, t.id) : undefined;
-  return { ...t, when: describeWhen(t, names), status: scheduleStatus(t), ...(ld ? { lastDelivery: ld } : {}), ...(counts ? { counts } : {}) };
+  // `brief` is what the grid shows (given facts over derived ones); `facts` stays the given set the editor edits.
+  return { ...t, when: describeWhen(t, names), status: scheduleStatus(t), brief: briefOf(t), ...(ld ? { lastDelivery: ld } : {}), ...(counts ? { counts } : {}) };
 }
 
 /* ───────────────────────────── quiet runs ───────────────────────────── */

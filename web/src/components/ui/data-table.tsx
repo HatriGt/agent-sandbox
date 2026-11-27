@@ -30,13 +30,13 @@ export interface Column<T> {
   /** The flexible column's least width before the card scrolls sideways, in px (default 240). */
   minFlex?: number;
   /** Hide below this breakpoint (the primary column should carry a mobile meta line instead). */
-  hideBelow?: "sm" | "md" | "lg";
+  hideBelow?: "sm" | "md" | "lg" | "xl";
   /** The column that names the row: bright ink and medium weight; every other column stays muted (Orbit). */
   primary?: boolean;
   className?: string;
 }
 
-const BP: Record<NonNullable<Column<unknown>["hideBelow"]>, string> = { sm: "(min-width: 40rem)", md: "(min-width: 48rem)", lg: "(min-width: 64rem)" };
+const BP: Record<NonNullable<Column<unknown>["hideBelow"]>, string> = { sm: "(min-width: 40rem)", md: "(min-width: 48rem)", lg: "(min-width: 64rem)", xl: "(min-width: 80rem)" };
 
 /** The trailing actions column, sized from its own buttons on a phone. */
 const ACTIONS = "__actions";
@@ -89,6 +89,7 @@ export function DataTable<T>({
   minWidth,
   size,
   stickyHeader,
+  stickyFirst,
   containerClassName,
   "aria-label": ariaLabel,
   bordered = true,
@@ -117,6 +118,8 @@ export function DataTable<T>({
   minWidth?: string;
   size?: TableProps["size"];
   stickyHeader?: boolean;
+  /** The first column stays put while the card scrolls sideways (a wide grid keeps its names in view); it paints the row's own background. */
+  stickyFirst?: boolean;
   containerClassName?: string;
   "aria-label"?: string;
   /** Default true: the table sits in a rounded bordered card. False → Orbit's frameless list. */
@@ -130,7 +133,7 @@ export function DataTable<T>({
   /** Where dragged column widths are remembered; defaults to the aria-label. */
   resizeKey?: string;
 }) {
-  const at = { sm: useMediaQuery(BP.sm), md: useMediaQuery(BP.md), lg: useMediaQuery(BP.lg) };
+  const at = { sm: useMediaQuery(BP.sm), md: useMediaQuery(BP.md), lg: useMediaQuery(BP.lg), xl: useMediaQuery(BP.xl) };
   // A column hidden at this breakpoint is not rendered at all, not display:none: in fixed layout a
   // hidden <col> or cell still takes an equal share of the free width, which is what squeezed the
   // primary column on phones.
@@ -224,6 +227,12 @@ export function DataTable<T>({
   // and the hover-revealed buttons dragged a scrollbar in with them.
   const fitActions = cols.fit(ACTIONS);
   const actionsW = narrow ? fitActions : fitActions ? Math.max(112, fitActions) : undefined;
+  // The pinned first column: it inherits the row's background (rest, hover, selected) and takes a
+  // hairline plus a short shadow on its right edge once the card has scrolled sideways.
+  const pin = (i: number) =>
+    stickyFirst && i === 0 && !narrow
+      ? "sticky left-0 z-[1] bg-inherit in-data-scrolled-start:shadow-[inset_-1px_0_0_var(--border),8px_0_12px_-8px_color-mix(in_oklab,var(--foreground)_18%,transparent)]"
+      : undefined;
 
   const table = (
     <Table
@@ -232,7 +241,13 @@ export function DataTable<T>({
       size={size}
       stickyHeader={stickyHeader}
       containerClassName={containerClassName}
-      className={cn("table-fixed", !narrow && minWidth)}
+      className={cn(
+        "table-fixed",
+        !narrow && minWidth,
+        // A pinned column paints the row's background over scrolled cells, so that background must
+        // be opaque: the hover tint is mixed onto the card instead of onto transparent.
+        stickyFirst && (bordered ? "[--table-hover:color-mix(in_oklab,var(--foreground)_3%,var(--viz-tile))]" : "[--table-bg:var(--background)] [--table-hover:color-mix(in_oklab,var(--foreground)_3%,var(--background))]")
+      )}
       style={(() => {
         if (narrow) return undefined;
         // Sized columns + the flexible one's share (≥240px unless `minFlex`, and ≥ its header): below that the card scrolls sideways.
@@ -258,10 +273,10 @@ export function DataTable<T>({
       </colgroup>
       <TableHeader>
         <TableRow>
-          {visibleCols.map((c) => {
+          {visibleCols.map((c, i) => {
             const on = sort?.id === c.id ? sort.dir : null;
             return (
-              <TableHead key={c.id} align={c.align} aria-sort={on ? (on === "asc" ? "ascending" : "descending") : c.sort ? "none" : undefined} className="group/th relative whitespace-nowrap">
+              <TableHead key={c.id} align={c.align} aria-sort={on ? (on === "asc" ? "ascending" : "descending") : c.sort ? "none" : undefined} data-pinned={pin(i) ? "" : undefined} className={cn("group/th relative whitespace-nowrap", pin(i) && pin(i)!.replace("z-[1]", "z-2"))}>
                 {c.sort ? (
                   <button
                     type="button"
@@ -374,8 +389,8 @@ export function DataTable<T>({
                   data-new={motion["data-new"]}
                   style={motion.style}
                 >
-                  {visibleCols.map((c) => (
-                    <TableCell key={c.id} align={c.align} className={cn("overflow-hidden", c.primary && "text-foreground font-medium", c.className)}>
+                  {visibleCols.map((c, i) => (
+                    <TableCell key={c.id} align={c.align} data-pinned={pin(i) ? "" : undefined} className={cn("overflow-hidden", c.primary && "text-foreground font-medium", pin(i), c.className)}>
                       {c.cell(r)}
                     </TableCell>
                   ))}

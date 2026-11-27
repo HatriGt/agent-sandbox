@@ -439,8 +439,8 @@ test("parseWhen reads the ways an agent phrases a delay", () => {
 
 test("parseAutomate reads the labelled fields (title, does, repo, gives) in any order and keeps the task", () => {
   const log = [
-    "<!-- schedule: in 2h | title: Force-merge 3 production PRs. | does: Merges #2910, #2911 and #2912 once checks are green | repo: acme/api.git | gives: Three merged PRs | Merge PRs #2910, #2911, #2912 in acme/api with `gh pr merge --admin` | then report back. -->",
-    "<!-- automate: 0 9 * * 1-5 | Summarize CI. | repo: not a repo | title: -->",
+    "<!-- schedule: in 2h | title: Force-merge 3 production PRs. | does: Merges #2910, #2911 and #2912 once checks are green | repo: acme/api.git | gives: Three merged PRs | target: PRs #2910, #2911, #2912 | into: main | if: checks green, not draft | how: admin override | Merge PRs #2910, #2911, #2912 in acme/api with `gh pr merge --admin` | then report back. -->",
+    "<!-- automate: 0 9 * * 1-5 | Summarize CI. | repo: not a repo | title: | target: -->",
   ].join("\n");
   const r = parseAutomate(log, 1_700_000_000_000);
   assert.equal(r.length, 2);
@@ -448,6 +448,9 @@ test("parseAutomate reads the labelled fields (title, does, repo, gives) in any 
   assert.equal(r[0].summary, "Merges #2910, #2911 and #2912 once checks are green");
   assert.equal(r[0].repo, "acme/api");
   assert.equal(r[0].outcome, "Three merged PRs");
+  // The grid's columns, when the agent gives them (`if:` is stored as `only`).
+  assert.deepEqual(r[0].facts, { target: "PRs #2910, #2911, #2912", into: "main", only: "checks green, not draft", how: "admin override" });
+  assert.equal(r[1].facts, undefined);
   // Unlabelled segments are the task, and a pipe inside it survives.
   assert.equal(r[0].task, "Merge PRs #2910, #2911, #2912 in acme/api with `gh pr merge --admin` | then report back.");
   // The old form is unchanged; a bad repo and an empty title are dropped, not errors.

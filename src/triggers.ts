@@ -14,6 +14,7 @@
  */
 import crypto from "node:crypto";
 import { ALERT_PRESETS, INCIDENT_HARNESS_ID, PRESET_LABEL, normalizeCooldown, type AlertPreset } from "./alert-presets.js";
+import { normalizeFacts, type TaskFacts } from "./trigger-facts.js";
 
 export type TriggerKind = "schedule" | "webhook" | "github" | "chain" | "watch";
 export const TRIGGER_KINDS: readonly TriggerKind[] = ["schedule", "webhook", "github", "chain", "watch"];
@@ -462,21 +463,29 @@ export interface AutomateProposal {
   repo?: string;
   /** `gives:` — what the user gets out of it ("Three merged PRs", "A reply in this chat"). */
   outcome?: string;
+  /** `target:` / `into:` / `if:` / `how:` — the grid's structured columns (src/trigger-facts.ts); derived from the text when absent. */
+  facts?: TaskFacts;
 }
 
 /** The labelled fields a marker may carry after <when>; anything unlabelled is the task. */
-const FIELD_RE = /^(title|does|summary|repo|gives|outcome|task):\s*/i;
+const FIELD_RE = /^(title|does|summary|repo|gives|outcome|target|into|if|only|how|task):\s*/i;
 const FIELD_MAX: Record<string, number> = { title: 80, summary: 200, repo: 120, outcome: 80 };
-const FIELD_KEY: Record<string, "title" | "summary" | "repo" | "outcome" | "task"> = { title: "title", does: "summary", summary: "summary", repo: "repo", gives: "outcome", outcome: "outcome", task: "task" };
+type MarkerField = "title" | "summary" | "repo" | "outcome" | "task" | `facts.${"target" | "into" | "only" | "how"}`;
+const FIELD_KEY: Record<string, MarkerField> = {
+  title: "title", does: "summary", summary: "summary", repo: "repo", gives: "outcome", outcome: "outcome", task: "task",
+  target: "facts.target", into: "facts.into", if: "facts.only", only: "facts.only", how: "facts.how",
+};
 
 /**
- * The marker body after <when>: `title: … | does: … | repo: … | gives: … | <task>` in any order.
- * A segment with no known label (or `task:`) is the task; several of them re-join with " | " so a
- * pipe inside the task survives. The old form — just the task — parses unchanged.
+ * The marker body after <when>: `title: … | does: … | repo: … | gives: … | target: … | into: … |
+ * if: … | how: … | <task>` in any order. A segment with no known label (or `task:`) is the task;
+ * several of them re-join with " | " so a pipe inside the task survives. The old form — just the
+ * task — parses unchanged.
  */
-export function parseMarkerBody(body: string): { task: string } & Pick<AutomateProposal, "title" | "summary" | "repo" | "outcome"> {
-  const out: { task: string } & Pick<AutomateProposal, "title" | "summary" | "repo" | "outcome"> = { task: "" };
+export function parseMarkerBody(body: string): { task: string } & Pick<AutomateProposal, "title" | "summary" | "repo" | "outcome" | "facts"> {
+  const out: { task: string } & Pick<AutomateProposal, "title" | "summary" | "repo" | "outcome" | "facts"> = { task: "" };
   const taskParts: string[] = [];
+  const facts: Record<string, string> = {};
   for (const seg of body.split("|")) {
     const m = FIELD_RE.exec(seg.trim());
     const key = m ? FIELD_KEY[m[1].toLowerCase()] : "task";
@@ -485,14 +494,22 @@ export function parseMarkerBody(body: string): { task: string } & Pick<AutomateP
       if (text) taskParts.push(text);
       continue;
     }
-    if (!text || out[key]) continue;
-    const v = text.slice(0, FIELD_MAX[key]);
-    if (key === "repo") {
+    if (key.startsWith("facts.")) {
+      const k = key.slice(6);
+      if (text && !facts[k]) facts[k] = text;
+      continue;
+    }
+    const field = key as "title" | "summary" | "repo" | "outcome";
+    if (!text || out[field]) continue;
+    const v = text.slice(0, FIELD_MAX[field]);
+    if (field === "repo") {
       const r = v.replace(/\.git$/i, "");
       if (REPO_RE.test(r)) out.repo = r;
-    } else out[key] = key === "title" ? v.replace(/[.!]+$/, "") : v;
+    } else out[field] = field === "title" ? v.replace(/[.!]+$/, "") : v;
   }
   out.task = taskParts.join(" | ").slice(0, 500);
+  const f = normalizeFacts(facts);
+  if (f) out.facts = f;
   return out;
 }
 
@@ -720,6 +737,8 @@ export interface TriggerInput {
   summary?: string;
   /** What the user gets out of a run ("A PR", "Three merged PRs"); shown until the real result replaces it. */
   outcome?: string;
+  /** The grid's structured columns as given by the agent's marker or the editor; the view fills the rest from the text. */
+  facts?: TaskFacts;
   enabled: boolean;
   prComment: boolean;
   /** Quiet: a run that ends with QUIET_MARK (nothing needs the operator) sends no notification. */
@@ -760,6 +779,7 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
   const line = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, max) : "");
   const summary = line(b.summary, 200);
   const outcome = line(b.outcome, 80);
+  const facts = normalizeFacts(b.facts);
   // `repos` is the list; a lone `repo` string is still read from older mobile builds.
   const rawRepos: unknown[] = Array.isArray(b.repos) ? b.repos : typeof b.repo === "string" ? [b.repo] : [];
   const repos: string[] = [];
@@ -852,6 +872,7 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
       taskTemplate,
       ...(summary ? { summary } : {}),
       ...(outcome ? { outcome } : {}),
+      ...(facts ? { facts } : {}),
       enabled: b.enabled !== false,
       // Receipt comment: ON by default for GitHub triggers (plan §5); opt-in for the rest.
       prComment: typeof b.prComment === "boolean" ? b.prComment : kind === "github",

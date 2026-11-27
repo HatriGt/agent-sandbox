@@ -1597,6 +1597,19 @@ export interface AutomationDelivery {
   quiet?: boolean;
   facts?: RunFacts;
 }
+/** The Autopilot grid's structured columns (src/trigger-facts.ts): one short value each. */
+export interface TaskFacts {
+  /** One verb: Merge, Force-merge, Review, Check, Report. */
+  action?: string;
+  /** What it acts on: "PR #290", "PRs #282, #164, #2889", "each PR", "CI". */
+  target?: string;
+  /** The branch the work lands on: "Production". */
+  into?: string;
+  /** Conditions checked first, " · " joined: "checks green · not draft". */
+  only?: string;
+  /** The means: "admin override · merge commit", "gh run list". */
+  how?: string;
+}
 export interface AutomationDraft {
   name: string;
   kind: AutomationKind;
@@ -1607,6 +1620,8 @@ export interface AutomationDraft {
   summary?: string;
   /** What the user gets out of a run ("A PR", "Three merged PRs"); shown until the real result replaces it. */
   outcome?: string;
+  /** The grid's structured columns as given (the agent's marker or the editor); the server fills the rest from the text into `brief`. */
+  facts?: TaskFacts;
   enabled: boolean;
   prComment: boolean;
   /** Quiet: a run that finds nothing for the operator sends no notification. */
@@ -1665,6 +1680,8 @@ export type ScheduleStatus = "needs-ok" | "waiting" | "running" | "done" | "fail
 export interface Automation extends AutomationDraft {
   id: string;
   when: string;
+  /** What the grid shows: the given facts over what the server read from the title, summary and task. */
+  brief: TaskFacts;
   /** scheduled: made from a chat (usually once) · automation: a standing rule. */
   scope: AutomationScope;
   status: ScheduleStatus;

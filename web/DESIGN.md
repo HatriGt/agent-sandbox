@@ -2085,3 +2085,41 @@ one, via `onCount`. `collapsedFace` in SchedulePill.tsx is the single rule. The 
 the row detail are unchanged. Proof: `node .shots/thread-fixture.mjs done <out> --schedule=once|
 pending|many --interact=schedule [--dark] [--w=390|900|1100|1440]` (rest, hover, open, detail;
 prints the pill's aria-label and width).
+
+## Round: Autopilot, the task in columns (2026-11-27)
+
+A schedule the agent set up from a chat ("Merge PR #290 to Production", "Force-merge 3 production
+PRs at 12:45 PM Dubai time; the user explicitly authori…") sat in the grid as one long Does
+paragraph and a Result cell that began "gives PR #290 me…". Nothing told the eye *what* the row
+does, *to what*, *where it lands* or *on what conditions* without reading the sentence. The
+controller now reads those out, and the grid shows them as columns.
+
+- **Five structured columns** replace Does: `Action` (one verb in foreground ink: Merge,
+  Force-merge, Review, Check, Report), `Target` (foreground: `PR #290`, `PRs #282, #164, #2889`,
+  `4 PRs`, `each PR` for a templated rule, else the words after the verb: `CI`, `current UTC time`),
+  `Into` (mono, the branch the work lands on, only for landing actions), `Only if` (the guards the
+  task names, ` · ` joined: `checks green · still open · mergeable · not draft · no conflicts`,
+  `pre-authorised`; the flexible column, `minFlex` 150) and `How` (mono: `admin override · merge
+  commit · keep branch`, else the first backticked command's head: `gh run list`, `date -u`). Every
+  value is one line, truncated, with the full text in the title; a dash where nothing was read.
+- **The controller derives, the agent and the editor override.** `src/trigger-facts.ts`
+  `deriveFacts` reads the title first (the agent picked its verb), then the summary, then the task;
+  `briefOf` lets the given facts win field by field. The marker takes `target:` / `into:` / `if:` /
+  `how:` (stored as `facts_json`); the editor's *Columns* block shows the five fields with the read
+  values as placeholders, so a blank field keeps what was read and typing overrides it. `Result`
+  keeps `gives …` before a run (the Gives column was tried and folded back: fifteen columns was one
+  too many).
+- **The name is a name.** `shortName` cuts a one-time task's old first-sentence name at " at
+  <time>", ";" or ":" (the moment lives in When); the full name and the summary are the title.
+- **The Name column is pinned.** Fourteen columns plus actions need ~1830 px; a 1760 px window
+  holds 1399. `DataTable` gains `stickyFirst`: the first column stays put while the card scrolls
+  sideways (hairline plus a short shadow on its edge once scrolled), painting the row's own
+  background, which therefore has to be opaque: the hover tint mixes onto the card instead of onto
+  transparent, the waiting row's tint mixes `attention` 4 % onto `--table-bg`, and finished rows
+  dim their cells' content (`[&>td>*]:opacity-60`) rather than the row. A stylesheet rule gave every
+  first cell `position: relative` for its accent bar; the pinned cell carries `data-pinned` and a
+  rule that outranks it. `hideBelow: "xl"` (80rem) is new: How and Source use it.
+- Proof: `node .shots/autopilot-page.mjs [--dark]` (page, grid, hovered row, scrolled sideways with
+  the pin measured, the chips, a search, the sheet with the Columns placeholders, a phone); it
+  imports `briefOf` from `dist/` so the mocked rows carry the same `brief` the controller sends.
+  `test/trigger-facts.test.ts` pins the six rows that were live on 2026-11-27.

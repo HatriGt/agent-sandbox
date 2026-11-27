@@ -1823,6 +1823,12 @@
 [data-slot="table-row"] > [data-slot="table-cell"]:first-child {
   position: relative;
 }
+/* A pinned first column (DataTable `stickyFirst`) stays put while the card scrolls sideways; this
+   rule outranks the one above, which would otherwise unpin it. */
+[data-slot="table-row"] > [data-slot="table-cell"]:first-child[data-pinned],
+[data-slot="table-head"][data-pinned] {
+  position: sticky;
+}
 [data-slot="table-row"] > [data-slot="table-cell"]:first-child::before {
   content: "";
   position: absolute;

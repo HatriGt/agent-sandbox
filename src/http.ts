@@ -1118,6 +1118,7 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
         taskTemplate: p.task,
         ...(p.summary ? { summary: p.summary } : {}),
         ...(p.outcome ? { outcome: p.outcome } : {}),
+        ...(p.facts ? { facts: p.facts } : {}),
         enabled: !ask,
         prComment: false,
         // Something asked for once ("merge the PR at 2pm") always reports back; a repeating check stays quiet when nothing is wrong.

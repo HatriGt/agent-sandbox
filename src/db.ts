@@ -574,6 +574,13 @@ const MIGRATIONS: string[] = [
   ALTER TABLE triggers ADD COLUMN summary TEXT;
   ALTER TABLE triggers ADD COLUMN outcome TEXT;
   `,
+  `
+  -- The grid's structured columns as GIVEN (the marker's target: / into: / if: / how:, or the
+  -- editor): src/trigger-facts.ts TaskFacts JSON. What the grid shows is briefOf(row): these win
+  -- field by field over what deriveFacts reads from the title, summary and task, so a NULL here
+  -- still spreads across the columns.
+  ALTER TABLE triggers ADD COLUMN facts_json TEXT;
+  `,
 ];
 
 export function openDb(dataDir: string): Db {
