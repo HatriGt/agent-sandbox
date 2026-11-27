@@ -86,7 +86,7 @@ export interface HandlerDeps {
   /** `force` destroys a KEPT box too (a deliberate Destroy that names the keep); without it a kept box is refused. */
   teardown(cfg: Config, session: string, opts?: { force?: boolean }): Promise<void>;
   /** Warm pool status line. */
-  /** `names: false` (users) reports counts only; the operator and admins see box names. */
+  /** `names: false` (users) reports counts only; the operator and admins see box names (the warm pool is nobody's). */
   poolStatus(cfg: Config, opts?: { names?: boolean }): Promise<string>;
   /** Fleet report: how many boxes are up and what each is doing (role/state/task/metrics). */
   monitor(cfg: Config): Promise<string>;

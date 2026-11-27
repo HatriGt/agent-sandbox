@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { openMemoryDb } from "../src/db.js";
 import {
   upsertGithubUser, createSession, principalFromSession, deleteSession, createApiKey, principalFromApiKey, revokeApiKey, listApiKeys,
-  newLoginState, consumeLoginState, recordBoxOwner, mayAccess, ownedBoxNames, parseCookies, sessionCookie, csrfOk, SESSION_TTL_MS, LOGIN_STATE_TTL_MS,
+  newLoginState, consumeLoginState, recordBoxOwner, mayAccess, ownedBoxNames, foreignBoxNames, parseCookies, sessionCookie, csrfOk, SESSION_TTL_MS, LOGIN_STATE_TTL_MS,
 } from "../src/identity.js";
 
 test("identity: github upsert is idempotent and admin logins get the admin role", () => {
@@ -60,7 +60,7 @@ test("identity: login state is single-use and short-lived", () => {
   assert.equal(consumeLoginState(db, undefined, t).ok, false);
 });
 
-test("ownership: users see only their boxes; operators and admins see all; unknown boxes belong to nobody", () => {
+test("ownership: users see only their boxes; an admin sees their own and the unowned, never another person's; the operator sees all", () => {
   const db = openMemoryDb();
   const alice = upsertGithubUser(db, { githubId: "1", login: "alice" });
   const bob = upsertGithubUser(db, { githubId: "2", login: "bob" });
@@ -71,9 +71,17 @@ test("ownership: users see only their boxes; operators and admins see all; unkno
   assert.equal(mayAccess(db, P(alice), "pool-a"), true);
   assert.equal(mayAccess(db, P(alice), "pool-b"), false);
   assert.equal(mayAccess(db, P(alice), "pool-legacy"), false, "no record → not yours");
-  assert.equal(mayAccess(db, P(root), "pool-b"), true);
+  assert.equal(mayAccess(db, P(root), "pool-b"), false, "an admin is not let into another person's box");
+  assert.equal(mayAccess(db, P(root), "pool-legacy"), true, "no record → infrastructure, the admin's to handle");
+  recordBoxOwner(db, "pool-orphan", null);
+  assert.equal(mayAccess(db, P(root), "pool-orphan"), true, "a box with no owner (deleted account, operator run) too");
+  assert.equal(mayAccess(db, P(alice), "pool-orphan"), false);
+  recordBoxOwner(db, "pool-root", root.id);
+  assert.equal(mayAccess(db, P(root), "pool-root"), true);
   assert.equal(mayAccess(db, { kind: "operator" }, "pool-legacy"), true);
   assert.deepEqual([...ownedBoxNames(db, alice.id)], ["pool-a"]);
+  assert.deepEqual([...foreignBoxNames(db, root.id)].sort(), ["pool-a", "pool-b"], "what the admin's listing hides");
+  assert.deepEqual([...foreignBoxNames(db, alice.id)].sort(), ["pool-b", "pool-root"]);
   recordBoxOwner(db, "pool-a", bob.id); // re-claim moves ownership
   assert.equal(mayAccess(db, P(alice), "pool-a"), false);
 });

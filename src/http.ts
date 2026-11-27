@@ -320,10 +320,11 @@ app.use((req: Request, res: Response, next) => {
     res.status(400).json({ error: "invalid session name" });
     return;
   }
-  // Box-scoped JSON routes: a user may only name their own boxes. 404, not 403 — no existence oracle.
+  // Box-scoped JSON routes: a person may only name their own boxes (an admin also unowned ones,
+  // identity.ts mayAccess). 404, not 403 — no existence oracle.
   // The archive routes name boxes whose ownership record a teardown already dropped; they scope by
   // owner in their own queries instead.
-  if (p && p.kind === "user" && p.role !== "admin" && !ARCHIVED_BOX_ROUTES[req.path] && sessions.some((s) => !mayAccess(db, p, s as string))) {
+  if (p && p.kind === "user" && !ARCHIVED_BOX_ROUTES[req.path] && sessions.some((s) => !mayAccess(db, p, s as string))) {
     res.status(404).json({ error: "no such machine" });
     return;
   }
@@ -2298,13 +2299,16 @@ app.get("/fleet.json", async (req: Request, res: Response) => {
     // Which hosts are asleep or paused, so a thread can say "waking the host" (a minute) rather than
     // "waking the sandbox" (seconds) when its box lives on one.
     const hostsAsleep = hostPool.state().filter((h) => h.asleep).map((h) => h.id);
+    // Other people's boxes leave the listing for everyone signed in, admins included; only a user
+    // (quota'd) also gets the capacity figure cut to their allowance.
+    const boxes = ownership.visible(fleet.boxes);
     if (!ownership.isUser()) {
-      res.json({ ...fleet, hostsAsleep });
+      res.json({ ...fleet, hostsAsleep, boxes });
       return;
     }
     const p = principalOf(res);
     const max = (p.kind === "user" && getUser(db, p.userId)?.max_boxes) || cfg.userMaxBoxes;
-    res.json({ ...fleet, hostsAsleep, boxes: ownership.visible(fleet.boxes), lifecycle: { ...fleet.lifecycle, capacity: Math.min(max, fleet.lifecycle.capacity || max) } });
+    res.json({ ...fleet, hostsAsleep, boxes, lifecycle: { ...fleet.lifecycle, capacity: Math.min(max, fleet.lifecycle.capacity || max) } });
   } catch (e) {
     failWith(res, e);
   }

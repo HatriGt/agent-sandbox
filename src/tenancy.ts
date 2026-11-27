@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Config } from "./config.js";
 import type { HandlerDeps } from "./handlers.js";
 import type { Db } from "./db.js";
-import { forgetBox, getUser, mayAccess, ownedBoxNames, planOf, recordBoxOwner, TrialExpiredError, type Principal } from "./identity.js";
+import { forgetBox, foreignBoxNames, getUser, mayAccess, ownedBoxNames, planOf, recordBoxOwner, TrialExpiredError, type Principal } from "./identity.js";
 import { formatMonitor } from "./monitor.js";
 import { sweepBoxes } from "./host-sweep.js";
 
@@ -35,19 +35,26 @@ export interface Ownership {
   check(session: string): void;
   record(box: string, taskHead?: string): void;
   forget(box: string): void;
-  /** Filter a fleet listing to what the current principal may see. */
+  /**
+   * Filter a fleet listing to what the current principal may see: a user their own boxes, an admin
+   * everything but other people's (see identity.ts mayAccess), the operator all of it.
+   */
   visible<T extends { name: string; role: string }>(boxes: T[]): T[];
   /** Throws QuotaError when the current user is at their concurrent-box limit. */
   assertQuota(liveOwned: number, max: number): void;
   /** How many of these boxes the current user owns and are up. */
   liveOwned<T extends { name: string; boxStatus: string }>(boxes: T[]): number;
+  /** A signed-in person who is not an admin: quota'd, trial-gated, shown only their own machines. */
   isUser(): boolean;
+  /** Any signed-in person, admin or not: their box listing is scoped (the operator token's is not). */
+  isPerson(): boolean;
 }
 
 export function makeOwnership(db: Db, cfg: Config): Ownership {
   const userOnly = (p: Principal): p is Extract<Principal, { kind: "user" }> => p.kind === "user" && p.role !== "admin";
   return {
     isUser: () => userOnly(currentPrincipal()),
+    isPerson: () => currentPrincipal().kind === "user",
     assertCanRun() {
       const p = currentPrincipal();
       if (!userOnly(p)) return;
@@ -67,7 +74,11 @@ export function makeOwnership(db: Db, cfg: Config): Ownership {
     },
     visible(boxes) {
       const p = currentPrincipal();
-      if (!userOnly(p)) return boxes;
+      if (p.kind !== "user") return boxes;
+      if (p.role === "admin") {
+        const theirs = foreignBoxNames(db, p.userId);
+        return boxes.filter((b) => !theirs.has(b.name));
+      }
       const mine = ownedBoxNames(db, p.userId);
       return boxes.filter((b) => b.role !== "pool-free" && mine.has(b.name));
     },
@@ -126,9 +137,10 @@ export function guardDeps(deps: HandlerDeps, own: Ownership): HandlerDeps {
     async poolStatus(cfg) {
       return deps.poolStatus(cfg, { names: !own.isUser() });
     },
-    // The text fleet report (MCP `monitor`) shows a user only their own machines; the pool is infrastructure.
+    // The text fleet report (MCP `monitor`) shows a person only their own machines (an admin also the
+    // unowned ones); a user's pool is infrastructure and stays out.
     async monitor(cfg) {
-      if (!own.isUser()) return deps.monitor(cfg);
+      if (!own.isPerson()) return deps.monitor(cfg);
       const mine = own.visible(await sweepBoxes(cfg));
       return mine.length ? formatMonitor(mine) : "No machines yet. delegate() starts one — it will be yours alone.";
     },

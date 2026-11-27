@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { openMemoryDb } from "../src/db.js";
 import { upsertGithubUser, recordBoxOwner } from "../src/identity.js";
+import { upsertThread } from "../src/threads.js";
 import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "../src/tenancy.js";
 import type { HandlerDeps } from "../src/handlers.js";
 import type { Config } from "../src/config.js";
@@ -55,6 +56,39 @@ test("tenancy: a delegation records its owner; teardown forgets it", async () =>
   assert.deepEqual(asAlice(() => own.visible([{ name: "pool-new", role: "pool-claimed" }, { name: "pool-free-1", role: "pool-free" }, { name: "pool-x", role: "pool-claimed" }])), [{ name: "pool-new", role: "pool-claimed" }]);
   await asAlice(() => deps.teardown(cfg, "pool-new"));
   await assert.rejects(asAlice(() => deps.status(cfg, "pool-new")), NotOwnedError);
+});
+
+test("tenancy: an admin reaches their own and the unowned boxes, never another person's; the listing hides them", async () => {
+  const db = openMemoryDb();
+  const alice = upsertGithubUser(db, { githubId: "1", login: "alice" });
+  const root = upsertGithubUser(db, { githubId: "3", login: "root" }, { adminLogins: ["root"] });
+  recordBoxOwner(db, "pool-a", alice.id);
+  recordBoxOwner(db, "pool-root", root.id);
+  recordBoxOwner(db, "pool-orphan", null);
+  // An Away thread of Alice's whose box record a teardown dropped: its row still names her.
+  upsertThread(db, { id: "delegate-away", owner: alice.id, task: "x", boxStatus: "absent" });
+  const calls: string[] = [];
+  const own = makeOwnership(db, cfg);
+  const deps = guardDeps(fakeDeps(calls), own);
+  const asRoot = <T>(fn: () => T) => withPrincipal({ kind: "user", userId: root.id, login: "root", role: "admin", via: "session" }, fn);
+
+  assert.equal(await asRoot(() => deps.status(cfg, "pool-root")), "ok");
+  assert.equal(await asRoot(() => deps.status(cfg, "pool-orphan")), "ok", "nobody's box is the admin's to handle");
+  assert.equal(await asRoot(() => deps.status(cfg, "pool-legacy")), "ok", "no record at all: infrastructure");
+  await assert.rejects(asRoot(() => deps.status(cfg, "pool-a")), NotOwnedError, "another person's box is not the admin's");
+  await assert.rejects(asRoot(() => deps.teardown(cfg, "pool-a")), NotOwnedError);
+  const fleet = [
+    { name: "pool-a", role: "pool-claimed" },
+    { name: "pool-root", role: "pool-claimed" },
+    { name: "pool-orphan", role: "pool-claimed" },
+    { name: "pool-free-1", role: "pool-free" },
+    { name: "delegate-away", role: "session" },
+  ];
+  assert.deepEqual(asRoot(() => own.visible(fleet)).map((b) => b.name), ["pool-root", "pool-orphan", "pool-free-1"], "the admin's listing: theirs, the unowned, the warm pool; never Alice's, Away or not");
+  assert.equal(own.visible(fleet).length, 5, "the operator sees all");
+  assert.equal(asRoot(() => own.isUser()), false, "an admin is not quota'd");
+  assert.equal(asRoot(() => own.isPerson()), true);
+  assert.equal(own.isPerson(), false);
 });
 
 test("tenancy: quota counts only the user's running boxes", () => {

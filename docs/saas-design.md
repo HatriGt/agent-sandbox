@@ -183,4 +183,4 @@ the operator. A box with no row (pre-migration) belongs to nobody but the operat
 | `PUBLIC_URL` | e.g. `https://agent-sandbox.example.com` — OAuth callback base and cookie `Secure` |
 | `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | the GitHub OAuth App (callback `PUBLIC_URL/auth/github/callback`) |
 | `USER_MAX_BOXES` | default per-user concurrent box quota (2) |
-| `ADMIN_GITHUB_LOGINS` | comma-separated logins that get `role=admin` on first login (see all boxes, like the operator) |
+| `ADMIN_GITHUB_LOGINS` | comma-separated logins that get `role=admin` on first login (manage users, hosts and health; their box listing is their own plus unowned boxes, never another person's) |

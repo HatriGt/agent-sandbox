@@ -320,15 +320,33 @@ export function ownerOf(db: Db, name: string): string | null | undefined {
   return row ? row.owner_id : undefined; // undefined = no record at all
 }
 
-/** May this principal act on this box? Operators and admins: always. Users: only their own. */
+/**
+ * May this principal act on this box? The operator (the controller's own token): always. A user:
+ * only their own. An admin: their own, plus boxes nobody owns (the warm pool, a deleted account's
+ * leftovers, runs the operator token started), which are infrastructure to administer, never
+ * another person's box. A box is one person's: the admin role is about users, hosts and the
+ * service's health, not a window into other people's work.
+ */
 export function mayAccess(db: Db, p: Principal, name: string): boolean {
-  if (p.kind === "operator" || p.role === "admin") return true;
-  return ownerOf(db, name) === p.userId;
+  if (p.kind === "operator") return true;
+  const owner = ownerOf(db, name);
+  if (owner === p.userId) return true;
+  return p.role === "admin" && owner == null;
 }
 
 /** Names of the boxes a user owns (for fleet filtering). */
 export function ownedBoxNames(db: Db, userId: string): Set<string> {
   return new Set((db.prepare(`SELECT name FROM boxes WHERE owner_id = ?`).all(userId) as { name: string }[]).map((r) => r.name));
+}
+
+/**
+ * Names of the boxes that belong to someone else: what an admin's fleet listing hides. Read from
+ * both ownership records and the threads table, so an Away thread (its box gone, its row kept) stays
+ * its owner's alone too.
+ */
+export function foreignBoxNames(db: Db, userId: string): Set<string> {
+  const rows = db.prepare(`SELECT name FROM boxes WHERE owner_id IS NOT NULL AND owner_id != ? UNION SELECT id AS name FROM threads WHERE owner IS NOT NULL AND owner != ? AND deleted_at IS NULL`).all(userId, userId) as { name: string }[];
+  return new Set(rows.map((r) => r.name));
 }
 
 /* ───────────── cookies (no dependency) ───────────── */
