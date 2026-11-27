@@ -1049,6 +1049,9 @@ export function Thread({
     const t = window.setTimeout(() => setLanded(true), 1200);
     return () => window.clearTimeout(t);
   }, [loadingTrace]);
+  // How many things this chat scheduled: the pill floats over the top of the transcript, so the
+  // first line moves down to clear it while there is one.
+  const [scheduled, setScheduled] = React.useState(0);
   const stick = useStickToBottom({ resize: landed && runState === "running" && !sleeping ? "smooth" : "instant", initial: "instant" });
   // A quote pill in the composer: back to the passage it was taken from.
   const jumpQuote = React.useCallback(
@@ -1303,9 +1306,9 @@ export function Thread({
       <div data-thread onClickCapture={onThreadClick} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", ((showWorkspace && workspaceFull) || (browserOpen && browserFull && !sleeping)) && "hidden md:hidden")}>
       <div className="@container relative min-h-0 min-w-0 flex-1">
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
-        <SchedulePill box={box.name} runState={String(runState ?? "")} />
+        <SchedulePill box={box.name} runState={String(runState ?? "")} onCount={setScheduled} />
         <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick} aria-label="Conversation" aria-busy={runState === "running"}>
-          <ChatContainerContent className="mx-auto w-full max-w-3xl gap-5 px-4 pt-7 pb-12 md:px-6">
+          <ChatContainerContent className={cn("mx-auto w-full max-w-3xl gap-5 px-4 pb-12 md:px-6", scheduled > 0 ? "pt-14" : "pt-7")}>
             {planBoard && !sleeping && !loadingTrace && planPlacement === "card" && <PlanBoard board={planBoard} live={runState === "running"} variant="card" />}
             {box.task && (
               <div data-turn="task">

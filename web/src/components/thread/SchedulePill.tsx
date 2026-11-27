@@ -29,10 +29,13 @@ import { useNow } from "@/hooks/useNow";
 
 /**
  * The thread's schedule pill: what is scheduled as part of this chat, floating at the top-right of
- * the conversation. Absent when nothing is. Collapsed it is one line ("Next in 2h"); open it morphs
- * (one shared layout, spring) into a compact table — type, what, next run, options — and a row opens
- * its detail in place. Ink, not colour: an item awaiting approval is marked by weight, not hue.
- * Reduced motion keeps only the fades.
+ * the conversation. Absent when nothing is. Collapsed it is one line that says three things in
+ * order — that something is scheduled (the word), what (the name of the item firing next, or the
+ * one waiting on you) and when ("today 6:30 PM") — plus a "+n" count when there is more. The name
+ * is the first thing to go as the pane narrows; the word and the time never do, so the pill is
+ * never a bare glyph. Open it morphs (one shared layout, spring) into a compact table — type, what,
+ * next run, options — and a row opens its detail in place. Ink, not colour: an item awaiting
+ * approval is marked by weight, not hue. Reduced motion keeps only the fades.
  */
 
 type Item = ThreadScheduleItem;
@@ -86,6 +89,25 @@ function fmtAgo(at: number, now = Date.now()): string {
 function blurb(it: Item): string {
   const rest = it.task.startsWith(it.name) ? it.task.slice(it.name.length).replace(/^[.!?\s]+/, "") : it.task;
   return rest || it.when;
+}
+
+/**
+ * The collapsed pill's three words. The item that leads is the one waiting on you, else the one
+ * firing next, else the first; the word says its state, the name says what it is, `when` says
+ * when it runs. `more` counts the others.
+ */
+export function collapsedFace(items: Item[], now: number): { word: string; name: string; when: string; more: number } {
+  if (!items.length) return { word: "", name: "", when: "", more: 0 };
+  const pending = items.filter((i) => i.relation === "proposed");
+  const running = items.find((i) => i.status === "running");
+  const upcoming = items.filter((i) => i.nextFire !== null).sort((a, b) => a.nextFire! - b.nextFire!);
+  const more = Math.max(0, items.length - 1);
+  if (pending.length) return { word: pending.length > 1 ? `${pending.length} awaiting your approval` : "Awaiting your approval", name: pending[0].name, when: "", more };
+  if (running) return { word: "Running now", name: running.name, when: "", more };
+  if (upcoming.length) return { word: "Scheduled", name: upcoming[0].name, when: fmtNext(upcoming[0].nextFire!, now), more };
+  const lead = items[0];
+  const word = lead.status === "done" ? "Ran" : lead.status === "failed" ? "Failed" : lead.enabled ? "Scheduled" : "Paused";
+  return { word, name: lead.name, when: lead.status === "done" && lead.lastFired ? fmtAgo(lead.lastFired, now) : "", more };
 }
 
 export function useThreadSchedule(box: string, runState: string) {
@@ -146,8 +168,9 @@ export function useActions(reload: () => void) {
 }
 type Actions = ReturnType<typeof useActions>;
 
-export function SchedulePill({ box, runState, className }: { box: string; runState: string; className?: string }) {
+export function SchedulePill({ box, runState, className, onCount }: { box: string; runState: string; className?: string; /** How many items the pill shows (0 when it is absent), so the transcript can clear it. */ onCount?: (n: number) => void }) {
   const { items, reload } = useThreadSchedule(box, runState);
+  React.useEffect(() => onCount?.(items.length), [items.length, onCount]);
   const [open, setOpen] = React.useState(false);
   const [detailId, setDetailId] = React.useState<string | null>(null);
   const still = useReducedMotion();
@@ -190,7 +213,8 @@ export function SchedulePill({ box, runState, className }: { box: string; runSta
     .map((i) => i.nextFire)
     .filter((n): n is number => n !== null)
     .sort((a, b) => a - b)[0];
-  const summary = pending ? `${pending} awaiting approval` : next ? `Next ${fmtNext(next, now)}` : `${items.length} paused`;
+  const face = collapsedFace(items, now);
+  const summary = [face.word, face.name, face.when].filter(Boolean).join(" · ") + (face.more ? ` · +${face.more} more` : "");
 
   const spring = still ? { duration: 0.15 } : { type: "spring" as const, bounce: 0.14, duration: 0.45 };
   const fade = { initial: { opacity: 0 }, animate: { opacity: 1, transition: { duration: 0.16, delay: still ? 0 : 0.08 } }, exit: { opacity: 0, transition: { duration: 0.08 } } };
@@ -206,13 +230,13 @@ export function SchedulePill({ box, runState, className }: { box: string; runSta
           exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.9, y: -6 }}
           transition={{ duration: 0.2, ease: EASE }}
           style={{ transformOrigin: "100% 0%" }}
-          className={cn("absolute top-3 right-3 z-20 flex justify-end md:right-4", className)}
+          className={cn("pointer-events-none absolute top-3 right-3 left-3 z-20 flex justify-end md:right-4 md:left-4", className)}
         >
           <motion.div
             layout
             transition={spring}
             style={{ borderRadius: open ? 18 : 999 }}
-            className={cn("bg-popover/95 text-popover-foreground overflow-hidden border shadow-e3 backdrop-blur-md", open ? "w-[min(34rem,calc(100vw-1.5rem))]" : "w-auto")}
+            className={cn("bg-popover/95 text-popover-foreground pointer-events-auto overflow-hidden border shadow-e3 backdrop-blur-md", open ? "w-[min(34rem,calc(100vw-1.5rem))]" : "max-w-full", pending > 0 && !open && "border-attention/50")}
           >
             <AnimatePresence mode="popLayout" initial={false}>
               {open ? (
@@ -274,12 +298,30 @@ export function SchedulePill({ box, runState, className }: { box: string; runSta
                   aria-haspopup="dialog"
                   title={`Scheduled in this chat — ${summary}`}
                   aria-label={`Scheduled in this chat: ${summary}`}
-                  className="hover:bg-muted/60 focus-visible:ring-live/50 relative flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-2 text-meta @[68rem]:pr-3 @[68rem]:pl-2.5 font-medium whitespace-nowrap outline-none transition-colors focus-visible:ring-2"
+                  className="hover:bg-muted/60 focus-visible:ring-live/50 flex h-8 max-w-full cursor-pointer items-center gap-1.5 rounded-full pr-3 pl-2.5 text-meta font-medium whitespace-nowrap outline-none transition-colors focus-visible:ring-2"
                 >
-                  <CalendarClock className={cn("size-4 shrink-0", pending ? "text-attention-text" : "text-muted-foreground")} aria-hidden />
-                  <span className={cn("hidden tabular-nums @[68rem]:inline", pending ? "text-attention-text" : "text-foreground")}>{summary}</span>
-                  {items.length > 1 && <span className="hidden @[68rem]:grid bg-muted text-muted-foreground h-4.5 min-w-4.5 place-items-center rounded-full px-1 text-micro tabular-nums">{items.length}</span>}
-                  {pending > 0 && <span className="bg-attention absolute top-0.5 right-0.5 size-2 rounded-full ring-2 ring-[var(--popover)]" aria-hidden />}
+                  <span className="relative grid size-4 shrink-0 place-items-center" aria-hidden>
+                    {pending > 0 && <span className="bg-attention mcp-ping absolute inset-0 rounded-full opacity-40 motion-reduce:hidden" />}
+                    <CalendarClock className={cn("size-4", pending ? "text-attention-text" : "text-muted-foreground")} />
+                  </span>
+                  <span className={cn("shrink-0", pending ? "text-attention-text" : "text-muted-foreground")}>{face.word}</span>
+                  {face.name && (
+                    <>
+                      <span className="text-faint shrink-0" aria-hidden>
+                        ·
+                      </span>
+                      <span className="text-foreground min-w-0 max-w-[8rem] truncate @[36rem]:max-w-[12rem] @[44rem]:max-w-[16rem] @[60rem]:max-w-[22rem]">{face.name}</span>
+                    </>
+                  )}
+                  {face.when && (
+                    <>
+                      <span className="text-faint shrink-0" aria-hidden>
+                        ·
+                      </span>
+                      <span className={cn("shrink-0 tabular-nums", pending ? "text-attention-text" : "text-foreground")}>{face.when}</span>
+                    </>
+                  )}
+                  {face.more > 0 && <span className="bg-muted text-muted-foreground grid h-4.5 min-w-4.5 shrink-0 place-items-center rounded-full px-1 text-micro tabular-nums">+{face.more}</span>}
                 </motion.button>
               )}
             </AnimatePresence>

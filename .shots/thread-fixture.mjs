@@ -455,6 +455,41 @@ if (interact === "send" || interact === "send-probe" || interact === "send-rich"
   streamPort = streamer.address().port;
 }
 
+/* ───────────────────────────── what this chat scheduled ─────────────────────────────
+ * --schedule=once     the agent set up a one-time merge to Production, held for later today
+ * --schedule=pending  the same, but waiting for the user's approval
+ * --schedule=many     the merge plus a nightly rule and one that already ran
+ */
+function scheduleItems(kind) {
+  if (!kind) return [];
+  const inMs = (h) => Date.now() + Math.round(h * 3600_000);
+  const merge = {
+    id: "trg_merge290",
+    name: "Merge PR #290 to Production",
+    relation: "created",
+    category: "ci",
+    when: "once, today 6:30 PM",
+    at: inMs(3.5),
+    scope: "scheduled",
+    status: "waiting",
+    nextFire: inMs(3.5),
+    lastFired: null,
+    repos: ["atom-insurance/atom-ui-spacerdb"],
+    enabled: true,
+    task: "Merge PR #290 to Production. Re-check that the PR is still open, mergeable and green, merge it into Production, and report back; skip and report if checks fail or conflicts appear.",
+    summary: "Merges PR #290 (SPC-2406 baseline rate) into the Production branch after 6:30 PM Dubai time, once its checks are green",
+    outcome: "PR #290 merged to Production",
+  };
+  if (kind === "pending") return [{ ...merge, relation: "proposed", status: "needs-ok", enabled: false, nextFire: null, why: "It merges into Production" }];
+  if (kind === "many")
+    return [
+      merge,
+      { id: "trg_nightly", name: "Nightly baseline-rate regression", relation: "created", category: "monitor", when: "every day at 2:00 AM", cron: "0 2 * * *", scope: "automation", status: "waiting", nextFire: inMs(9), lastFired: null, repos: [merge.repos[0]], enabled: true, task: "Run the baseline-rate regression suite against Production and open an issue if a rate drifts.", summary: "Runs the regression suite against Production every night", outcome: "An issue per drifted rate" },
+      { id: "trg_smoke", name: "Smoke-test the SPC-2406 fix on QA", relation: "created", category: "task", when: "once, 2:10 PM", at: Date.now() - 50 * 60_000, scope: "scheduled", status: "done", nextFire: null, lastFired: Date.now() - 48 * 60_000, lastOutcome: "12 checks passed", enabled: false, task: "Smoke-test the baseline-rate fix on QA.", summary: "Checks the fix on QA before the merge" },
+    ];
+  return [merge];
+}
+
 /* ───────────────────────────── browser ───────────────────────────── */
 const helperHeaders = () => { try { return { "x-asb-browser": fsx.readFileSync(pathx.join(osx.homedir(), ".asb", "browser.token"), "utf8").trim() }; } catch { return {}; } };
 const browser = await chromium.launch();
@@ -495,7 +530,7 @@ await page.route("**/*", async (route) => {
     case "/workflows.json":
       return json(route, { limits: {}, dir: ".agent-sandbox/workflows", workflows: [] });
     case "/triggers/for-box.json":
-      return json(route, { items: [] });
+      return json(route, { items: scheduleItems(flag("schedule", "")) });
     case "/fleet.json":
       return json(route, { boxes: scenario === "lost" && !restored ? [] : [scenario === "away" ? boxFor(scenario) : box], lifecycle: LIFECYCLE, at: Date.now() });
     case "/monitor.json":
@@ -1142,6 +1177,21 @@ row: inner ${Math.round(h?.clientWidth ?? 0)} = ${row}; scrollWidth ${h?.scrollW
   }
   await page.waitForTimeout(500);
   await shot("-details");
+} else if (interact === "schedule") {
+  // The collapsed pill at rest, hovered, then opened to the table and a row's detail.
+  const pill = page.getByRole("button", { name: /^Scheduled in this chat/ });
+  await pill.waitFor({ timeout: 8000 }).catch((e) => errors.push("pill: " + e.message));
+  console.log("pill reads:", await pill.getAttribute("aria-label"), "| width:", (await pill.boundingBox())?.width);
+  await shot("-rest");
+  await pill.hover();
+  await page.waitForTimeout(300);
+  await shot("-hover");
+  await pill.click();
+  await page.waitForTimeout(900);
+  await shot("-open");
+  await page.getByRole("row").nth(1).click();
+  await page.waitForTimeout(700);
+  await shot("-detail");
 } else if (interact === "resolve") {
   // The failed `deploy-preview.sh` call: its Resolve row ("Provide DEPLOY_TOKEN") under the terminal panel.
   await page.locator("[data-resolve-row]").first().scrollIntoViewIfNeeded().catch((e) => errors.push("resolve: " + e.message));

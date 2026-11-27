@@ -2058,3 +2058,30 @@ agent starts, so the memory switch does not govern it) is answered by the sectio
 - Proof: `node .shots/memory-setup.mjs [--dark]` over `test/ui-mock-server.mjs` (three ATOM repos,
   one per origin; page, hovered row, a search, the sheet with a save, a phone), printing the rail,
   the header row, each row and the column widths.
+
+## Round: the schedule pill says what (2026-11-27)
+
+The agent scheduled a merge to Production from a chat and the floating pill at the top of the
+transcript read "Next today 6:30 PM", and below 68rem of pane width it was a bare clock glyph.
+Nothing on the collapsed face said that something *is* scheduled or *what* it is; the time alone
+reads like a clock. The pill is the only always-visible trace of an automation the chat set up,
+so the collapsed face now says three things, in this order, at every width:
+
+- **The word** — what state the leading item is in: `Awaiting your approval` (ink, the ping dot on
+  the glyph, the attention hairline on the pill), `Running now`, `Scheduled`, `Paused`, `Ran` or
+  `Failed`. Muted ink; the attention ink only when it waits on you.
+- **The name** — the item's own name, in foreground ink: the one waiting on you, else the one
+  firing next, else the first. It truncates with the full line in the title, capped at 8rem on a
+  phone, 12rem from `@36rem`, 16rem from `@44rem`, 22rem from `@60rem`. It is the only part that
+  shrinks; it never disappears.
+- **The time** — `today 6:30 PM` from `fmtNext`, foreground, tabular; `Ran` carries "48 min ago".
+  A pending item shows no time (it has none until approved).
+- **`+n`** — a muted chip when more is scheduled: the count of the others, not the total.
+
+The wrapper spans the pane (`left-3 right-3`, pointer-events off so the transcript stays
+clickable) and the pill is `max-w-full`, so a long name truncates instead of leaving the page. The
+transcript's first line moves down to clear the pill (`pt-14` instead of `pt-7`) while there is
+one, via `onCount`. `collapsedFace` in SchedulePill.tsx is the single rule. The open table and
+the row detail are unchanged. Proof: `node .shots/thread-fixture.mjs done <out> --schedule=once|
+pending|many --interact=schedule [--dark] [--w=390|900|1100|1440]` (rest, hover, open, detail;
+prints the pill's aria-label and width).
